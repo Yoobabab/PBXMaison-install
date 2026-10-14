@@ -182,7 +182,7 @@ EOF
   for _ in $(seq 1 30); do /usr/sbin/asterisk -rx "core show version" >/dev/null 2>&1 && break; sleep 1; done
   /usr/sbin/asterisk -rx "core show version" >/dev/null 2>&1 || fail demarrage "Asterisk ne démarre pas (journalctl -u asterisk)."
   local transports
-  transports="$(/usr/sbin/asterisk -rx "pjsip show transports" | awk '/^Transport:/ {print $2}' | paste -sd' ' -)"
+  transports="$(/usr/sbin/asterisk -rx "pjsip show transports" | awk '/^Transport:/ && $2 !~ /^</ {print $2}' | paste -sd' ' -)"
   json demarrage ok "Moteur démarré · transports : ${transports:-aucun}"
 
   # 6. Code d'installation pour le portail

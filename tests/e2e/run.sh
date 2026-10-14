@@ -49,7 +49,7 @@ curl -sS -X POST "$API/api/setup/check" -H "x-setup-token: $TOKEN" -H "content-t
 
 # 3. Moteur
 sudo systemctl is-active --quiet asterisk && pass "Asterisk actif ($(sudo /usr/sbin/asterisk -V))" || fail "Asterisk arrêté"
-TR="$(sudo /usr/sbin/asterisk -rx 'pjsip show transports' | awk '/^Transport:/ {print $2}' | paste -sd' ' -)"
+TR="$(sudo /usr/sbin/asterisk -rx 'pjsip show transports' | awk '/^Transport:/ && $2 !~ /^</ {print $2}' | paste -sd' ' -)"
 [[ "$TR" == *transport-udp* ]] && pass "Transports SIP : $TR" || fail "transports : $TR"
 sudo /usr/sbin/asterisk -rx "odbc show asterisk" | grep -qi "active connections: [1-9]" && pass "Asterisk connecté à la base (ODBC)" || fail "ODBC non connecté"
 sudo /usr/sbin/asterisk -rx "core show settings" | grep -i "language" | head -1 | sed 's/^ */   /' >> "$OUT" || true
