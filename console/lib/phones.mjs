@@ -10,19 +10,19 @@ import crypto from "node:crypto";
 export const MODELS = [
   { id: "yealink-t31p", brand: "Yealink", label: "Yealink T31P", keys: 2 },
   { id: "yealink-t31g", brand: "Yealink", label: "Yealink T31G", keys: 2 },
-  { id: "yealink-t33g", brand: "Yealink", label: "Yealink T33G", keys: 4 },
-  { id: "yealink-t34w", brand: "Yealink", label: "Yealink T34W", keys: 4 },
+  { id: "yealink-t33g", brand: "Yealink", label: "Yealink T33G", keys: 4, screen: "320x240" },
+  { id: "yealink-t34w", brand: "Yealink", label: "Yealink T34W", keys: 4, screen: "320x240" },
   { id: "yealink-t43u", brand: "Yealink", label: "Yealink T43U", keys: 21 },
-  { id: "yealink-t44u", brand: "Yealink", label: "Yealink T44U / T44W", keys: 24 },
-  { id: "yealink-t46u", brand: "Yealink", label: "Yealink T46U", keys: 27 },
-  { id: "yealink-t48u", brand: "Yealink", label: "Yealink T48U", keys: 29 },
+  { id: "yealink-t44u", brand: "Yealink", label: "Yealink T44U / T44W", keys: 24, screen: "320x240" },
+  { id: "yealink-t46u", brand: "Yealink", label: "Yealink T46U", keys: 27, screen: "480x272" },
+  { id: "yealink-t48u", brand: "Yealink", label: "Yealink T48U", keys: 29, screen: "800x480" },
   { id: "yealink-t53", brand: "Yealink", label: "Yealink T53 / T53W", keys: 21 },
-  { id: "yealink-t54w", brand: "Yealink", label: "Yealink T54W", keys: 27 },
-  { id: "yealink-t57w", brand: "Yealink", label: "Yealink T57W", keys: 29 },
-  { id: "yealink-t58w", brand: "Yealink", label: "Yealink T58W / T58A", keys: 27 },
-  { id: "yealink-t85w", brand: "Yealink", label: "Yealink T85W", keys: 27 },
-  { id: "yealink-t87w", brand: "Yealink", label: "Yealink T87W", keys: 29 },
-  { id: "yealink-t88w", brand: "Yealink", label: "Yealink T88W", keys: 27 },
+  { id: "yealink-t54w", brand: "Yealink", label: "Yealink T54W", keys: 27, screen: "480x272" },
+  { id: "yealink-t57w", brand: "Yealink", label: "Yealink T57W", keys: 29, screen: "800x480" },
+  { id: "yealink-t58w", brand: "Yealink", label: "Yealink T58W / T58A", keys: 27, screen: "1024x600" },
+  { id: "yealink-t85w", brand: "Yealink", label: "Yealink T85W", keys: 27, screen: "480x272" },
+  { id: "yealink-t87w", brand: "Yealink", label: "Yealink T87W", keys: 29, screen: "800x480" },
+  { id: "yealink-t88w", brand: "Yealink", label: "Yealink T88W", keys: 27, screen: "1024x600" },
 ];
 const modelById = (id) => MODELS.find((m) => m.id === id);
 
@@ -217,6 +217,12 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("static.auto_provision.repeat.minutes", 1440),
     v("static.auto_provision.pnp_enable", 0),
     "",
+    ...(model?.screen && server.assets_url ? [
+      "## Fond d'écran PBXMaison",
+      v("wallpaper_upload.url", `${server.assets_url}wallpaper-${model.screen}.png`),
+      v("phone_setting.backgrounds", `Config:wallpaper-${model.screen}.png`),
+      "",
+    ] : []),
     "## Touches",
   ];
   const n = Math.max(model?.keys || 0, phone.keys.length);

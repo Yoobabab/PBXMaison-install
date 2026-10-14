@@ -195,3 +195,4 @@ h3.sec{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--
 .qrimg{width:200px;background:#fff;border-radius:10px;padding:6px;border:1px solid var(--line)}
 .qrimg svg{display:block;width:100%;height:auto}
 .appbox .row{display:flex;gap:8px;flex-wrap:wrap}
+td.acts{text-align:right;white-space:nowrap}

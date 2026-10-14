@@ -243,7 +243,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       return {
         id: u.id, name: displayName(u), first_name: u.first_name, last_name: u.last_name, email: u.email,
         status: u.status, status_label: STATUSES[u.status], disabled: u.options.disabled,
-        registered: contacts.length > 0, contacts, dids: u.dids, mobile: u.mobile,
+        registered: contacts.length > 0, contacts, dids: u.dids, mobile: u.mobile, phone_model: u.phone.model,
         forwards: forwardSummary(u),
       };
     });
@@ -506,7 +506,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const secret = await extensionSecret(num);
     const users = await loadUsers();
     const names = new Map(users.map((x) => [x.id, displayName(x)]));
-    return { user: u, text: buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url: await provisioningUrl(server) }, names) };
+    return { user: u, text: buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url: await provisioningUrl(server), assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/` }, names) };
   }
 
   /** Fichier demandé par un téléphone : null si inconnu. */
@@ -533,6 +533,16 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     try { await ami.command(`pjsip send notify ${kind} endpoint ${num}`); }
     catch { throw new UserError("Moteur téléphonique injoignable."); }
     return { ok: true };
+  }
+
+  async function resyncAll() {
+    const reg = await registrations();
+    let sent = 0;
+    for (const [id, contacts] of reg) {
+      if (!contacts.length) continue;
+      try { await ami.command(`pjsip send notify pbxm-resync endpoint ${id}`); sent++; } catch { /* suivant */ }
+    }
+    return { sent };
   }
 
   async function resetPhoneAdmin(num) {
@@ -642,7 +652,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, deleteImpact,
-    provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, trackDevices, listPhones,
+    provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, loadUsers, registrations,
     getRoutes, setRoutes, listCalls, registrationStatus,
   };

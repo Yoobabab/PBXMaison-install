@@ -108,6 +108,8 @@ PPATH="/${PURL#*://*/}"
 CFG="$(curl -sS "http://127.0.0.1${PPATH}44dbd229fa7b.cfg")"
 echo "$CFG" | grep -q "^account.1.user_name = 201$" && echo "$CFG" | grep -q "^linekey.2.type = 16$" && echo "$CFG" | grep -q "^transfer.dsskey_deal_type = 2$" \
   && pass "Provisioning : 44dbd229fa7b.cfg servi par Nginx (compte, BLF, transfert aveugle)" || { echo "$CFG" | head -20 >> "$OUT"; fail "fichier de provisioning"; }
+echo "$CFG" | grep -q "^phone_setting.backgrounds = Config:wallpaper-800x480.png$" && [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/phone/wallpaper-800x480.png)" == 200 ]] \
+  && pass "Provisioning : fond d'écran PBXMaison (800x480) poussé et servi" || fail "fond d'écran"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1${PPATH}000000000000.cfg")" == 404 ]] && pass "Provisioning : MAC inconnue refusée (404)" || fail "MAC inconnue servie"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1/prov/mauvaisjeton/44dbd229fa7b.cfg")" == 404 ]] && pass "Provisioning : mauvais jeton refusé" || fail "jeton non vérifié"
 sleep 2

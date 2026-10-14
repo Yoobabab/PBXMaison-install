@@ -414,20 +414,34 @@ const ago = (iso) => {
   return `${Math.floor(s / 86400)} j`;
 };
 
+/** Boutons « Reprovisionner » / « Redémarrer » (data-resync / data-reboot = poste). */
+function wireResync(root) {
+  root.querySelectorAll("[data-resync],[data-reboot]").forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    const reboot = !!b.dataset.reboot, id = b.dataset.reboot || b.dataset.resync;
+    if (reboot && !confirm(`Redémarrer le téléphone du poste ${id} ? Un appel en cours serait coupé.`)) return;
+    const t = b.textContent; b.disabled = true;
+    try { await api("POST", `/api/extensions/${id}/phone/notify`, { action: reboot ? "reboot" : "resync" }); b.textContent = "Envoyé ✓"; }
+    catch (err) { b.textContent = "Échec"; b.title = err.message; }
+    setTimeout(() => { b.textContent = t; b.disabled = false; }, 2500);
+  });
+}
+
 // ---------------------------------------------------------------- Téléphones
 async function renderPhones() {
   setNav("phones");
   const d = await api("GET", "/api/phones");
   const filter = sessionStorage.getItem("pbxm_phones_f") || "all";
   const on = d.phones.filter((p) => p.online).length;
-  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Téléphones</h1><p class="sub" style="margin:0">Tous les appareils : téléphones de bureau, softphones et applis.</p></div></div>
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Téléphones</h1><p class="sub" style="margin:0">Tous les appareils : téléphones de bureau, softphones et applis.</p></div>
+    ${on ? `<button class="btn ghost" id="resyncall">Reprovisionner tous les connectés (${on})</button>` : ""}</div>
     <div class="cards"><div class="card"><div class="k">Connectés</div><div class="v">${on}</div></div>
       <div class="card"><div class="k">Déconnectés</div><div class="v">${d.phones.length - on}</div></div>
       <div class="card"><div class="k">Lien de provisioning</div><div class="s mono" style="word-break:break-all;margin-top:6px">${esc(d.provisioning_url)}</div>
         <button class="copy" style="margin-top:6px" data-copy="${esc(d.provisioning_url)}">Copier</button></div></div>
     <div class="panel"><div class="filters"><div class="seg" id="pf">${[["all", "Tous"], ["on", "Connectés"], ["off", "Déconnectés"]].map(([k, l]) => `<label class="${filter === k ? "on" : ""}"><input type="radio" name="pf" value="${k}" ${filter === k ? "checked" : ""}>${l}</label>`).join("")}</div></div>
     ${d.phones.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>État</th><th>Appareil</th><th class="hide-sm">MAC</th><th>Utilisateur</th><th>Depuis</th><th class="hide-sm">IP publique / locale</th><th class="hide-sm">Connexion</th></tr></thead>
+      <thead><tr><th>État</th><th>Appareil</th><th class="hide-sm">MAC</th><th>Utilisateur</th><th>Depuis</th><th class="hide-sm">IP publique / locale</th><th class="hide-sm">Connexion</th><th></th></tr></thead>
       <tbody id="prows"></tbody></table></div>`
       : `<div class="empty">Aucun appareil pour l'instant. Renseigne le modèle et l'adresse MAC dans la fiche d'un utilisateur (onglet Téléphone IP), ou connecte un softphone.</div>`}</div>`;
   copyButtons();
@@ -443,10 +457,16 @@ async function renderPhones() {
       <td><a href="#/utilisateurs/${esc(p.user.id)}">${esc(p.user.id)} · ${esc(p.user.name)}</a></td>
       <td>${p.since ? `${p.online ? "connecté depuis" : "déconnecté depuis"} <strong>${esc(ago(p.since))}</strong><div class="s">${esc(fmtDateTime(p.since))}</div>` : p.provisioned ? `<span class="s">jamais connecté · provisionné le ${esc(fmtDateTime(p.provisioned.at))}</span>` : '<span class="s">jamais connecté</span>'}</td>
       <td class="hide-sm mono">${esc(p.source_ip || "—")}${p.local_ip && p.local_ip !== p.source_ip ? `<div class="s">local ${esc(p.local_ip)}</div>` : ""}</td>
-      <td class="hide-sm">${p.connection ? esc(p.connection.label) : "—"}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">Aucun appareil dans cette catégorie.</td></tr>';
+      <td class="hide-sm">${p.connection ? esc(p.connection.label) : "—"}</td>
+      <td class="acts">${p.online ? `<button class="btn ghost sm" data-resync="${esc(p.user.id)}">Reprovisionner</button> <button class="btn ghost sm" data-reboot="${esc(p.user.id)}">Redémarrer</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="8" class="empty">Aucun appareil dans cette catégorie.</td></tr>';
+    wireResync(rows);
     rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
   };
   app.querySelectorAll("#pf input").forEach((i) => i.addEventListener("change", draw));
+  $("#resyncall")?.addEventListener("click", async (e) => {
+    if (!confirm("Envoyer la configuration à tous les téléphones connectés ? Ils la rechargent sans redémarrer.")) return;
+    const r = await api("POST", "/api/phones/resync"); e.target.textContent = `Envoyé à ${r.sent} appareil(s) ✓`;
+  });
   draw();
   clearInterval(timer);
   timer = setInterval(() => location.hash === "#/telephones" && renderPhones(), 20000);
@@ -494,7 +514,7 @@ async function renderUsers() {
       <div class="filters"><input id="uq" type="search" placeholder="Rechercher : nom, poste, SDA, numéro de renvoi…" value="${esc(q)}">
         <label class="check"><input type="checkbox" id="ufw" ${onlyFw ? "checked" : ""}> Seulement ceux avec un renvoi actif</label></div>
       ${d.extensions.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>Poste</th><th>Nom</th><th>Statut</th><th class="hide-sm">Téléphone</th><th>Renvois</th></tr></thead>
+      <thead><tr><th>Poste</th><th>Nom</th><th>Statut</th><th class="hide-sm">Téléphone</th><th>Renvois</th><th></th></tr></thead>
       <tbody id="urows"></tbody></table></div><div id="unone" class="empty" hidden>Aucun utilisateur ne correspond.</div>`
       : `<div class="empty"><p>Aucun utilisateur pour l'instant.</p><a class="btn" href="#/utilisateurs/nouveau">Créer le premier utilisateur</a></div>`}</div>`;
   const rows = $("#urows");
@@ -515,7 +535,9 @@ async function renderUsers() {
       <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
       <td>${statusPill(x)}</td>
       <td class="hide-sm">${x.registered ? `<span class="devs">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}<span class="pill ok">Connecté</span></span>` : '<span class="pill off">Non connecté</span>'}</td>
-      <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td></tr>`).join("");
+      <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td>
+      <td class="acts">${x.registered ? `<button class="btn ghost sm" data-resync="${esc(x.id)}" title="Renvoyer la configuration au téléphone">Reprovisionner</button>` : ""}</td></tr>`).join("");
+    wireResync(rows);
     $("#unone").hidden = list.length > 0;
     rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
   };
