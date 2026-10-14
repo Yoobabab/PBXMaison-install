@@ -15,6 +15,8 @@ import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import * as vm from "./lib/voicemail.mjs";
+import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS } from "./lib/callflow.mjs";
+const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS };
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
 
 if (!settings.sessionSecret) { console.error("SESSION_SECRET manquant"); process.exit(1); }
@@ -360,6 +362,26 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/extensions/:id/impact", { preHandler: requireUser }, async (req) => pbx.deleteImpact(req.params.id));
   app.delete("/api/extensions/:id", { preHandler: requireUser }, async (req) =>
     ({ ok: true, impact: await pbx.deleteExtension(req.params.id, req.query?.force === "1", currentUser(req).email) }));
+
+  // ---------------------------------------------------------------- Gestion d'appels
+  app.get("/api/callflow", { preHandler: requireUser }, async () => ({
+    objects: await pbx.listObjects(), users: (await pbx.listExtensions()).map((u) => ({ id: u.id, name: u.name, status: u.status, disabled: u.disabled, registered: u.registered, voicemail: true })),
+    options: cfOptions, timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris",
+    trunk_dids: (await pbx.listTrunks()).flatMap((t) => (t.dids || []).map((d) => ({ did: d, trunk: t.id }))),
+  }));
+  app.get("/api/callflow/:kind/:id", { preHandler: requireUser }, async (req) => pbx.getObject(req.params.kind, req.params.id));
+  app.get("/api/callflow/:kind/:id/impact", { preHandler: requireUser }, async (req) => ({ refs: await pbx.objectImpact(req.params.kind, req.params.id) }));
+  app.post("/api/callflow/:kind", { preHandler: requireUser }, async (req) => pbx.saveObject(req.params.kind, null, req.body || {}, currentUser(req).email));
+  app.put("/api/callflow/:kind/:id", { preHandler: requireUser }, async (req) => pbx.saveObject(req.params.kind, req.params.id, req.body || {}, currentUser(req).email));
+  app.delete("/api/callflow/:kind/:id", { preHandler: requireUser }, async (req) => pbx.deleteObject(req.params.kind, req.params.id, req.query?.force === "1", currentUser(req).email));
+  // Annonces : WAV 8 kHz mono 16 bits, converti dans le navigateur, envoyé en base64
+  const wavOf = (b) => (b?.wav ? Buffer.from(String(b.wav), "base64") : null);
+  app.post("/api/prompts", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => pbx.savePrompt(null, req.body?.name, wavOf(req.body), currentUser(req).email));
+  app.put("/api/prompts/:id", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => pbx.savePrompt(req.params.id, req.body?.name, wavOf(req.body), currentUser(req).email));
+  app.get("/api/prompts/:id/audio", { preHandler: requireUser }, async (req, reply) =>
+    reply.type("audio/wav").header("cache-control", "no-store").send(fs.createReadStream(await pbx.promptFile(req.params.id))));
+  app.get("/api/trace", { preHandler: requireUser }, async (req) => pbx.trace(req.query?.n));
+  app.get("/api/forwards", { preHandler: requireUser }, async () => ({ forwards: await pbx.forwardsReport() }));
 
   app.get("/api/routes", { preHandler: requireUser }, async () => pbx.getRoutes());
   app.put("/api/routes", { preHandler: requireUser }, async (req) => pbx.setRoutes(req.body || {}));

@@ -1,4 +1,5 @@
-// Console web PBXMaison — application monopage sans dépendance.
+// Console web Callikoe — application monopage sans dépendance.
+import { renderCallflow } from "./callflow-ui.js";
 const $ = (s, r = document) => r.querySelector(s);
 const app = $("#app");
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -52,7 +53,7 @@ async function copyText(text) {
 
 function setNav(active) {
   const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"],
-    ["#/routes", "Routes", "routes"], ["#/appels", "Appels en cours", "calls"], ["#/systeme", "Système", "sys"]];
+    ["#/gestion", "Gestion d'appels", "cf"], ["#/routes", "Routes", "routes"], ["#/appels", "En cours", "calls"], ["#/systeme", "Système", "sys"]];
   $("#nav").innerHTML = state?.logged_in ? links.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${l}</a>`).join("") : "";
   $("#user").innerHTML = state?.logged_in ? `<button id="logout" title="Connecté : ${esc(state.email || "")}">Déconnexion</button>` : "";
   $("#logout")?.addEventListener("click", async () => { await api("POST", "/api/logout"); state.logged_in = false; location.hash = "#/"; route(); });
@@ -971,6 +972,9 @@ async function renderSystem() {
   };
 }
 
+// ---------------------------------------------------------------- Gestion d'appels (module callflow-ui.js)
+const cfHelpers = { api, esc, $, app, setNav, formData, showFormError, takeFlash: () => takeFlash(), setFlash: (f) => { flash = f; } };
+
 // ---------------------------------------------------------------- Routage
 async function route() {
   try {
@@ -987,6 +991,7 @@ async function route() {
     else if (h === "#/telephones") await renderPhones();
     else if ((m = h.match(/^#\/utilisateurs\/nouveau(?:\?depuis=(\d{3}))?$/))) await renderUserNew(m[1]);
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
+    else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "regles", m[2] || null);
     else if (h === "#/routes") await renderRoutes();
     else if (h === "#/appels") await renderCalls();
     else if (h === "#/systeme") await renderSystem();

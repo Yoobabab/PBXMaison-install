@@ -187,6 +187,7 @@ step "Console web"
 # =============================================================================
 install -d -o pbxmaison -g asterisk -m 2750 "$VAR"
 install -d -o pbxmaison -g pbxmaison -m 0700 "$VAR/staging"
+install -d -o pbxmaison -g asterisk -m 2750 "$VAR/sounds"
 [[ -f "$VAR/extensions_routes.conf" ]] || install -o pbxmaison -g asterisk -m 0640 /dev/null "$VAR/extensions_routes.conf"
 (cd "$APP/console" && PATH="/usr/bin:$PATH" npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null 2>&1)
 if [[ -n "${PBXM_TRUSTED_KEY_FILE:-}" ]]; then install -m 0644 "$PBXM_TRUSTED_KEY_FILE" "$ETC/trusted-key.pem"; fi

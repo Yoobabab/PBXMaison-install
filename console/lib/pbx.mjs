@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
 import { MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType } from "./phones.mjs";
+import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
 import { nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 
 export const EMERGENCY = ["15", "17", "18", "112", "114", "115", "116000", "119", "191", "196", "197"];
@@ -261,6 +262,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const users = await loadUsers();
     const didOwners = new Map();
     for (const u of users) for (const d of u.dids) didOwners.set(d, u.id);
+    for (const o of await loadObjects()) if (o.kind === "rule") for (const d of o.data.dids) didOwners.set(d, `la règle entrante « ${o.name} »`);
     return { cc: countryCode(), extensions: new Set([...users.map((u) => u.id), selfId]), didOwners };
   }
 
@@ -321,6 +323,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     checkExtNumber(num);
     const exists = await db.query("SELECT 1 FROM ps_endpoints WHERE id = $1", [num]);
     if (exists.rowCount) throw new UserError(`Le poste ${num} existe déjà.`, "number");
+    const obj = (await loadObjects()).find((o) => o.number === num);
+    if (obj) throw new UserError(`Le numéro ${num} est déjà utilisé (${KINDS[obj.kind].toLowerCase()} « ${obj.name} »).`, "number");
     // Compatibilité : « name » seul (ancienne API) → prénom
     const data = { ...input };
     if (data.first_name === undefined && data.last_name === undefined) data.first_name = input.name || `Poste ${num}`;
@@ -416,7 +420,17 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       if (rules.length) forwards.push({ id: u.id, name: displayName(u), rules: rules.map(([, l]) => l), replaced_by: u.voicemail.enabled ? "sa messagerie vocale" : "raccrocher" });
     }
     const routes = await getRoutes();
-    return { id: num, name: displayName(self), forwards, dids: self.dids, inbound_route: routes.inbound.includes(num),
+    const objects = await loadObjects();
+    const callflow = [];
+    for (const o of objects) {
+      const where = [];
+      if ((o.data.members || []).includes(num)) where.push("membre (retiré automatiquement)");
+      for (const [f, dest] of destFields(o.data)) if ((dest?.type === "user" || dest?.type === "user_vm") && dest.target === num) where.push(`destination « ${f} » (→ raccrocher)`);
+      if (where.length) callflow.push({ kind: o.kind, kind_label: KINDS[o.kind], id: o.id, number: o.number, name: o.name, where });
+    }
+    if (callflow.some((c) => c.where.some((w) => w.startsWith("destination")))) forwards.push(...callflow.filter((c) => c.where.some((w) => w.startsWith("destination")))
+      .map((c) => ({ id: c.number || "", name: `${c.kind_label} « ${c.name} »`, rules: c.where.filter((w) => w.startsWith("destination")), replaced_by: "raccrocher" })));
+    return { id: num, name: displayName(self), forwards, callflow, dids: self.dids, inbound_route: routes.inbound.includes(num),
       inbound_alone: routes.inbound.length === 1 && routes.inbound[0] === num };
   }
 
@@ -441,6 +455,14 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       }
       await c.query("DELETE FROM ps_contacts WHERE endpoint IN ($1::text, $1::text || '-web')", [num]);
       await c.query("DELETE FROM pbxmaison_extensions WHERE id = $1", [num]);
+      // Gestion d'appels : retrait des membres, destinations vers ce poste → raccrocher
+      for (const o of await loadObjects(c)) {
+        const d = structuredClone(o.data);
+        let changed = false;
+        if ((d.members || []).includes(num)) { d.members = d.members.filter((x) => x !== num); changed = true; }
+        for (const [f, dest, set] of destFields(d)) if ((dest?.type === "user" || dest?.type === "user_vm") && dest.target === num) { set({ type: "hangup", target: "" }); changed = true; void f; }
+        if (changed) await c.query("UPDATE pbxmaison_objects SET data = $3, updated_at = now(), updated_by = $4 WHERE kind = $1 AND id = $2", [o.kind, o.id, JSON.stringify(d), by || ""]);
+      }
     });
     const routes = await getRoutes();
     if (routes.inbound.includes(num)) await setRoutes({ ...routes, inbound: routes.inbound.filter((x) => x !== num) });
@@ -648,10 +670,28 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       "",
     ].join("\n"));
     const dir = path.dirname(routesFile);
+    const objects = await loadObjects();
+    const model = { users: byId, objects, soundsDir: soundsDir(), tz: tz() };
     writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
-    writeAtomic(path.join(dir, "voicemail_users.conf"), buildVoicemail(users));
+    writeAtomic(path.join(dir, "extensions_callflow.conf"), buildCallflowDialplan(model));
+    writeAtomic(path.join(dir, "queues_callikoe.conf"), buildQueues(model));
+    // Musiques d'attente des files : un dossier par file contenant un lien vers l'annonce choisie
+    for (const c of mohClasses(model)) {
+      fs.mkdirSync(c.dir, { recursive: true });
+      for (const f of fs.readdirSync(c.dir)) if (f !== c.file) fs.rmSync(path.join(c.dir, f), { force: true });
+      const link = path.join(c.dir, c.file);
+      if (!fs.existsSync(link)) fs.symlinkSync(path.join(soundsDir(), c.file), link);
+    }
+    writeAtomic(path.join(dir, "musiconhold_callikoe.conf"), buildMoh(model));
+    writeAtomic(path.join(dir, "voicemail_users.conf"), `${buildVoicemail(users)}${buildGroupVoicemail(model)}\n`);
+    // Voyant de messagerie : boîte personnelle + messageries de groupe dont l'utilisateur est membre
+    for (const [id, boxes] of mailboxesByUser(model)) {
+      await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id IN ($1::text, $1::text || '-web') AND mailboxes IS DISTINCT FROM $2", [id, boxes]);
+    }
     try { await ami.command("dialplan reload"); } catch { /* rechargé au démarrage d'Asterisk */ }
     try { await ami.command("module reload app_voicemail.so"); } catch { /* idem */ }
+    try { await ami.command("moh reload"); } catch { /* idem */ }
+    try { await ami.command("module reload app_queue.so"); } catch { /* idem */ }
   }
 
   // ------------------------------------------------------------------ Appels en cours
@@ -702,8 +742,146 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     return { available: true, calls };
   }
 
+
+  // ------------------------------------------------------------------ Gestion d'appels (groupes, files, SVI, horaires, règles)
+  const soundsDir = () => path.join(path.dirname(routesFile), "sounds");
+  async function loadObjects(client = db) {
+    const r = await client.query("SELECT kind, id, number, name, data, updated_at, updated_by FROM pbxmaison_objects ORDER BY kind, number NULLS LAST, name");
+    return r.rows.map((x) => ({ kind: x.kind, id: x.id, number: x.number, name: x.name, data: x.data, updated_at: x.updated_at, updated_by: x.updated_by }));
+  }
+  /** Champs « destination » d'un objet : [nom, valeur, setter] */
+  function destFields(d) {
+    const out = [];
+    for (const f of ["no_answer", "invalid", "open", "closed", "break", "holiday"]) if (d[f]) out.push([f, d[f], (v) => { d[f] = v; }]);
+    for (const k of Object.keys(d.options || {})) out.push([`touche ${k}`, d.options[k], (v) => { d.options[k] = v; }]);
+    return out;
+  }
+  async function cfContext(selfId) {
+    const [users, objects] = await Promise.all([loadUsers(), loadObjects()]);
+    const usedNumbers = new Map();
+    for (const u of users) usedNumbers.set(u.id, `utilisateur ${displayName(u)}`);
+    for (const o of objects) if (o.number && o.id !== selfId) usedNumbers.set(o.number, `${KINDS[o.kind].toLowerCase()} « ${o.name} »`);
+    const userDids = new Map();
+    for (const u of users) for (const d of u.dids) userDids.set(d, u.id);
+    return { users: new Map(users.map((u) => [u.id, u])), objects, cc: countryCode(), selfId, usedNumbers, userDids };
+  }
+  const checkKind = (kind) => { if (!KINDS[kind]) throw Object.assign(new UserError("Type inconnu."), { status: 404 }); };
+  async function listObjects(kind) {
+    if (kind) checkKind(kind);
+    const all = await loadObjects();
+    return kind ? all.filter((o) => o.kind === kind) : all;
+  }
+  async function getObject(kind, id) {
+    checkKind(kind);
+    const o = (await loadObjects()).find((x) => x.kind === kind && x.id === id);
+    if (!o) throw Object.assign(new UserError("Introuvable."), { status: 404 });
+    return o;
+  }
+  async function saveObject(kind, id, input, by) {
+    checkKind(kind);
+    if (kind === "prompt" && !id) throw new UserError("Ajoute une annonce en envoyant un fichier audio.");
+    const current = id ? await getObject(kind, id) : null;
+    const v = validateObject(kind, input || {}, current?.data, await cfContext(id));
+    const newId = id || `${kind[0]}${crypto.randomBytes(4).toString("hex")}`;
+    await db.query(`INSERT INTO pbxmaison_objects (kind, id, number, name, data, updated_by) VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (kind, id) DO UPDATE SET number = EXCLUDED.number, name = EXCLUDED.name, data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [kind, newId, v.number, v.name, JSON.stringify(v.data), by || ""]);
+    await applyDialplan();
+    return getObject(kind, newId);
+  }
+  async function objectImpact(kind, id) {
+    await getObject(kind, id);
+    const objects = await loadObjects();
+    return referencesTo(kind, id, objects).map((r) => ({ ...r, kind_label: KINDS[r.kind] }));
+  }
+  async function deleteObject(kind, id, force = false, by = "") {
+    const o = await getObject(kind, id);
+    const refs = await objectImpact(kind, id);
+    if (refs.length && !force) {
+      throw Object.assign(new UserError(`Attention : utilisé par ${refs.map((r) => `${r.kind_label.toLowerCase()} « ${r.name} » (${r.where})`).join(", ")}.`), { status: 409, impact: { refs } });
+    }
+    await db.tx(async (c) => {
+      for (const other of await loadObjects(c)) {
+        if (other.kind === kind && other.id === id) continue;
+        const d = structuredClone(other.data);
+        let changed = false;
+        for (const [, dest, set] of destFields(d)) {
+          if (dest?.type === kind && dest.target === id) { set({ type: "hangup", target: "" }); changed = true; }
+          else if (kind === "prompt" && dest?.prompt === id) { const { prompt, ...rest } = dest; void prompt; set(rest); changed = true; }
+        }
+        if (kind === "prompt" && d.moh === id) { d.moh = ""; changed = true; }
+        if (kind === "prompt" && (d.periodic || []).includes(id)) { d.periodic = d.periodic.filter((x) => x !== id); changed = true; }
+        if (kind === "prompt" && d.greeting === id) { d.greeting = ""; changed = true; }
+        if (kind === "prompt" && d.prompt === id) { d.prompt = ""; changed = true; }
+        if (kind === "schedule" && d.schedule === id) { d.schedule = ""; changed = true; }
+        if (changed) await c.query("UPDATE pbxmaison_objects SET data = $3, updated_at = now(), updated_by = $4 WHERE kind = $1 AND id = $2", [other.kind, other.id, JSON.stringify(d), by || ""]);
+      }
+      await c.query("DELETE FROM pbxmaison_objects WHERE kind = $1 AND id = $2", [kind, id]);
+    });
+    if (kind === "prompt" && o.data.file) { try { fs.unlinkSync(path.join(soundsDir(), o.data.file)); } catch { /* déjà absent */ } }
+    await applyDialplan();
+    return { ok: true, refs };
+  }
+
+  /** WAV PCM 16 bits mono 8 kHz (converti dans le navigateur) → durée en secondes ; sinon erreur. */
+  function checkWav(buf) {
+    if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") throw new UserError("Fichier audio invalide (WAV attendu).", "file");
+    let off = 12, fmt = null, dataLen = 0;
+    while (off + 8 <= buf.length) {
+      const id = buf.toString("ascii", off, off + 4), len = buf.readUInt32LE(off + 4);
+      if (id === "fmt ") fmt = { format: buf.readUInt16LE(off + 8), channels: buf.readUInt16LE(off + 10), rate: buf.readUInt32LE(off + 12), bits: buf.readUInt16LE(off + 22) };
+      if (id === "data") { dataLen = Math.min(len, buf.length - off - 8); break; }
+      off += 8 + len + (len % 2);
+    }
+    if (!fmt || fmt.format !== 1 || fmt.channels !== 1 || fmt.rate !== 8000 || fmt.bits !== 16) throw new UserError("Format audio non pris en charge : WAV PCM 16 bits mono 8 kHz attendu.", "file");
+    const sec = dataLen / 16000;
+    if (sec < 0.3) throw new UserError("Annonce trop courte.", "file");
+    if (sec > 600) throw new UserError("Annonce trop longue (10 minutes maximum).", "file");
+    return Math.round(sec * 10) / 10;
+  }
+  async function savePrompt(id, name, wav, by) {
+    const clean = String(name || "").replace(/[\r\n"<>,;|\\()[\]{}$]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50);
+    if (!clean) throw new UserError("Donne un nom à l'annonce.", "name");
+    let data;
+    if (wav) {
+      const duration = checkWav(wav);
+      const pid = id || `p${crypto.randomBytes(4).toString("hex")}`;
+      fs.mkdirSync(soundsDir(), { recursive: true });
+      const file = `${pid}-${Date.now().toString(36)}.wav`;
+      writeAtomic(path.join(soundsDir(), file), wav);
+      const old = id ? await getObject("prompt", id) : null;
+      if (old?.data.file && old.data.file !== file) { try { fs.unlinkSync(path.join(soundsDir(), old.data.file)); } catch { /* */ } }
+      data = { name: clean, file, duration };
+      id = pid;
+    } else {
+      if (!id) throw new UserError("Envoie un fichier audio.", "file");
+      const old = await getObject("prompt", id);
+      data = { ...old.data, name: clean };
+    }
+    await db.query(`INSERT INTO pbxmaison_objects (kind, id, number, name, data, updated_by) VALUES ('prompt', $1, NULL, $2, $3, $4)
+      ON CONFLICT (kind, id) DO UPDATE SET name = EXCLUDED.name, data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`, [id, clean, JSON.stringify(data), by || ""]);
+    await applyDialplan();
+    return getObject("prompt", id);
+  }
+  async function promptFile(id) {
+    const o = await getObject("prompt", id);
+    const f = path.join(soundsDir(), o.data.file || "");
+    if (!o.data.file || !fs.existsSync(f)) throw Object.assign(new UserError("Fichier absent."), { status: 404 });
+    return f;
+  }
+
+  async function traceModel() {
+    const [users, objects, reg, routes, trunks] = await Promise.all([loadUsers(), loadObjects(), registrations(), getRoutes(), db.query("SELECT dids FROM pbxmaison_trunks")]);
+    const registered = new Map();
+    for (const [id, contacts] of reg) registered.set(id, [...new Set(contacts.map((c) => c.device?.label || "appareil"))]);
+    return { users: new Map(users.map((u) => [u.id, u])), objects, registered, outboundTrunk: routes.outbound_trunk,
+      trunkDids: new Set(trunks.rows.flatMap((r) => r.dids || [])), legacyInbound: routes.inbound, cc: countryCode(), tz: tz(), now: new Date() };
+  }
+  async function trace(number) { return traceNumber(number, await traceModel()); }
+  async function forwardsReport() { return listForwards(await traceModel()); }
+
   async function nextFreeExtension() {
-    const r = await db.query("SELECT id FROM ps_endpoints WHERE id ~ '^[1-9][0-9]{2}$'");
+    const r = await db.query("SELECT id FROM ps_endpoints WHERE id ~ '^[1-9][0-9]{2}$' UNION SELECT number FROM pbxmaison_objects WHERE number IS NOT NULL");
     const used = new Set(r.rows.map((x) => x.id));
     for (let n = 200; n <= 899; n++) if (!used.has(String(n)) && !EMERGENCY.includes(String(n))) return String(n);
     return "";
@@ -716,6 +894,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
+    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport,
   };
 }
 

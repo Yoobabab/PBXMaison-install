@@ -161,6 +161,42 @@ curl -sS -b "$VJ" -X DELETE "$API/api/u/voicemail/$NID" | grep -q '"ok":true' &&
 R="$(curl -sS -b "$VJ" -X PUT "$API/api/u/settings" -H 'content-type: application/json' -d '{"status":"away","forwarding":{"away":{"type":"extension","target":"204"}}}')"
 echo "$R" | grep -q '"target":"204"' && sudo /usr/sbin/asterisk -rx 'dialplan show 206@users' | grep -q "Goto(users,204" && pass "Réglages utilisateur : statut et renvoi modifiés depuis le softphone" || { echo "$R" | cut -c1-300 >> "$OUT"; sudo /usr/sbin/asterisk -rx 'dialplan show 206@users' | head -12 >> "$OUT"; fail "réglages softphone"; }
 
+# 4e. Gestion d'appels (lot 3) : annonce, groupe, file, SVI, messagerie de groupe, horaires, règle entrante, traceur
+jid() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).id||"")}catch{console.log("")}})'; }
+python3 -c "
+import wave,struct,math,base64,io,json
+b=io.BytesIO(); w=wave.open(b,'w'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000)
+w.writeframes(b''.join(struct.pack('<h',int(6000*math.sin(i/4))) for i in range(12000))); w.close()
+json.dump({'name':'Accueil','wav':base64.b64encode(b.getvalue()).decode()},open('prompt.json','w'))"
+PID="$(api POST /api/prompts "$(cat prompt.json)" | jid)"
+[[ -n "$PID" ]] && sudo -u asterisk test -r "/var/lib/pbxmaison/sounds/$(sudo ls /var/lib/pbxmaison/sounds | grep "^$PID" | head -1)" && pass "Annonce : WAV 8 kHz enregistré et lisible par Asterisk" || fail "annonce"
+R="$(api POST /api/callflow/group '{"name":"Accueil","number":"600","members":["205","206"],"ring_time":15,"no_answer":{"type":"groupvm_placeholder"}}')"
+echo "$R" | grep -q "Destination inconnue" && pass "Groupe : destination invalide refusée" || fail "validation groupe : $R"
+VID="$(api POST /api/callflow/groupvm '{"name":"Accueil","number":"900","members":["204","205"]}' | jid)"
+GID="$(api POST /api/callflow/group "{\"name\":\"Accueil\",\"number\":\"600\",\"members\":[\"205\",\"206\"],\"ring_time\":15,\"cid_prefix\":\"[Acc]\",\"no_answer\":{\"type\":\"groupvm\",\"target\":\"$VID\",\"prompt\":\"$PID\"}}" | jid)"
+RID="$(api POST /api/callflow/group '{"name":"Tour","number":"601","strategy":"rotate","members":["204","205","206"]}' | jid)"
+QID="$(api POST /api/callflow/queue "{\"name\":\"Support\",\"number\":\"700\",\"members\":[\"205\"],\"max_wait\":60,\"moh\":\"$PID\",\"periodic\":[\"$PID\"],\"announce_holdtime\":true,\"no_answer\":{\"type\":\"user_vm\",\"target\":\"205\"}}" | jid)"
+SID="$(api POST /api/callflow/schedule '{"name":"Bureau","override":"open"}' | jid)"
+IID="$(api POST /api/callflow/ivr "{\"name\":\"Standard\",\"number\":\"800\",\"prompt\":\"$PID\",\"options\":{\"1\":{\"type\":\"group\",\"target\":\"$GID\"},\"2\":{\"type\":\"queue\",\"target\":\"$QID\"}},\"invalid\":{\"type\":\"group\",\"target\":\"$GID\"},\"schedule\":\"$SID\",\"closed\":{\"type\":\"prompt\",\"target\":\"$PID\"}}" | jid)"
+R="$(api POST /api/callflow/rule "{\"name\":\"Standard\",\"dids\":\"04 65 00 15 40\",\"schedule\":\"$SID\",\"open\":{\"type\":\"ivr\",\"target\":\"$IID\"},\"closed\":{\"type\":\"prompt\",\"target\":\"$PID\"}}")"
+[[ -n "$GID" && -n "$RID" && -n "$QID" && -n "$IID" && "$R" == *'"kind":"rule"'* ]] && pass "Gestion d'appels : groupe, groupe cyclique, file, SVI, messagerie de groupe, horaires et règle créés" || fail "création objets : $R"
+api POST /api/callflow/group '{"name":"X","number":"204"}' | grep -q "déjà utilisé" && pass "Numéro déjà pris par un utilisateur refusé" || fail "unicité numéro"
+sleep 1
+sudo /usr/sbin/asterisk -rx 'dialplan show 600@callflow' | grep -q 'Dial(PJSIP/205&PJSIP/205-web&PJSIP/206&PJSIP/206-web,15' && pass "Asterisk : groupe 600 (sonne tous)" || { sudo /usr/sbin/asterisk -rx 'dialplan show 600@callflow' | head -20 >> "$OUT"; fail "groupe 600"; }
+sudo /usr/sbin/asterisk -rx 'dialplan show 601@callflow' | grep -q 'GLOBAL(RR_601)' && pass "Asterisk : groupe 601 (1 à 1 en tournant)" || fail "groupe cyclique"
+sudo /usr/sbin/asterisk -rx 'dialplan show ivr-800' | grep -q "Background(/var/lib/pbxmaison/sounds/$PID" && pass "Asterisk : SVI 800 avec annonce et touches" || { sudo /usr/sbin/asterisk -rx 'dialplan show ivr-800' | head -20 >> "$OUT"; fail "SVI"; }
+sudo /usr/sbin/asterisk -rx 'dialplan show 0465001540@did-rules' | grep -q "rule-" && pass "Asterisk : SDA 04 65 00 15 40 → règle entrante" || fail "did-rules"
+sudo /usr/sbin/asterisk -rx 'queue show q700' | grep -q "Local/205@queue-ring" && pass "Asterisk : file d'attente 700 avec son agent" || { sudo /usr/sbin/asterisk -rx 'queue show q700' >> "$OUT"; fail "file 700"; }
+sudo /usr/sbin/asterisk -rx 'moh show classes' | grep -q "Class: q700" && pass "Musique d'attente personnalisée de la file" || { sudo /usr/sbin/asterisk -rx 'moh show classes' >> "$OUT"; fail "moh"; }
+sudo /usr/sbin/asterisk -rx 'voicemail show users' | grep -qE "^default +900 " && pass "Messagerie de groupe 900 créée" || fail "groupvm"
+sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 204' | grep -q "900@default" && pass "Voyant de la messagerie de groupe chez ses membres" || fail "mailboxes groupe"
+api GET "/api/trace?n=0465001540" | grep -q '"SVI 800 · Standard"' && pass "Traceur : SDA → règle → SVI → groupe" || fail "traceur"
+api GET /api/forwards | grep -q '"forwards":\[' && pass "Où sont les renvois : liste disponible" || fail "renvois"
+sudo grep -E "ERROR|WARNING" /var/log/asterisk/messages | grep -iE "pbx_config|extensions|app_queue|queues\.conf|res_musiconhold" | tail -5 > ast-err2.txt || true
+if [[ -s ast-err2.txt ]]; then cat ast-err2.txt >> "$OUT"; fail "Erreurs Asterisk (gestion d'appels)"; else pass "Aucune erreur Asterisk au chargement de la gestion d'appels"; fi
+if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" "" callflow 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Gestion d'appels OK"; then pass "Appels réels : groupe 600 et SVI 800 (touche 1)"; else
+  sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appels gestion d'appels"; fi
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"

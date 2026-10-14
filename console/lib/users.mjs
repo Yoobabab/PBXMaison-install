@@ -109,7 +109,7 @@ export function validateUser(input, current, ctx) {
       const n = nationalNumber(raw, cc);
       if (!n) throw new UserError(`SDA invalide : ${String(raw).trim()}`, "dids");
       const owner = ctx.didOwners?.get(n);
-      if (owner && owner !== u.id) throw new UserError(`La SDA ${n} est déjà attribuée au poste ${owner}.`, "dids");
+      if (owner && owner !== u.id) throw new UserError(/^\d+$/.test(owner) ? `La SDA ${n} est déjà attribuée au poste ${owner}.` : `La SDA ${n} est déjà utilisée par ${owner} (Gestion d'appels).`, "dids");
       if (!out.includes(n)) out.push(n);
     }
     u.dids = out;

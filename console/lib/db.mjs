@@ -59,6 +59,17 @@ export function createDb(cfg) {
         created_by text NOT NULL DEFAULT '',
         used_at timestamptz
       );
+      CREATE TABLE IF NOT EXISTS pbxmaison_objects (
+        kind text NOT NULL,
+        id text NOT NULL,
+        number text,
+        name text NOT NULL,
+        data jsonb NOT NULL DEFAULT '{}',
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        updated_by text NOT NULL DEFAULT '',
+        PRIMARY KEY (kind, id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS pbxmaison_objects_number ON pbxmaison_objects (number) WHERE number IS NOT NULL;
       CREATE TABLE IF NOT EXISTS pbxmaison_devices (
         endpoint text PRIMARY KEY,
         online boolean NOT NULL DEFAULT false,

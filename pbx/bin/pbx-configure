@@ -140,6 +140,8 @@ render_asterisk() {
   case "$PBX_COUNTRY" in FR|MC|LU) ind=fr ;; BE) ind=be ;; CH) ind=ch ;; esac
   sed "s/^country=.*/country=${ind}/" /usr/share/asterisk/indications.conf.sample > /etc/asterisk/indications.conf
   cp /usr/share/asterisk/musiconhold.conf.sample /etc/asterisk/musiconhold.conf
+  # Musiques d'attente des files (console : Gestion d'appels › Files d'attente)
+  printf '\n#tryinclude /var/lib/pbxmaison/musiconhold_callikoe.conf\n' >> /etc/asterisk/musiconhold.conf
   chown -R asterisk:asterisk /etc/asterisk
 }
 

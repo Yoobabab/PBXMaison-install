@@ -6,6 +6,7 @@ from playwright.sync_api import sync_playwright
 
 base, a_ext, a_pw, b_ext, b_pw = sys.argv[1:6]
 vm_ext = sys.argv[6] if len(sys.argv) > 6 else ""
+mode = sys.argv[7] if len(sys.argv) > 7 else "basic"
 SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
 os.makedirs(SHOTS, exist_ok=True)
 def log(m): print(m, flush=True)
@@ -27,6 +28,25 @@ with sync_playwright() as p:
         log(f"✔ Softphone web {ext} enregistré sur le PBX (WebSocket via Nginx)")
         pages[ext] = pg
     a, b = pages[a_ext], pages[b_ext]
+    if mode == "callflow":
+        def call_and_answer(number, dtmf=None, label=""):
+            a.click("#opendial"); a.fill("#num", number); a.click("#dial")
+            if dtmf:
+                a.wait_for_selector("#dur", timeout=20000)   # le SVI décroche
+                a.wait_for_timeout(2500)
+                a.click("#kp"); a.click(f"[data-d='{dtmf}']")
+            b.wait_for_selector("#answer", timeout=25000)
+            name = b.inner_text(".sp-incoming .cname")
+            log(f"✔ {label} : le softphone de {b_ext} sonne (affiché : {name})")
+            b.click("#answer"); b.wait_for_selector("#dur", timeout=20000)
+            a.wait_for_timeout(2000)
+            a.click("#hang"); b.wait_for_selector("#dial", timeout=15000); a.wait_for_timeout(1500)
+        call_and_answer("600", label="Groupe 600")
+        shot(b, "6-groupe")
+        call_and_answer("800", dtmf="1", label="SVI 800, touche 1 → groupe 600")
+        log("✔ Gestion d'appels OK")
+        browser.close()
+        sys.exit(0)
     shot(a, "1-equipe")
     a.click("#opendial"); a.fill("#num", b_ext); a.click("#dial")
     b.wait_for_selector("#answer", timeout=20000)

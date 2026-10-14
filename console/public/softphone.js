@@ -751,6 +751,14 @@ function connect() {
     s.on("hold", () => renderDrawer()); s.on("unhold", () => renderDrawer());
     s.on("ended", () => finish("answered"));
     s.on("failed", (e) => finish(callInfo.direction === "in" && !startedAt ? "missed" : "failed", e.cause));
+    // Interphone (groupe « annonce sans décrocher ») : décroché automatique
+    const ci = originator === "remote" ? String(s._request?.getHeader?.("Call-Info") || "") : "";
+    if (/answer-after=0/i.test(ci)) {
+      callInfo.intercom = true;
+      try { s.answer({ mediaConstraints: { audio: micConstraint(), video: false }, pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] } }); toast(`Annonce de ${callInfo.name || fmtNum(callInfo.number)}`); }
+      catch { showIncoming(); }
+      return;
+    }
     if (originator === "remote") showIncoming(); else { renderDrawer(); openDrawer(true); }
   });
   ua.start();
