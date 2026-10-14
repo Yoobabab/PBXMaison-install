@@ -12,7 +12,7 @@
 set -Eeuo pipefail
 
 TARGET="${1:?cible manquante (debian12, ubuntu2404)}"
-OUT="${2:?dossier de sortie manquant}"
+OUT="$(realpath -m "${2:?dossier de sortie manquant}")"
 ASTERISK_MAJOR=22
 URL="https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_MAJOR}-current.tar.gz"
 export DEBIAN_FRONTEND=noninteractive
