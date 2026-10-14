@@ -117,7 +117,9 @@ async function wizCheck() {
     return;
   }
   const p = c.pbx, n = c.network;
-  const dnsLine = n.dns_ok ? `<span class="pill ok">OK</span> ${esc(p.fqdn)} → ${esc(n.dns_ip)}`
+  if (n.dns_managed && !n.dns_ok) n.auto = true;
+  const dnsLine = n.auto ? `<span class="pill ok">Automatique</span> ${esc(p.fqdn)} sera créé vers ${esc(n.public_ip)} pendant l'installation`
+    : n.dns_ok ? `<span class="pill ok">OK</span> ${esc(p.fqdn)} → ${esc(n.dns_ip)}`
     : n.dns_ip ? `<span class="pill bad">À corriger</span> ${esc(p.fqdn)} pointe vers ${esc(n.dns_ip)} au lieu de ${esc(n.public_ip)}`
     : `<span class="pill wait">Absent</span> ${esc(p.fqdn)} ne pointe nulle part`;
   app.innerHTML = wizardFrame(2, `<div class="panel">
@@ -131,13 +133,13 @@ async function wizCheck() {
       <div><dt>IP publique</dt><dd class="mono">${esc(n.public_ip)}${n.behind_nat ? ` <span class="hint">(derrière un routeur, IP locale ${esc(n.local_ip)})</span>` : ""}</dd></div>
       <div><dt>DNS</dt><dd>${dnsLine}</dd></div>
     </dl>
-    ${n.dns_ok ? "" : `<div class="pad"><div class="note">Sans DNS correct, le PBX fonctionne mais <strong>sans certificat HTTPS</strong>.
+    ${n.dns_ok || n.auto ? "" : `<div class="pad"><div class="note">Sans DNS correct, le PBX fonctionne mais <strong>sans certificat HTTPS</strong>.
       Crée l'enregistrement <strong>A</strong> <code>${esc(p.fqdn)}</code> → <code>${esc(n.public_ip)}</code> chez ton hébergeur DNS,
       puis vérifie à nouveau (la propagation peut prendre quelques minutes). Tu pourras aussi obtenir le certificat plus tard, depuis « Système ».</div></div>`}
     ${n.behind_nat ? `<div class="pad"><div class="note">Machine derrière une box : redirige vers <code>${esc(n.local_ip)}</code> les ports UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80 et 443, et désactive le « SIP ALG ».</div></div>` : ""}
     <div class="pad row" style="border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn ghost" id="back">Autre fichier</button>
-      ${n.dns_ok ? "" : `<button class="btn ghost" id="recheck">Vérifier à nouveau le DNS</button>`}
+      ${n.dns_ok || n.auto ? "" : `<button class="btn ghost" id="recheck">Vérifier à nouveau le DNS</button>`}
       <button class="btn" id="go">Installer ce PBX</button>
     </div></div>`);
   $("#back").onclick = () => { wiz.step = 1; renderWizard(); };

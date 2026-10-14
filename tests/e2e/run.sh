@@ -124,6 +124,9 @@ TOK="$(api POST /api/extensions/201/app-token | node -e 'let s="";process.stdin.
 curl -sS "http://127.0.0.1/app/provision?t=${TOK}&format=json" | grep -q '"extension":"201"' && pass "QR code appli mobile : identifiants servis (valable 48 h)" || fail "app provision"
 api GET /api/phones | grep -q '"phones":\[' && pass "Menu Téléphones : liste disponible" || fail "api phones"
 
+systemctl is-enabled --quiet pbxmaison-dns.timer && pass "Mise à jour automatique de l'adresse (timer) active" || fail "timer DNS"
+sudo /opt/pbxmaison/pbx/bin/pbx-configure dns | grep -q "non gérée" && pass "Adresse personnalisée : pas d'appel au service DNS Callikoe" || fail "pbx-configure dns"
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"

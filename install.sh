@@ -213,6 +213,31 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
+# Adresse <nom>.callikoe.fr tenue à jour (IP qui change) : au démarrage puis toutes les 6 h
+cat > /etc/systemd/system/pbxmaison-dns.service <<EOF
+[Unit]
+Description=Callikoe — mise à jour de l'adresse du PBX
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${APP}/pbx/bin/pbx-configure dns
+EOF
+cat > /etc/systemd/system/pbxmaison-dns.timer <<EOF
+[Unit]
+Description=Callikoe — mise à jour régulière de l'adresse du PBX
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=6h
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now pbxmaison-dns.timer >/dev/null 2>&1 || true
 systemctl enable pbxmaison-console >/dev/null 2>&1
 systemctl restart pbxmaison-console
 ok "Console démarrée"

@@ -5,6 +5,7 @@
 #
 #    pbx-configure apply <fichier>   applique un pbx-config.json déposé dans l'assistant
 #    pbx-configure render            réécrit /etc/asterisk depuis les modèles (mise à jour)
+#    pbx-configure dns               met à jour l'adresse <nom>.callikoe.fr (chaque jour, et au démarrage)
 #    pbx-configure nginx             réécrit la config web (après obtention du certificat)
 #
 #  Sortie : une ligne JSON par étape {"step":…, "status":"ok|warn|error|run", "message":…}
@@ -97,6 +98,21 @@ EOF
   if systemctl is-active --quiet nginx; then systemctl reload nginx; else systemctl enable --now nginx >/dev/null 2>&1; fi
 }
 
+# ---------------------------------------------------------------------------
+# Adresses gérées <nom>.callikoe.fr : créées et mises à jour par le service DNS Callikoe
+DNS_API="${PBXM_DNS_API:-https://api.callikoe.fr}"
+is_managed_fqdn() { [[ "$1" =~ \.callikoe\.(fr|com)$ ]]; }
+# Affiche l'IP enregistrée (code 0) ou le message d'erreur (code 1)
+dns_register() {
+  local body out
+  body="$(node -e 'const fs=require("fs");process.stdout.write(JSON.stringify({config:JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}))' "$ETC/pbx-config.json")"
+  if ! out="$(curl -4 -sS --max-time 25 -X POST "$DNS_API/v1/register" -H "content-type: application/json" --data-binary "$body" 2>&1)"; then
+    echo "service ${DNS_API} injoignable (${out})"; return 1
+  fi
+  node -e 'let r;try{r=JSON.parse(process.argv[1])}catch{console.log("réponse illisible");process.exit(1)}
+    if(r.ok){console.log(r.ip);process.exit(0)}console.log(r.error||"erreur");process.exit(1)' "$out"
+}
+
 # Écrit /etc/asterisk à partir des modèles (variables de pbx.env, secrets.env, install.state)
 render_asterisk() {
   install -d -o asterisk -g asterisk -m 0750 /etc/asterisk /etc/asterisk/keys
@@ -140,7 +156,17 @@ cmd_apply() {
 
   # 4. DNS et certificat
   local dns_ip dns_ok=0 tls=0
-  dns_ip="$(dig +short A "$PBX_FQDN" 2>/dev/null | grep -E '^[0-9.]+$' | tail -n1 || true)"
+  if is_managed_fqdn "$PBX_FQDN"; then
+    json dns run "Création de l'adresse ${PBX_FQDN}…"
+    local reg_ip
+    if reg_ip="$(dns_register)"; then
+      json dns ok "Adresse ${PBX_FQDN} → ${reg_ip} (créée automatiquement)"
+      dns_ip="$reg_ip"; sleep 5   # le temps que les serveurs DNS de Cloudflare la publient
+    else
+      json dns warn "Adresse automatique non créée : ${reg_ip}"
+    fi
+  fi
+  [[ -n "$dns_ip" ]] || dns_ip="$(dig +short A "$PBX_FQDN" 2>/dev/null | grep -E '^[0-9.]+$' | tail -n1 || true)"
   if [[ "$dns_ip" == "$PUBLIC_IP" ]]; then
     dns_ok=1
     json certificat run "Demande du certificat HTTPS pour ${PBX_FQDN}…"
@@ -211,9 +237,16 @@ EOF
 
 case "${1:-}" in
   apply) shift; cmd_apply "$@" ;;
+  dns)    [[ -f "$ETC/pbx.env" ]] || exit 0
+          set -a; . "$ETC/pbx.env"; set +a
+          is_managed_fqdn "$PBX_FQDN" || { echo "Adresse ${PBX_FQDN} non gérée par Callikoe : rien à faire."; exit 0; }
+          if ip="$(dns_register)"; then
+            echo "Adresse ${PBX_FQDN} → ${ip}"
+            [[ "$ip" == "${PUBLIC_IP:-}" ]] || echo "Attention : l'IP publique a changé (${PUBLIC_IP:-?} → ${ip}). Relance la commande d'installation pour mettre à jour la téléphonie." >&2
+          else echo "Échec : ${ip}" >&2; exit 1; fi ;;
   render) [[ -f "$ETC/pbx.env" ]] || { echo "PBX pas encore configuré" >&2; exit 1; }
           set -a; . "$ETC/pbx.env"; set +a; render_asterisk ;;
   nginx) set -a; . "$ETC/pbx.env" 2>/dev/null || true; set +a
          if [[ -n "${PBX_FQDN:-}" && -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]]; then nginx_write "$PBX_FQDN" 1; else nginx_write "" 0; fi ;;
-  *) echo "Usage : pbx-configure apply <fichier> | render | nginx" >&2; exit 2 ;;
+  *) echo "Usage : pbx-configure apply <fichier> | render | dns | nginx" >&2; exit 2 ;;
 esac

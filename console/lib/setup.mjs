@@ -43,6 +43,7 @@ export async function checkSetupConfig(cfg) {
     network: {
       public_ip: st.PUBLIC_IP || null, local_ip: st.LOCAL_IP || null, behind_nat: st.BEHIND_NAT === "1",
       dns_ip: dnsIp, dns_ok: !!dnsIp && dnsIp === st.PUBLIC_IP,
+      dns_managed: /\.callikoe\.(fr|com)$/.test(cfg.pbx.fqdn),
     },
   };
 }
