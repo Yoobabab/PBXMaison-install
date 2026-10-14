@@ -32,7 +32,7 @@ trap 'die "Erreur ligne $LINENO : $BASH_COMMAND"' ERR
 [[ $EUID -eq 0 ]] || die "Lance la commande avec sudo (… | sudo bash)."
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
-echo "${B}PBXMaison — installation${N} ($(date '+%F %T'))"
+echo "${B}Callikoe — installation${N} ($(date '+%F %T'))"
 export DEBIAN_FRONTEND=noninteractive
 apt_install() { apt-get install -y -q --no-install-recommends "$@" >/dev/null; }
 START=$SECONDS
@@ -73,7 +73,7 @@ systemctl enable --now nginx >/dev/null 2>&1 || true
 ok "Node.js $(/usr/bin/node -v), PostgreSQL, Nginx, Certbot, fail2ban"
 
 # =============================================================================
-step "Téléchargement de PBXMaison"
+step "Téléchargement de Callikoe"
 # =============================================================================
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 curl -fsSL "https://github.com/${REPO}/archive/${REF}.tar.gz" -o "$TMP/app.tar.gz"
@@ -109,7 +109,7 @@ install -d -o asterisk -g asterisk /etc/asterisk /var/lib/asterisk /var/log/aste
 chown -R asterisk:asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk
 cat > /etc/systemd/system/asterisk.service <<'EOF'
 [Unit]
-Description=Asterisk (PBXMaison)
+Description=Asterisk (Callikoe)
 After=network-online.target postgresql.service
 Wants=network-online.target postgresql.service
 ConditionPathExists=/etc/asterisk/asterisk.conf
@@ -193,7 +193,7 @@ chmod 440 /etc/sudoers.d/pbxmaison
 visudo -cq -f /etc/sudoers.d/pbxmaison
 cat > /etc/systemd/system/pbxmaison-console.service <<EOF
 [Unit]
-Description=PBXMaison — console web
+Description=Callikoe — console web
 After=network-online.target postgresql.service
 Wants=postgresql.service
 

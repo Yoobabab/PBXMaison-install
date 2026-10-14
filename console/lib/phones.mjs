@@ -164,7 +164,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
   const v = (k, val) => `${k} = ${String(val ?? "").replace(/[\r\n]/g, " ")}`;
   const L = [
     "#!version:1.0.0.1",
-    `## PBXMaison — poste ${user.id} (${name}) — ${model?.label || phone.model} — généré le ${new Date().toISOString()}`,
+    `## Callikoe — poste ${user.id} (${name}) — ${model?.label || phone.model} — généré le ${new Date().toISOString()}`,
     "## Ne pas modifier : ce fichier est régénéré par le PBX.",
     "",
     "## Compte SIP",
@@ -218,7 +218,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("static.auto_provision.pnp_enable", 0),
     "",
     ...(model?.screen && server.assets_url ? [
-      "## Fond d'écran PBXMaison",
+      "## Fond d'écran Callikoe",
       v("wallpaper_upload.url", `${server.assets_url}wallpaper-${model.screen}.png`),
       v("phone_setting.backgrounds", `Config:wallpaper-${model.screen}.png`),
       "",
@@ -250,8 +250,8 @@ export function identifyDevice(userAgent = "") {
   if ((m = /(Fanvil|Snom|Grandstream|Gigaset|Panasonic|Polycom|Poly|Cisco|Alcatel|Htek|Akuvox|Mitel|Avaya)[ /-]?([A-Za-z0-9-]*)/i.exec(ua))) {
     return { ...out, kind: "phone", brand: m[1], model: m[2], label: `${m[1]} ${m[2]}`.trim() };
   }
-  if (/PBXMaison-Web|SIP\.js|JsSIP|sipML5|WebRTC/i.test(ua)) return { ...out, kind: "web", label: "Softphone web" };
-  if (/Android|iPhone|iOS|iPad|Groundwire|Acrobits|Bria Mobile|Zoiper\s*(?:iOS|Android)|Linphone(?:Android|iOS)|PBXMaison-App/i.test(ua)) return { ...out, kind: "mobile", label: ua.split(/[ /]/)[0] || "Appli mobile" };
+  if (/PBXMaison-Web|Callikoe-Web|SIP\.js|JsSIP|sipML5|WebRTC/i.test(ua)) return { ...out, kind: "web", label: "Softphone web" };
+  if (/Android|iPhone|iOS|iPad|Groundwire|Acrobits|Bria Mobile|Zoiper\s*(?:iOS|Android)|Linphone(?:Android|iOS)|PBXMaison-App|Callikoe-App/i.test(ua)) return { ...out, kind: "mobile", label: ua.split(/[ /]/)[0] || "Appli mobile" };
   if (/MicroSIP|Zoiper|Linphone|PhonerLite|X-Lite|Bria|Jitsi|baresip|Blink|Telephone|3CX/i.test(ua)) return { ...out, kind: "pc", label: ua.split(/[ /]/)[0] || "Softphone" };
   return out;
 }

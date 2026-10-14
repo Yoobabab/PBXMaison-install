@@ -512,7 +512,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   /** Fichier demandé par un téléphone : null si inconnu. */
   async function provisionFile(token, file, server, from) {
     if (token !== (await db.getSetting("prov_token", ""))) return null;
-    if (/^y0{6}\d{6}\.cfg$/i.test(file)) return { text: "#!version:1.0.0.1\n## PBXMaison : tout est dans <mac>.cfg\n" };
+    if (/^y0{6}\d{6}\.cfg$/i.test(file)) return { text: "#!version:1.0.0.1\n## Callikoe : tout est dans <mac>.cfg\n" };
     const m = /^([0-9a-f]{12})\.cfg$/i.exec(file);
     if (!m) return null;
     const mac = m[1].toLowerCase();

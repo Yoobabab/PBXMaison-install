@@ -192,8 +192,8 @@ export async function buildApp({ db, ami } = {}) {
     const wantsJson = req.query?.format === "json" || String(req.headers.accept || "").includes("application/json");
     if (!wantsJson) {
       return reply.type("text/html; charset=utf-8").send(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>PBXMaison</title><body style="font:16px system-ui;max-width:420px;margin:12vh auto;padding:0 16px;text-align:center">
-        <h1 style="font-size:20px">Application PBXMaison</h1><p>Ce QR code se scanne depuis l'application mobile PBXMaison pour configurer ton poste automatiquement.</p></body></html>`);
+        <title>Callikoe</title><body style="font:16px system-ui;max-width:420px;margin:12vh auto;padding:0 16px;text-align:center">
+        <h1 style="font-size:20px">Application Callikoe</h1><p>Ce QR code se scanne depuis l'application mobile Callikoe pour configurer ton poste automatiquement.</p></body></html>`);
     }
     const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
     const f = provFails.get(ip);
@@ -257,7 +257,7 @@ export async function buildApp({ db, ami } = {}) {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   const app = await buildApp();
   await app.listen({ port: settings.port, host: settings.host });
-  console.log(`Console PBXMaison sur http://${settings.host}:${settings.port}`);
+  console.log(`Console Callikoe sur http://${settings.host}:${settings.port}`);
   // Après une mise à jour : régénère les fichiers lus par Asterisk (nouveau format éventuel)
   if (isConfigured()) app.pbx.applyDialplan().catch((e) => console.error("Plan de numérotation non régénéré :", e.message));
   // Suivi des connexions des téléphones (« connecté depuis… »)

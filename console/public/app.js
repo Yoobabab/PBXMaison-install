@@ -799,7 +799,7 @@ async function wireAppQr(u) {
   const box = $("#appqr"); if (!box) return;
   const idle = (st) => {
     box.innerHTML = `<h3 class="sec" style="margin:0 0 8px">Application mobile</h3>
-      <p class="hint" style="margin:0 0 12px">Un QR code à scanner dans l'application PBXMaison pour configurer le poste ${esc(u.id)} sans rien saisir. Valable 2 jours.</p>
+      <p class="hint" style="margin:0 0 12px">Un QR code à scanner dans l'application Callikoe pour configurer le poste ${esc(u.id)} sans rien saisir. Valable 2 jours.</p>
       ${st ? `<p style="margin:0 0 12px">Un QR code est actif jusqu'au <strong>${esc(fmtDateTime(st.expires_at))}</strong>${st.used_at ? ` · scanné le ${esc(fmtDateTime(st.used_at))}` : " · pas encore scanné"}.</p>` : ""}
       <div class="row"><button type="button" class="btn ghost sm" id="qrgen">${st ? "Générer un nouveau QR code" : "Générer le QR code"}</button>
       ${st ? '<button type="button" class="btn ghost sm" id="qrrev">Révoquer</button>' : ""}</div>`;
@@ -809,7 +809,7 @@ async function wireAppQr(u) {
   const show = (t) => {
     box.innerHTML = `<h3 class="sec" style="margin:0 0 8px">Application mobile</h3>
       <div class="qr"><div class="qrimg">${t.qr_svg}</div><div>
-        <p style="margin-top:0">Scanne ce QR code avec l'application PBXMaison.<br>Valable jusqu'au <strong>${esc(fmtDateTime(t.expires_at))}</strong>.</p>
+        <p style="margin-top:0">Scanne ce QR code avec l'application Callikoe.<br>Valable jusqu'au <strong>${esc(fmtDateTime(t.expires_at))}</strong>.</p>
         <p class="hint">Il donne accès aux identifiants du poste ${esc(u.id)} : ne l'envoie qu'à son utilisateur. Un nouveau QR code annule le précédent.</p>
         <div class="row"><button type="button" class="btn ghost sm" id="qrrev">Révoquer</button><button type="button" class="btn ghost sm" id="qrprint">Imprimer</button></div></div></div>`;
     $("#qrrev").onclick = async () => { await api("DELETE", `/api/extensions/${u.id}/app-token`); idle(null); };
