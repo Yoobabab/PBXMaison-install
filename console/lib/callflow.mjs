@@ -357,7 +357,7 @@ export function destApps(d, m) {
     const p = find(m.objects, "prompt", d.prompt);
     const { prompt, ...rest } = d;
     void prompt;
-    return [...(p?.data.file ? ["Answer()", `Playback(${promptPath(m.soundsDir, p)})`] : []), ...destApps(rest, m)];
+    return [...(p?.data?.file ? ["Answer()", `Playback(${promptPath(m.soundsDir, p)})`] : []), ...destApps(rest, m)];
   }
   switch (d.type) {
     case "user": return m.users.has(d.target) ? [`Goto(users,${d.target},1)`] : ["Hangup()"];
@@ -365,7 +365,7 @@ export function destApps(d, m) {
     case "external": return [`Goto(user-external,${d.target},1)`];
     case "prompt": {
       const p = find(m.objects, "prompt", d.target);
-      return p?.data.file ? ["Answer()", `Playback(${promptPath(m.soundsDir, p)})`, "Hangup()"] : ["Hangup()"];
+      return p?.data?.file ? ["Answer()", `Playback(${promptPath(m.soundsDir, p)})`, "Hangup()"] : ["Hangup()"];
     }
     case "hangup": return ["Hangup()"];
     default: {
@@ -446,7 +446,7 @@ export function buildCallflowDialplan(m) {
     const tails = officeGate(L, o, m);
     L.push(" same => n,Answer()");
     const g = d.greeting && find(m.objects, "prompt", d.greeting);
-    if (g?.data.file) L.push(` same => n,Playback(${promptPath(m.soundsDir, g)})`);
+    if (g?.data?.file) L.push(` same => n,Playback(${promptPath(m.soundsDir, g)})`);
     L.push(` same => n,Queue(q${o.number},t,,,${d.max_wait})`);
     pushApps(L, destApps(d.no_answer, m));
     L.push(` same => n(loop),Log(WARNING,Boucle de renvois détectée : file ${o.number})`, " same => n(end),Hangup()", ...tails);
@@ -472,7 +472,7 @@ export function buildCallflowDialplan(m) {
     const d = o.data;
     const p = d.prompt && find(m.objects, "prompt", d.prompt);
     L.push("", `[ivr-${o.number}]`, "exten => s,1,Answer()", " same => n,Set(CDR(dest_kind)=ivr)", " same => n,Set(TRIES=0)", " same => n,Set(TIMEOUT(digit)=2)");
-    L.push(` same => n(menu),${p?.data.file ? `Background(${promptPath(m.soundsDir, p)})` : "Wait(1)"}`, ` same => n,WaitExten(${d.timeout})`);
+    L.push(` same => n(menu),${p?.data?.file ? `Background(${promptPath(m.soundsDir, p)})` : "Wait(1)"}`, ` same => n,WaitExten(${d.timeout})`);
     for (const [k, dest] of Object.entries(d.options)) {
       L.push(`exten => ${k},1,NoOp(SVI ${o.number} : touche ${k})`);
       pushApps(L, destApps(dest, m));
@@ -542,10 +542,10 @@ export function buildQueues(m) {
   for (const o of byKind(m.objects, "queue")) {
     const d = o.data;
     L.push("", `[q${o.number}]`, `strategy = ${d.strategy}`, `timeout = ${d.member_timeout}`, "retry = 2", `wrapuptime = ${d.wrapup}`,
-      `musicclass = ${d.moh && find(m.objects, "prompt", d.moh)?.data.file ? `q${o.number}` : "default"}`, "ringinuse = no", "joinempty = paused,invalid,unavailable", "leavewhenempty = paused,invalid,unavailable",
+      `musicclass = ${d.moh && find(m.objects, "prompt", d.moh)?.data?.file ? `q${o.number}` : "default"}`, "ringinuse = no", "joinempty = paused,invalid,unavailable", "leavewhenempty = paused,invalid,unavailable",
       `announce-position = ${d.announce_position ? "yes" : "no"}`, `announce-frequency = ${d.announce_position || d.announce_holdtime ? 45 : 0}`,
       `announce-holdtime = ${d.announce_holdtime ? "yes" : "no"}`, "setinterfacevar = yes");
-    const per = (d.periodic || []).map((id) => find(m.objects, "prompt", id)).filter((p) => p?.data.file).map((p) => promptPath(m.soundsDir, p));
+    const per = (d.periodic || []).map((id) => find(m.objects, "prompt", id)).filter((p) => p?.data?.file).map((p) => promptPath(m.soundsDir, p));
     if (per.length) L.push(`periodic-announce = ${per.join(",")}`, `periodic-announce-frequency = ${d.periodic_freq || 30}`);
     for (const x of ringers(d.members, m.users)) {
       L.push(`member => Local/${x}@queue-ring/n,0,${clean(displayName(m.users.get(x)), 40)},hint:${x}@users-hints`);
@@ -557,7 +557,7 @@ export function buildQueues(m) {
 
 /** Musiques d'attente personnalisées : une classe par file (dossier contenant le fichier). */
 export function mohClasses(m) {
-  return byKind(m.objects, "queue").map((o) => ({ o, p: o.data.moh && find(m.objects, "prompt", o.data.moh) })).filter(({ p }) => p?.data.file)
+  return byKind(m.objects, "queue").map((o) => ({ o, p: o.data.moh && find(m.objects, "prompt", o.data.moh) })).filter(({ p }) => p?.data?.file)
     .map(({ o, p }) => ({ cls: `q${o.number}`, dir: `${m.soundsDir}/moh-q${o.number}`, file: p.data.file }));
 }
 export function buildMoh(m) {
@@ -702,7 +702,7 @@ function expand(dest, m, path, depth) {
     }
     case "prompt": {
       const o = find(m.objects, "prompt", dest.target);
-      return node("prompt", `Annonce « ${o?.data.name || "?"} » puis raccroche`, { status: o?.data.file ? "ok" : "bad", detail: o ? [] : ["Annonce supprimée."] });
+      return node("prompt", `Annonce « ${o?.data.name || "?"} » puis raccroche`, { status: o?.data?.file ? "ok" : "bad", detail: o ? [] : ["Annonce supprimée."] });
     }
     case "user": return expandUser(dest.target, m, p, depth);
     default: {

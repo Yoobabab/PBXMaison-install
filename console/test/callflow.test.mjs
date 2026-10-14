@@ -143,6 +143,10 @@ test("groupe cyclique, heures de bureau d'un groupe, SDA directe, file avancée"
   assert.match(t, /exten => 0465001541,1,Goto\(callflow,600,1\)/);
   assert.match(t, /GotoIfTime\(09:00-17:59,mon,\*,\*,Europe\/Paris\?break\)/);
   const qs = buildQueues(m);
+  // Champs d'annonce vides : pas d'erreur
+  const m2 = model(); Object.assign(m2.objects.find((o) => o.id === "q1").data, { greeting: "", moh: "", periodic: [] });
+  Object.assign(m2.objects.find((o) => o.id === "i1").data, { prompt: "" });
+  assert.doesNotThrow(() => { buildCallflowDialplan(m2); buildQueues(m2); mohClasses(m2); });
   assert.match(qs, /musicclass = q700/);
   assert.match(qs, /periodic-announce = \/var\/lib\/pbxmaison\/sounds\/p1\nperiodic-announce-frequency = 40/);
   assert.match(qs, /announce-holdtime = yes/);
