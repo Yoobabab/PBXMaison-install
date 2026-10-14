@@ -39,7 +39,8 @@ jobs:
         shell: bash
         run: |
           f=tests/e2e/e2e-result.txt
-          if [[ -f $f ]]; then msg="$(sed -e 's/%/%25/g' "$f" | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Résultat e2e::${msg}"; fi
+          if [[ -f $f ]]; then msg="$(sed -e 's/%/%25/g' "$f" | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Résultat e2e::${msg}"
+            tailmsg="$(tail -n 25 "$f" | cut -c1-160 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Fin du résultat::${tailmsg}"; fi
       - name: Captures du softphone
         if: always()
         uses: actions/upload-artifact@v4
