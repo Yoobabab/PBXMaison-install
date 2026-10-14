@@ -42,7 +42,7 @@ export async function buildApp({ db, ami } = {}) {
     if (err instanceof UserError || err.status) {
       return reply.code(err.status || 400).send({ error: err.message, field: err.field, impact: err.impact });
     }
-    if (err.validation) return reply.code(400).send({ error: "Requête invalide." });
+    if (err.validation || (err.statusCode >= 400 && err.statusCode < 500)) return reply.code(err.statusCode || 400).send({ error: "Requête invalide." });
     req.log.error(err);
     return reply.code(500).send({ error: "Erreur interne. Détail dans le journal du serveur." });
   });

@@ -24,7 +24,7 @@ grep -q "jeton=" install.out && pass "URL de l'assistant affichée : $(grep -o '
 TOKEN="$(sudo cat /var/lib/pbxmaison/setup-token)"
 
 api() { # api <méthode> <chemin> [json]
-  curl -sS -b "$JAR" -c "$JAR" -X "$1" "$API$2" -H "x-setup-token: $TOKEN" -H "content-type: application/json" ${3:+-d "$3"}
+  curl -sS -b "$JAR" -c "$JAR" -X "$1" "$API$2" -H "x-setup-token: $TOKEN" ${3:+-H "content-type: application/json" -d "$3"}
 }
 CFG="$(cat pbx-config.json)"
 
