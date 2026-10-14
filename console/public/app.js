@@ -36,8 +36,17 @@ const takeFlash = () => { const f = flash; flash = null; return f ? `<div class=
 
 function copyButtons(root = document) {
   root.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => {
-    navigator.clipboard?.writeText(b.dataset.copy).then(() => { const t = b.textContent; b.textContent = "Copié ✓"; setTimeout(() => (b.textContent = t), 1500); });
+    copyText(b.dataset.copy).then((ok) => { const t = b.textContent; b.textContent = ok ? "Copié ✓" : "Sélectionne et copie (Ctrl+C)"; setTimeout(() => (b.textContent = t), 2000); });
   }));
+}
+// navigator.clipboard n'existe qu'en HTTPS : repli sur execCommand tant que le PBX est en HTTP.
+async function copyText(text) {
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch { /* repli */ }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.append(ta); ta.select(); ta.setSelectionRange(0, text.length);
+  let ok = false; try { ok = document.execCommand("copy"); } catch { ok = false; }
+  ta.remove(); return ok;
 }
 
 function setNav(active) {
