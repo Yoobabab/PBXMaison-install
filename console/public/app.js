@@ -53,7 +53,7 @@ async function copyText(text) {
 
 function setNav(active) {
   const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"],
-    ["#/gestion", "Gestion d'appels", "cf"], ["#/routes", "Routes", "routes"], ["#/appels", "En cours", "calls"], ["#/journal", "Journal", "cdr"], ["#/systeme", "Système", "sys"]];
+    ["#/gestion", "Gestion d'appels", "cf"], ["#/routes", "Routes", "routes"], ["#/journal", "Journal", "cdr"], ["#/annuaire", "Annuaire", "book"], ["#/systeme", "Système", "sys"]];
   $("#nav").innerHTML = state?.logged_in ? links.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${l}</a>`).join("") : "";
   $("#user").innerHTML = state?.logged_in ? `<button id="logout" title="Connecté : ${esc(state.email || "")}">Déconnexion</button>` : "";
   $("#logout")?.addEventListener("click", async () => { await api("POST", "/api/logout"); state.logged_in = false; location.hash = "#/"; route(); });
@@ -947,11 +947,12 @@ async function renderCdr() {
   clearInterval(timer);
   const f = JSON.parse(sessionStorage.getItem("pbxm_cdr") || '{"days":"7","direction":"","status":"","q":""}');
   const qs = new URLSearchParams(f).toString();
-  const d = await api("GET", `/api/cdr?${qs}`);
+  const [d, live] = await Promise.all([api("GET", `/api/cdr?${qs}`), api("GET", "/api/calls").catch(() => ({ calls: [] }))]);
   const fmtWhen = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
   const sel = (name, opts) => `<select data-f="${name}">${opts.map(([v, l]) => `<option value="${v}" ${f[name] === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   app.innerHTML = `<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX : qui a appelé, qui a répondu, combien de temps.</p></div>
     <a class="btn ghost" href="/api/cdr.csv?${qs}">Exporter (CSV, Excel)</a></div>
+    ${live.calls?.length ? `<div class="panel" style="margin-bottom:18px"><div class="ph"><h2>En cours (${live.calls.length})</h2><a href="#/appels" class="s">Suivre en direct</a></div>${callsTable(live)}</div>` : ""}
     <div class="panel"><div class="filters">
       <input type="search" data-f="q" placeholder="Numéro, nom, SDA, poste…" value="${esc(f.q)}">
       ${sel("days", [["1", "Aujourd'hui et hier"], ["7", "7 derniers jours"], ["30", "30 jours"], ["90", "90 jours"], ["366", "1 an"]])}
@@ -969,6 +970,70 @@ async function renderCdr() {
   app.querySelectorAll("select[data-f]").forEach((el) => el.onchange = save);
   let t; app.querySelector("input[data-f=q]").oninput = () => { clearTimeout(t); t = setTimeout(() => { sessionStorage.setItem("pbxm_cdr_focus", "1"); save(); }, 400); };
   if (sessionStorage.getItem("pbxm_cdr_focus")) { sessionStorage.removeItem("pbxm_cdr_focus"); const i = app.querySelector("input[data-f=q]"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+}
+
+// ---------------------------------------------------------------- Annuaire de l'entreprise
+const PTYPES = { work: "Bureau", mobile: "Mobile", home: "Domicile", other: "Autre" };
+async function renderContacts(editId) {
+  setNav("book");
+  clearInterval(timer);
+  const q = sessionStorage.getItem("pbxm_book_q") || "";
+  const { contacts } = await api("GET", `/api/contacts?q=${encodeURIComponent(q)}`);
+  const all = q ? (await api("GET", "/api/contacts")).contacts : contacts;
+  const cur = editId && editId !== "nouveau" ? all.find((c) => c.id === editId) : null;
+  const editing = editId === "nouveau" || cur;
+  const c = cur || { first_name: "", last_name: "", company: "", email: "", notes: "", phones: [{ type: "work", number: "" }, { type: "mobile", number: "" }] };
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Annuaire</h1><p class="sub" style="margin:0">Contacts de l'entreprise : visibles dans le softphone et sur les téléphones Yealink, et nom affiché quand ils appellent.</p></div>
+    <a class="btn ghost" href="/api/contacts.csv">Exporter</a><button class="btn ghost" id="imp">Importer un CSV</button><a class="btn" href="#/annuaire/nouveau">+ Ajouter un contact</a></div>
+    <input type="file" id="impf" accept=".csv,text/csv" hidden>
+    <div id="impbox"></div>
+    ${editing ? `<div class="panel" style="margin-bottom:18px"><div class="ph"><h2>${cur ? "Modifier le contact" : "Nouveau contact"}</h2></div>
+      <form id="cf" class="grid" novalidate>
+        <label>Prénom<input name="first_name" value="${esc(c.first_name)}"></label><label>Nom<input name="last_name" value="${esc(c.last_name)}"></label>
+        <label>Société<input name="company" value="${esc(c.company)}"></label><label>E-mail<input name="email" type="email" value="${esc(c.email)}"></label>
+        <div class="full" id="phs"></div>
+        <label class="full">Notes<textarea name="notes" rows="2">${esc(c.notes)}</textarea></label>
+        <div class="form-msg full"></div>
+        <div class="actions">${cur ? '<button type="button" class="btn ghost" id="cdel">Supprimer</button>' : ""}<a class="btn ghost" href="#/annuaire">Annuler</a><button class="btn">Enregistrer</button></div>
+      </form></div>` : ""}
+    <div class="panel"><div class="filters"><input type="search" id="bq" placeholder="Rechercher : nom, société, numéro…" value="${esc(q)}"><span class="s">${contacts.length} contact${contacts.length > 1 ? "s" : ""}</span></div>
+    ${contacts.length ? `<div class="table-wrap"><table><thead><tr><th>Nom</th><th>Société</th><th>Numéros</th><th>E-mail</th><th></th></tr></thead><tbody>
+      ${contacts.map((x) => `<tr><td><a href="#/annuaire/${esc(x.id)}">${esc(`${x.first_name} ${x.last_name}`.trim() || "—")}</a></td><td>${esc(x.company)}</td>
+        <td>${x.phones.map((p) => `${esc(fmtPhone(p.number))} <span class="s">${PTYPES[p.type]}</span>`).join("<br>")}</td><td>${esc(x.email)}</td>
+        <td class="acts"><a class="btn ghost sm" href="#/annuaire/${esc(x.id)}">Modifier</a></td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">${q ? "Aucun résultat." : "L'annuaire est vide : ajoute des contacts ou importe un fichier CSV (Prénom ; Nom ; Société ; Téléphone ; Mobile ; E-mail)."}</div>`}</div>`;
+  let t; $("#bq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { sessionStorage.setItem("pbxm_book_q", e.target.value); renderContacts(editId).then(() => { const i = $("#bq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
+  $("#imp").onclick = () => $("#impf").click();
+  $("#impf").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const buf = await f.arrayBuffer();
+    let text = new TextDecoder("utf-8").decode(buf);
+    if (text.includes("\ufffd")) text = new TextDecoder("windows-1252").decode(buf); // CSV Excel en ANSI
+    const replace = confirm("Remplacer tout l'annuaire par ce fichier ?\n\nOK : remplacer — Annuler : ajouter / mettre à jour (même numéro = même contact)");
+    try {
+      const r = await api("POST", "/api/contacts/import", { csv: text, replace });
+      $("#impbox").innerHTML = `<div class="flash">${r.imported} contact${r.imported > 1 ? "s" : ""} importé${r.imported > 1 ? "s" : ""}.${r.errors.length ? ` ${r.errors.length} ligne(s) ignorée(s) : ${r.errors.slice(0, 5).map((x) => `ligne ${x.line} (${esc(x.error)})`).join(", ")}${r.errors.length > 5 ? "…" : ""}` : ""}</div>`;
+      setTimeout(() => renderContacts(), 2500);
+    } catch (err) { $("#impbox").innerHTML = `<div class="flash bad">${esc(err.message)}</div>`; }
+  };
+  if (!editing) return;
+  const phones = c.phones.map((p) => ({ ...p }));
+  const drawPh = () => {
+    $("#phs").innerHTML = `<span class="dl">Numéros</span>${phones.map((p, i) => `<div class="phrow"><select data-pt="${i}">${Object.entries(PTYPES).map(([k, l]) => `<option value="${k}" ${p.type === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <input data-pn="${i}" inputmode="tel" value="${esc(fmtPhone(p.number) === "—" ? "" : fmtPhone(p.number))}" placeholder="04 12 34 56 78"><button type="button" class="ic" data-pr="${i}">✕</button></div>`).join("")}
+      <button type="button" class="btn ghost sm" id="padd">+ Numéro</button>`;
+    app.querySelectorAll("[data-pt]").forEach((x) => x.onchange = () => { phones[x.dataset.pt].type = x.value; });
+    app.querySelectorAll("[data-pn]").forEach((x) => x.oninput = () => { phones[x.dataset.pn].number = x.value; });
+    app.querySelectorAll("[data-pr]").forEach((x) => x.onclick = () => { phones.splice(Number(x.dataset.pr), 1); drawPh(); });
+    $("#padd").onclick = () => { phones.push({ type: "work", number: "" }); drawPh(); };
+  };
+  drawPh();
+  $("#cf").onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api(cur ? "PUT" : "POST", `/api/contacts${cur ? "/" + cur.id : ""}`, { ...formData(e.target), phones }); flash = { text: "Contact enregistré." }; location.hash = "#/annuaire"; }
+    catch (err) { showFormError(e.target, err); }
+  };
+  $("#cdel")?.addEventListener("click", async () => { if (!confirm("Supprimer ce contact ?")) return; await api("DELETE", `/api/contacts/${cur.id}`); flash = { text: "Contact supprimé." }; location.hash = "#/annuaire"; });
 }
 
 // ---------------------------------------------------------------- Système
@@ -1025,8 +1090,9 @@ async function route() {
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "routages", m[2] || null);
     else if (h === "#/routes") await renderRoutes();
-    else if (h === "#/appels") await renderCalls();
+    else if (h === "#/appels") await renderCalls();  // accessible depuis le tableau de bord et le journal
     else if (h === "#/journal") await renderCdr();
+    else if ((m = h.match(/^#\/annuaire(?:\/(\w+))?$/))) await renderContacts(m[1]);
     else if (h === "#/systeme") await renderSystem();
     else await renderDashboard();
     window.scrollTo(0, 0);

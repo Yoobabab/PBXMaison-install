@@ -85,6 +85,12 @@ export function createDb(cfg) {
       );
       CREATE INDEX IF NOT EXISTS cdr_calldate ON cdr (calldate);
       CREATE INDEX IF NOT EXISTS cdr_linkedid ON cdr (linkedid);
+      CREATE TABLE IF NOT EXISTS pbxmaison_contacts (
+        id bigserial PRIMARY KEY,
+        first_name text NOT NULL DEFAULT '', last_name text NOT NULL DEFAULT '', company text NOT NULL DEFAULT '',
+        email text NOT NULL DEFAULT '', notes text NOT NULL DEFAULT '', phones jsonb NOT NULL DEFAULT '[]',
+        created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), updated_by text NOT NULL DEFAULT ''
+      );
       CREATE TABLE IF NOT EXISTS pbxmaison_devices (
         endpoint text PRIMARY KEY,
         online boolean NOT NULL DEFAULT false,

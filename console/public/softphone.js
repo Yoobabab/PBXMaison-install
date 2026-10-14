@@ -45,6 +45,7 @@ const I = {
   keypad: () => svg('<circle cx="6" cy="5" r="1.3"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="5" r="1.3"/><circle cx="6" cy="11" r="1.3"/><circle cx="12" cy="11" r="1.3"/><circle cx="18" cy="11" r="1.3"/><circle cx="6" cy="17" r="1.3"/><circle cx="12" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/><circle cx="12" cy="22" r="1.1"/>'),
   star: (on) => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>`,
   x: () => svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+  book: () => svg('<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c.6-1.8 2-2.6 3.5-2.6s2.9.8 3.5 2.6"/>'),
   back: () => svg('<path d="M15 5 8 12l7 7"/>'),
   search: () => svg('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>', 18),
   mic: () => svg('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>'),
@@ -112,7 +113,9 @@ let page = "equipe", sub = "";
 const histKey = () => `callikoe_hist_${me?.user.id}`;
 const favKey = () => `callikoe_fav_${me?.user.id}`;
 // Historique : celui du PBX (journal des appels) dès qu'il est chargé, sinon celui de ce navigateur
-let serverCalls = null;
+let serverCalls = null, directory = [];
+async function loadDirectory() { try { directory = (await api("GET", "/api/u/contacts")).contacts; } catch { directory = []; } }
+const dirByNumber = (n) => directory.find((c) => c.phones.some((p) => p.number === n));
 const history = () => serverCalls || store.get(histKey(), []);
 async function refreshCalls() {
   try { serverCalls = (await api("GET", "/api/u/calls")).calls; } catch { return; }
@@ -168,6 +171,7 @@ async function start() {
   connect();
   refreshVoicemail();
   refreshCalls();
+  loadDirectory().then(() => { if (page === "appels" || page === "contacts") renderPage(); });
   stopPolling();
   poll = setInterval(refreshTeam, 10_000);
   setInterval(refreshVoicemail, 60_000);
@@ -187,8 +191,8 @@ async function refreshVoicemail() {
 }
 
 // ------------------------------------------------------------------ Coquille : menu, en-tête, panneaux
-const NAV = [["equipe", "Équipe", I.team], ["appels", "Appels", I.calls], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { equipe: "Équipe", appels: "Appels", messagerie: "Messagerie vocale", reglages: "Réglages" };
+const NAV = [["equipe", "Équipe", I.team], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
+const TITLES = { equipe: "Équipe", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages" };
 
 function presenceOf(c) {
   if (!c.registered) return { cls: "off", label: "Hors ligne" };
@@ -293,7 +297,7 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, appels: pageCalls, messagerie: pageVoicemail, reglages: pageSettings })[page](el);
+  ({ equipe: pageTeam, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings })[page](el);
 }
 
 // ------------------------------------------------------------------ Équipe
@@ -394,6 +398,44 @@ function drawCallDetail(all) {
 
 function statusText(h) {
   return { missed: "Manqué", failed: "Échec", voicemail: "Messagerie", answered_elsewhere: `Répondu par ${nameOf(h.answered_by) || h.answered_by}` }[h.status] || fmtDur(h.duration || 0);
+}
+
+// ------------------------------------------------------------------ Contacts (collègues + annuaire de l'entreprise)
+let ctab = "all", csel = "";
+const PT = { work: "Bureau", mobile: "Mobile", home: "Domicile", other: "Autre" };
+function pageContacts(el) {
+  el.innerHTML = `<div class="split ${csel ? "has-sel" : ""}">
+    <section class="panel listp">
+      <div class="pad-s" style="padding-top:12px"><label class="search">${I.search()}<input id="cq" type="search" placeholder="Nom, société ou numéro" autocomplete="off"></label></div>
+      <div class="ltabs">${[["all", "Tous"], ["team", "Collègues"], ["company", "Annuaire"]].map(([k, l]) => `<button class="${ctab === k ? "on" : ""}" data-ct="${k}">${l}</button>`).join("")}</div>
+      <ul class="rows" id="clist"></ul>
+    </section>
+    <section class="panel detp" id="cdetail"></section></div>`;
+  $$("[data-ct]", el).forEach((b) => b.onclick = () => { ctab = b.dataset.ct; pageContacts(el); });
+  const draw = () => {
+    const q = ($("#cq").value || "").toLowerCase().trim(), qd = q.replace(/[\s.]/g, "");
+    const team = ctab === "company" ? [] : contacts.filter((c) => !q || `${c.id} ${c.name}`.toLowerCase().includes(q)).map((c) => ({ key: `u:${c.id}`, name: c.name, sub: `Poste ${c.id}`, team: c }));
+    const comp = ctab === "team" ? [] : directory.filter((c) => !q || `${c.name} ${c.company} ${c.email}`.toLowerCase().includes(q) || (qd.length > 1 && c.phones.some((p) => p.number.includes(qd))))
+      .map((c) => ({ key: `c:${c.id}`, name: c.name, sub: c.company || fmtNum(c.phones[0]?.number), dir: c }));
+    const list = [...team, ...comp].sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    $("#clist").innerHTML = list.map((x) => `<li data-ck="${esc(x.key)}" class="${csel === x.key ? "sel" : ""}" style="cursor:pointer">${avatar(x.name, x.team ? presenceOf(x.team).cls : "", "sm")}
+      <span class="grow"><strong>${esc(x.name)}</strong><span class="s">${esc(x.sub || "")}</span></span>${x.team ? '<span class="tagc">Collègue</span>' : ""}</li>`).join("") || `<li class="empty-st">${directory.length || ctab !== "company" ? "Aucun résultat." : "L'annuaire de l'entreprise est vide (géré par l'administrateur)."}</li>`;
+    $$("[data-ck]", $("#clist")).forEach((li) => li.onclick = () => { csel = li.dataset.ck; pageContacts(el); });
+  };
+  $("#cq").oninput = draw; draw();
+  const d = $("#cdetail");
+  const [kind, id] = csel.split(":");
+  const t = kind === "u" ? contacts.find((c) => c.id === id) : null, c = kind === "c" ? directory.find((x) => x.id === id) : null;
+  if (!t && !c) { d.innerHTML = '<div class="empty-st">Sélectionne un contact.</div>'; return; }
+  const name = t ? t.name : c.name;
+  const nums = t ? [{ type: "Poste", number: t.id }] : c.phones.map((p) => ({ type: PT[p.type] || p.type, number: p.number }));
+  d.innerHTML = `<button class="ghost-ic back-m" id="cback">${I.back()} Retour</button>
+    <div class="det-head">${avatar(name, t ? presenceOf(t).cls : "", "xl")}<div class="tname">${esc(name)}</div>
+      <div class="s">${t ? `Poste ${esc(t.id)} · ${presenceOf(t).label}` : esc(c.company || "")}</div>
+      ${!t && c.email ? `<div class="s"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ""}</div>
+    <ul class="rows plain">${nums.map((n) => `<li><span class="grow"><span class="s">${esc(n.type)}</span><strong>${esc(fmtNum(n.number))}</strong></span><button class="cbtn" data-call="${esc(n.number)}" title="Appeler">${I.phone()}</button></li>`).join("")}</ul>`;
+  wireCalls(d);
+  $("#cback").onclick = () => { csel = ""; pageContacts(el); };
 }
 
 // ------------------------------------------------------------------ Messagerie vocale
@@ -649,7 +691,10 @@ function renderDialer(d) {
   const sugg = () => {
     const q = num.value.trim().toLowerCase();
     const list = q ? contacts.filter((c) => `${c.id} ${c.name}`.toLowerCase().includes(q)).slice(0, 5) : [];
-    $("#sugg").innerHTML = list.map((c) => { const p = presenceOf(c); return `<li data-call="${esc(c.id)}">${avatar(c.name, p.cls, "sm")}<span class="grow"><strong>${esc(c.name)}</strong><span class="s">${esc(c.id)} · ${p.label}</span></span>${I.phone(16)}</li>`; }).join("");
+    const qd = q.replace(/[\s.]/g, "");
+    const dir = q ? directory.filter((c) => `${c.name} ${c.company}`.toLowerCase().includes(q) || (qd.length > 2 && c.phones.some((p) => p.number.includes(qd)))).slice(0, 5) : [];
+    $("#sugg").innerHTML = list.map((c) => { const p = presenceOf(c); return `<li data-call="${esc(c.id)}">${avatar(c.name, p.cls, "sm")}<span class="grow"><strong>${esc(c.name)}</strong><span class="s">${esc(c.id)} · ${p.label}</span></span>${I.phone(16)}</li>`; }).join("")
+      + dir.flatMap((c) => c.phones.slice(0, 2).map((ph) => `<li data-call="${esc(ph.number)}">${avatar(c.name, "", "sm")}<span class="grow"><strong>${esc(c.name)}</strong><span class="s">${esc(c.company ? c.company + " · " : "")}${esc(fmtNum(ph.number))}</span></span>${I.phone(16)}</li>`)).join("");
     wireCalls($("#sugg"));
   };
   $$("[data-k]", d).forEach((b) => b.onclick = () => { num.value += b.dataset.k; num.focus(); sugg(); if (session) dtmf(b.dataset.k); });
@@ -776,7 +821,7 @@ function connect() {
   ua.start();
 }
 
-function nameOf(num) { return contacts.find((c) => c.id === num)?.name || (num === me.user.id ? me.user.name : ""); }
+function nameOf(num) { return contacts.find((c) => c.id === num)?.name || (num === me.user.id ? me.user.name : "") || dirByNumber(num)?.name || ""; }
 
 function hookAudio(pc) {
   pc.addEventListener("track", (ev) => { const a = $("#remote"); a.srcObject = ev.streams[0]; a.play().catch(() => {}); });

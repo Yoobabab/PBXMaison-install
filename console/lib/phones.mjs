@@ -217,6 +217,12 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("static.auto_provision.repeat.minutes", 1440),
     v("static.auto_provision.pnp_enable", 0),
     "",
+    "## Annuaire de l'entreprise (collègues + contacts), aussi utilisé pour afficher le nom des appelants",
+    v("remote_phonebook.data.1.url", `${server.prov_url}phonebook.xml`),
+    v("remote_phonebook.data.1.name", "Annuaire"),
+    v("features.remote_phonebook.enable", 1),
+    v("features.remote_phonebook.flash_time", 3600),
+    "",
     ...(model?.screen && server.assets_url ? [
       "## Fond d'écran Callikoe",
       v("wallpaper_upload.url", `${server.assets_url}wallpaper-${model.screen}.png`),

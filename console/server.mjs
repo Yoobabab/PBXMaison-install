@@ -15,6 +15,7 @@ import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import * as vm from "./lib/voicemail.mjs";
+import { parseCsv } from "./lib/contacts.mjs";
 import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
@@ -281,6 +282,7 @@ export async function buildApp({ db, ami } = {}) {
     };
   });
   app.get("/api/u/calls", { preHandler: requireWebUser }, async (req) => ({ calls: await pbx.userCalls(webUser(req).ext, 150) }));
+  app.get("/api/u/contacts", { preHandler: requireWebUser }, async () => ({ contacts: (await pbx.listContacts()).map(({ notes, ...c }) => (void notes, c)) }));
   app.get("/api/u/team", { preHandler: requireWebUser }, async (req) => ({ contacts: await team(webUser(req).ext) }));
   app.put("/api/u/status", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
@@ -357,7 +359,7 @@ export async function buildApp({ db, ami } = {}) {
       provFails.set(ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 10 * 60_000 });
       return reply.code(404).type("text/plain").send("Introuvable");
     }
-    return reply.type("text/plain; charset=utf-8").header("cache-control", "no-store").send(out.text);
+    return reply.type(out.type ? `${out.type}; charset=utf-8` : "text/plain; charset=utf-8").header("cache-control", "no-store").send(out.text);
   });
 
   app.get("/api/extensions/:id/impact", { preHandler: requireUser }, async (req) => pbx.deleteImpact(req.params.id));
@@ -392,6 +394,15 @@ export async function buildApp({ db, ami } = {}) {
         { answered: "Répondu", missed: "Manqué", voicemail: "Messagerie", busy: "Occupé", failed: "Échec" }[c.status] || c.status, c.from.number, c.from.name, c.to.number, c.did, c.rule, c.answered_by, c.duration, c.talk].map(q).join(";"))];
     return reply.type("text/csv; charset=utf-8").header("content-disposition", 'attachment; filename="journal-appels.csv"').send("\ufeff" + lines.join("\r\n"));
   });
+  // Annuaire de l'entreprise
+  app.get("/api/contacts", { preHandler: requireUser }, async (req) => ({ contacts: await pbx.listContacts(req.query?.q) }));
+  app.post("/api/contacts", { preHandler: requireUser }, async (req) => pbx.saveContact(null, req.body, currentUser(req).email));
+  app.put("/api/contacts/:id", { preHandler: requireUser }, async (req) => pbx.saveContact(req.params.id, req.body, currentUser(req).email));
+  app.delete("/api/contacts/:id", { preHandler: requireUser }, async (req) => pbx.deleteContact(req.params.id));
+  app.post("/api/contacts/import", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) =>
+    pbx.importContacts(req.body?.rows || parseCsv(req.body?.csv), !!req.body?.replace, currentUser(req).email));
+  app.get("/api/contacts.csv", { preHandler: requireUser }, async (req, reply) =>
+    reply.type("text/csv; charset=utf-8").header("content-disposition", 'attachment; filename="annuaire.csv"').send(await pbx.contactsCsv()));
   app.get("/api/trace", { preHandler: requireUser }, async (req) => pbx.trace(req.query?.n));
   app.get("/api/forwards", { preHandler: requireUser }, async () => ({ forwards: await pbx.forwardsReport() }));
 

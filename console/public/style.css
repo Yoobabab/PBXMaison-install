@@ -348,3 +348,5 @@ body.wide main{max-width:none;padding-left:24px;padding-right:24px}
 .dirc.out{background:var(--accent-soft);color:var(--accent)}
 table.cdr td{font-size:14px}
 .filters select{width:auto}
+.phrow{display:flex;gap:8px;margin-bottom:8px;align-items:center}.phrow select{width:130px}.phrow input{flex:1}
+header nav a{padding:7px 7px;font-size:13.5px}

@@ -214,6 +214,15 @@ api GET '/api/cdr?days=1' | grep -q '"rang":\["205"' && pass "Journal : appels v
 curl -sS -b "$UJ" "$API/api/u/calls" | grep -q '"direction":"out"' && pass "Softphone : historique des appels lu depuis le PBX" || fail "historique softphone"
 api GET '/api/cdr.csv?days=1' | head -1 | grep -q "Répondu par" && pass "Journal : export CSV" || fail "csv"
 
+# Annuaire de l'entreprise
+api POST /api/contacts '{"first_name":"Jean","last_name":"Dupont","company":"Boulangerie Dupont","phones":[{"type":"work","number":"04 78 12 34 56"}]}' | grep -q '"0478123456"' && pass "Annuaire : contact créé" || fail "contact"
+R="$(api POST /api/contacts/import '{"csv":"Prénom;Nom;Société;Téléphone;Mobile\nClaire;Bernard;Cabinet Bernard;04 72 00 11 22;\nX;Y;;abc;\n"}')"
+echo "$R" | grep -q '"imported":1' && echo "$R" | grep -q '"line":3' && pass "Annuaire : import CSV (ligne invalide signalée)" || fail "import csv : $R"
+sleep 1
+sudo /usr/sbin/asterisk -rx 'dialplan show 0478123456@phonebook' | grep -q "CALLERID(name)=Jean Dupont Boulangerie Dupont" && pass "Annuaire : nom de l'appelant affiché sur les appels entrants" || fail "phonebook dialplan"
+curl -sS "http://127.0.0.1${PPATH}phonebook.xml" | grep -q "<Name>Claire Bernard (Cabinet Bernard)</Name>" && pass "Annuaire : carnet distant Yealink servi par Nginx" || fail "phonebook.xml"
+curl -sS -b "$UJ" "$API/api/u/contacts" | grep -q "Boulangerie Dupont" && pass "Softphone : annuaire de l'entreprise visible" || fail "contacts softphone"
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"
