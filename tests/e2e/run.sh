@@ -223,6 +223,17 @@ sudo /usr/sbin/asterisk -rx 'dialplan show 0478123456@phonebook' | grep -q "CALL
 curl -sS "http://127.0.0.1${PPATH}phonebook.xml" | grep -q "<Name>Claire Bernard (Cabinet Bernard)</Name>" && pass "Annuaire : carnet distant Yealink servi par Nginx" || fail "phonebook.xml"
 curl -sS -b "$UJ" "$API/api/u/contacts" | grep -q "Boulangerie Dupont" && pass "Softphone : annuaire de l'entreprise visible" || fail "contacts softphone"
 
+# Chat entre collègues : envoi par 204, réception en temps réel par 205 (SSE à travers Nginx)
+J5="$(mktemp)"
+curl -sS -c "$J5" -X POST "$API/api/u/login" -H 'content-type: application/json' -d "{\"login\":\"205\",\"password\":\"$PB\"}" >/dev/null
+( timeout 12 curl -sSN -b "$J5" http://127.0.0.1/api/u/events > sse.txt 2>&1 & )
+sleep 2
+CID="$(curl -sS -b "$UJ" -X POST "$API/api/u/chats" -H 'content-type: application/json' -d '{"members":["205"]}' | jid)"
+curl -sS -b "$UJ" -X POST "$API/api/u/chats/$CID/messages" -H 'content-type: application/json' -d '{"body":"Bonjour 205 !"}' | grep -q '"sender":"204"' && pass "Chat : message envoyé par 204" || fail "chat envoi"
+sleep 2
+grep -q "Bonjour 205" sse.txt && pass "Chat : reçu en temps réel par 205 (à travers Nginx)" || { head -c 400 sse.txt >> "$OUT"; fail "chat temps réel"; }
+curl -sS -b "$J5" "$API/api/u/chats" | grep -q '"unread":1' && pass "Chat : message non lu compté" || fail "chat non lu"
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"

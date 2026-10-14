@@ -16,6 +16,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
+import { migrateChat, createChat } from "./lib/chat.mjs";
 import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
@@ -26,7 +27,9 @@ export async function buildApp({ db, ami } = {}) {
   db ??= createDb(settings.db);
   ami ??= new Ami(settings.ami);
   await db.migrate();
+  await migrateChat(db);
   const pbx = createPbxService({ db, ami, templatesFile: TEMPLATES_FILE, routesFile: routesPath(VAR), env: pbxEnv });
+  const chat = createChat(db, { users: () => pbx.loadUsers() });
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 1_048_576 });
   await app.register(cookie);
@@ -283,6 +286,23 @@ export async function buildApp({ db, ami } = {}) {
   });
   app.get("/api/u/calls", { preHandler: requireWebUser }, async (req) => ({ calls: await pbx.userCalls(webUser(req).ext, 150) }));
   app.get("/api/u/contacts", { preHandler: requireWebUser }, async () => ({ contacts: (await pbx.listContacts()).map(({ notes, ...c }) => (void notes, c)) }));
+  // Temps réel (chat, …) : Server-Sent Events, gardé ouvert ; Nginx ne doit pas mettre en tampon (X-Accel-Buffering)
+  app.get("/api/u/events", { preHandler: requireWebUser }, (req, reply) => {
+    const s = webUser(req);
+    reply.hijack();
+    reply.raw.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" });
+    reply.raw.write("retry: 3000\n\n");
+    const unsub = chat.subscribe(s.ext, reply.raw);
+    const ka = setInterval(() => { try { reply.raw.write(": ping\n\n"); } catch { /* fermé */ } }, 25_000);
+    req.raw.on("close", () => { clearInterval(ka); unsub(); });
+  });
+  app.get("/api/u/chats", { preHandler: requireWebUser }, async (req) => ({ chats: await chat.list(webUser(req).ext), online: [...chat.online()] }));
+  app.post("/api/u/chats", { preHandler: requireWebUser }, async (req) => chat.open(webUser(req).ext, req.body?.members, req.body?.name));
+  app.get("/api/u/chats/:id/messages", { preHandler: requireWebUser }, async (req) => chat.messages(webUser(req).ext, req.params.id, req.query?.before || null));
+  app.post("/api/u/chats/:id/messages", { preHandler: requireWebUser }, async (req) => chat.send(webUser(req).ext, req.params.id, req.body?.body));
+  app.post("/api/u/chats/:id/read", { preHandler: requireWebUser }, async (req) => chat.markRead(webUser(req).ext, req.params.id, req.body?.last));
+  app.put("/api/u/chats/:id", { preHandler: requireWebUser }, async (req) => chat.rename(webUser(req).ext, req.params.id, req.body?.name));
+  app.delete("/api/u/chats/:id/me", { preHandler: requireWebUser }, async (req) => chat.leave(webUser(req).ext, req.params.id));
   app.get("/api/u/team", { preHandler: requireWebUser }, async (req) => ({ contacts: await team(webUser(req).ext) }));
   app.put("/api/u/status", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);

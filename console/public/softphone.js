@@ -45,6 +45,8 @@ const I = {
   keypad: () => svg('<circle cx="6" cy="5" r="1.3"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="5" r="1.3"/><circle cx="6" cy="11" r="1.3"/><circle cx="12" cy="11" r="1.3"/><circle cx="18" cy="11" r="1.3"/><circle cx="6" cy="17" r="1.3"/><circle cx="12" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/><circle cx="12" cy="22" r="1.1"/>'),
   star: (on) => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>`,
   x: () => svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+  chat: () => svg('<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>'),
+  send: () => svg('<path d="M4 12 20 4l-6 16-3-7z"/>'),
   book: () => svg('<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c.6-1.8 2-2.6 3.5-2.6s2.9.8 3.5 2.6"/>'),
   back: () => svg('<path d="M15 5 8 12l7 7"/>'),
   search: () => svg('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>', 18),
@@ -171,6 +173,8 @@ async function start() {
   connect();
   refreshVoicemail();
   refreshCalls();
+  loadChats();
+  startEvents();
   loadDirectory().then(() => { if (page === "appels" || page === "contacts") renderPage(); });
   stopPolling();
   poll = setInterval(refreshTeam, 10_000);
@@ -191,8 +195,8 @@ async function refreshVoicemail() {
 }
 
 // ------------------------------------------------------------------ Coquille : menu, en-tête, panneaux
-const NAV = [["equipe", "Équipe", I.team], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { equipe: "Équipe", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages" };
+const NAV = [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
+const TITLES = { equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages" };
 
 function presenceOf(c) {
   if (!c.registered) return { cls: "off", label: "Hors ligne" };
@@ -250,7 +254,8 @@ function badges() {
   const seen = store.get(`callikoe_seen_${me.user.id}`, "");
   const missed = history().filter((h) => h.status === "missed" && h.at > seen).length;
   const nv = vmList.filter((m) => m.folder === "new").length;
-  for (const [k, n] of [["appels", page === "appels" ? 0 : missed], ["messagerie", nv]]) {
+  const unread = chats.reduce((n, c) => n + (c.unread || 0), 0);
+  for (const [k, n] of [["appels", page === "appels" ? 0 : missed], ["messagerie", nv], ["chat", unread]]) {
     const b = $(`#b-${k}`); b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n);
   }
 }
@@ -297,7 +302,7 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings })[page](el);
+  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings })[page](el);
 }
 
 // ------------------------------------------------------------------ Équipe
@@ -340,10 +345,11 @@ function drawTeam() {
       <div class="tname" title="${esc(c.name)}">${esc(c.name)}</div>
       <div class="text">${esc(c.id)}${c.devices?.length ? ` · <span class="devs-i">${c.devices.map((d) => I.device(d)).join("")}</span>` : ""}</div>
       <div class="tstat ${p.cls}">${p.label}</div>
-      <div class="tact"><button class="cbtn" data-call="${esc(c.id)}" title="Appeler ${esc(c.name)}">${I.phone()}</button></div>
+      <div class="tact"><button class="cbtn" data-call="${esc(c.id)}" title="Appeler ${esc(c.name)}">${I.phone()}</button><button class="cbtn chatb" data-chat="${esc(c.id)}" title="Écrire à ${esc(c.name)}">${I.chat()}</button></div>
     </div>`;
   }).join("") || (dialCard ? "" : `<div class="empty-st">${teamFilter === "fav" ? "Aucun favori : clique sur l'étoile d'un collègue pour l'ajouter." : "Aucun collègue trouvé."}</div>`));
   wireCalls(g);
+  $$("[data-chat]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); openChatWith([b.dataset.chat]); });
   $$("[data-fav]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); drawTeam(); });
 }
 function wireCalls(r) { $$("[data-call]", r).forEach((b) => b.onclick = (e) => { e.stopPropagation(); call(b.dataset.call); }); }
@@ -398,6 +404,131 @@ function drawCallDetail(all) {
 
 function statusText(h) {
   return { missed: "Manqué", failed: "Échec", voicemail: "Messagerie", answered_elsewhere: `Répondu par ${nameOf(h.answered_by) || h.answered_by}` }[h.status] || fmtDur(h.duration || 0);
+}
+
+// ------------------------------------------------------------------ Chat
+let chats = [], chatOnline = new Set(), chatSel = "", chatMsgs = [], chatReads = {}, es = null, newChat = false;
+async function loadChats() {
+  try { const r = await api("GET", "/api/u/chats"); chats = r.chats; chatOnline = new Set(r.online); } catch { return; }
+  badges();
+  if (page === "chat") drawChatList();
+}
+function startEvents() {
+  try { es?.close(); } catch { /* */ }
+  if (!window.EventSource) return;
+  es = new EventSource("/api/u/events");
+  es.addEventListener("message", (ev) => onChatMessage(JSON.parse(ev.data)));
+  es.addEventListener("read", (ev) => { const d = JSON.parse(ev.data); if (d.conv === chatSel) { chatReads[d.ext] = d.last_read; drawMsgs(false); } });
+  es.addEventListener("conv", () => loadChats());
+}
+const convName = (c) => c.kind === "group" ? (c.name || c.members.filter((x) => x !== me.user.id).map((x) => (nameOf(x) || x).split(" ")[0]).join(", ")) : (nameOf(c.members.find((x) => x !== me.user.id)) || c.members.find((x) => x !== me.user.id));
+const convOther = (c) => c.kind === "direct" ? contacts.find((x) => x.id === c.members.find((m) => m !== me.user.id)) : null;
+function onChatMessage(m) {
+  const c = chats.find((x) => x.id === m.conv);
+  if (!c) { loadChats(); }
+  else { c.last = { id: m.id, sender: m.sender, body: m.body, at: m.at }; c.updated_at = m.at; chats.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))); }
+  const visible = page === "chat" && chatSel === m.conv && !document.hidden;
+  if (visible) { chatMsgs.push(m); drawMsgs(true); if (m.sender !== me.user.id) api("POST", `/api/u/chats/${m.conv}/read`, { last: m.id }).catch(() => {}); }
+  else if (m.sender !== me.user.id && c) {
+    c.unread = (c.unread || 0) + 1;
+    const who = nameOf(m.sender) || m.sender;
+    if (!session) { const st = tone([[880, 1320], 90, 60000], "tones"); setTimeout(st, 120); }
+    if (document.hidden && window.Notification?.permission === "granted") { try { const n = new Notification(who, { body: m.body.slice(0, 120), tag: `chat-${m.conv}` }); n.onclick = () => { window.focus(); location.hash = "#/chat"; chatSel = m.conv; n.close(); }; } catch { /* */ } }
+    else if (page !== "chat") toast(`${who} : ${m.body.slice(0, 60)}`);
+  }
+  badges();
+  if (page === "chat") drawChatList();
+}
+async function openChatWith(members, name = "") {
+  try { const r = await api("POST", "/api/u/chats", { members, name }); chatSel = r.id; newChat = false; await loadChats(); location.hash = "#/chat"; if (page === "chat") renderPage(); }
+  catch (e) { toast(e.message, "bad"); }
+}
+function pageChat(el) {
+  el.innerHTML = `<div class="split chat ${chatSel || newChat ? "has-sel" : ""}">
+    <section class="panel listp"><div class="chat-head"><strong>Discussions</strong><button class="btn sm" id="newc">+ Nouvelle</button></div><ul class="rows" id="clist2"></ul></section>
+    <section class="panel detp chatp" id="chatp"></section></div>`;
+  $("#newc").onclick = () => { newChat = true; chatSel = ""; renderPage(); };
+  drawChatList();
+  if (newChat) return drawNewChat();
+  if (!chatSel) { $("#chatp").innerHTML = `<div class="empty-st">${chats.length ? "Choisis une discussion." : "Aucune discussion. Écris à un collègue avec « + Nouvelle » ou depuis l'onglet Équipe."}</div>`; return; }
+  openConv(chatSel);
+}
+function drawChatList() {
+  const ul = $("#clist2"); if (!ul) return;
+  ul.innerHTML = chats.map((c) => {
+    const o = convOther(c);
+    const pres = o ? presenceOf(o).cls : "";
+    const last = c.last ? `${c.last.sender === me.user.id ? "Vous : " : c.kind === "group" ? `${(nameOf(c.last.sender) || c.last.sender).split(" ")[0]} : ` : ""}${c.last.body}` : "Nouvelle discussion";
+    return `<li data-conv="${esc(c.id)}" class="${chatSel === c.id ? "sel" : ""}" style="cursor:pointer">${c.kind === "group" ? `<span class="av sm grp">${I.team()}</span>` : avatar(convName(c), pres, "sm")}
+      <span class="grow"><strong>${esc(convName(c))}</strong><span class="s ell">${esc(last)}</span></span>
+      <span class="cmeta"><span class="when">${c.last ? esc(fmtWhen(c.last.at).replace("Aujourd'hui ", "")) : ""}</span>${c.unread ? `<b class="ubadge">${c.unread}</b>` : ""}</span></li>`;
+  }).join("") || '<li class="empty-st">Aucune discussion.</li>';
+  $$("[data-conv]", ul).forEach((li) => li.onclick = () => { chatSel = li.dataset.conv; newChat = false; renderPage(); });
+}
+function drawNewChat() {
+  const picked = new Set();
+  $("#chatp").innerHTML = `<button class="ghost-ic back-m" id="cback2">${I.back()} Retour</button><h3 class="sec" style="margin-top:0">Nouvelle discussion</h3>
+    <label class="search" style="max-width:none">${I.search()}<input id="ncq" placeholder="Rechercher un collègue"></label>
+    <div class="nclist" id="ncl"></div>
+    <div id="ncname" hidden><label>Nom du groupe (facultatif)<input id="ncn" maxlength="60" placeholder="Ex. : Équipe commerciale"></label></div>
+    <div class="row-c" style="margin-top:12px"><button class="btn" id="ncgo" disabled>Démarrer</button><button class="btn ghost" id="ncx">Annuler</button></div>`;
+  const draw = () => {
+    const q = $("#ncq").value.toLowerCase();
+    $("#ncl").innerHTML = contacts.filter((c) => !q || `${c.id} ${c.name}`.toLowerCase().includes(q)).map((c) => `<label class="ncitem ${picked.has(c.id) ? "on" : ""}"><input type="checkbox" value="${esc(c.id)}" ${picked.has(c.id) ? "checked" : ""}>${avatar(c.name, presenceOf(c).cls, "sm")}<span class="grow"><strong>${esc(c.name)}</strong><span class="s">${esc(c.id)}</span></span></label>`).join("");
+    $$("#ncl input").forEach((i) => i.onchange = () => { i.checked ? picked.add(i.value) : picked.delete(i.value); i.closest(".ncitem").classList.toggle("on", i.checked); $("#ncgo").disabled = !picked.size; $("#ncname").hidden = picked.size < 2; $("#ncgo").textContent = picked.size > 1 ? `Créer le groupe (${picked.size + 1})` : "Démarrer"; });
+  };
+  $("#ncq").oninput = draw; draw();
+  $("#ncgo").onclick = () => openChatWith([...picked], $("#ncn").value);
+  $("#ncx").onclick = $("#cback2").onclick = () => { newChat = false; renderPage(); };
+}
+async function openConv(id) {
+  const c = chats.find((x) => x.id === id);
+  if (!c) { chatSel = ""; return renderPage(); }
+  const o = convOther(c);
+  $("#chatp").innerHTML = `<div class="chat-top"><button class="ghost-ic back-m" id="cback3">${I.back()}</button>
+      ${c.kind === "group" ? `<span class="av sm grp">${I.team()}</span>` : avatar(convName(c), o ? presenceOf(o).cls : "", "sm")}
+      <span class="grow"><strong>${esc(convName(c))}</strong><span class="s">${c.kind === "group" ? esc(c.members.map((x) => x === me.user.id ? "vous" : (nameOf(x) || x).split(" ")[0]).join(", ")) : o ? esc(presenceOf(o).label) : ""}</span></span>
+      ${o ? `<button class="cbtn" data-call="${esc(o.id)}" title="Appeler">${I.phone()}</button>` : ""}
+      ${c.kind === "group" ? '<button class="ghost-ic" id="cren" title="Renommer">✎</button><button class="ghost-ic" id="cleave" title="Quitter le groupe">⎋</button>' : ""}</div>
+    <div class="msgs" id="msgs"><div class="empty-st">Chargement…</div></div>
+    <form class="composer" id="compose"><textarea id="ctext" rows="1" placeholder="Écrire un message… (Entrée pour envoyer, Maj+Entrée pour aller à la ligne)"></textarea><button class="btn round sm" title="Envoyer">${I.send()}</button></form>`;
+  wireCalls($("#chatp"));
+  $("#cback3").onclick = () => { chatSel = ""; renderPage(); };
+  $("#cren")?.addEventListener("click", async () => { const n = prompt("Nom du groupe :", c.name || ""); if (n === null) return; await api("PUT", `/api/u/chats/${id}`, { name: n }); loadChats().then(() => renderPage()); });
+  $("#cleave")?.addEventListener("click", async () => { if (!confirm("Quitter ce groupe ?")) return; await api("DELETE", `/api/u/chats/${id}/me`); chatSel = ""; loadChats().then(() => renderPage()); });
+  const ta = $("#ctext");
+  ta.oninput = () => { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`; };
+  ta.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#compose").requestSubmit(); } };
+  $("#compose").onsubmit = async (e) => {
+    e.preventDefault();
+    const body = ta.value.trim(); if (!body) return;
+    ta.value = ""; ta.oninput();
+    try { await api("POST", `/api/u/chats/${id}/messages`, { body }); } catch (err) { toast(err.message, "bad"); ta.value = body; }
+  };
+  try { const r = await api("GET", `/api/u/chats/${id}/messages`); chatMsgs = r.messages; chatReads = r.reads; } catch (e) { $("#msgs").innerHTML = `<div class="empty-st">${esc(e.message)}</div>`; return; }
+  if (chatSel !== id) return;
+  drawMsgs(true);
+  ta.focus();
+  const last = chatMsgs.at(-1);
+  if (last && c.unread) { c.unread = 0; badges(); drawChatList(); api("POST", `/api/u/chats/${id}/read`, { last: last.id }).catch(() => {}); }
+}
+function drawMsgs(scroll) {
+  const box = $("#msgs"); if (!box) return;
+  const c = chats.find((x) => x.id === chatSel);
+  const others = (c?.members || []).filter((x) => x !== me.user.id);
+  let lastDay = "", html = "";
+  const myLast = [...chatMsgs].reverse().find((m) => m.sender === me.user.id);
+  const seen = myLast && others.length && others.every((x) => Number(chatReads[x] || 0) >= Number(myLast.id));
+  chatMsgs.forEach((m, i) => {
+    const d = new Date(m.at); const day = d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+    if (day !== lastDay) { html += `<div class="dsep"><span>${esc(day)}</span></div>`; lastDay = day; }
+    const mine = m.sender === me.user.id, prev = chatMsgs[i - 1];
+    const showName = !mine && c?.kind === "group" && (!prev || prev.sender !== m.sender);
+    html += `<div class="msg ${mine ? "me" : ""}">${showName ? `<span class="mn">${esc(nameOf(m.sender) || m.sender)}</span>` : ""}<div class="bub">${esc(m.body).replace(/\n/g, "<br>").replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')}</div>
+      <span class="mt">${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}${mine && m === myLast && seen ? " · Vu" : ""}</span></div>`;
+  });
+  box.innerHTML = html || '<div class="empty-st">Aucun message : dis bonjour 👋</div>';
+  if (scroll) box.scrollTop = box.scrollHeight;
 }
 
 // ------------------------------------------------------------------ Contacts (collègues + annuaire de l'entreprise)
@@ -896,5 +1027,9 @@ function addEyes() {
 }
 
 window.addEventListener("beforeunload", (e) => { if (session) { e.preventDefault(); e.returnValue = ""; } });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && me && $("#page")) refreshTeam(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !me || !$("#page")) return;
+  refreshTeam();
+  if (page === "chat" && chatSel) { const c = chats.find((x) => x.id === chatSel); const last = chatMsgs.at(-1); if (c?.unread && last) { c.unread = 0; badges(); drawChatList(); api("POST", `/api/u/chats/${chatSel}/read`, { last: last.id }).catch(() => {}); } }
+});
 start();
