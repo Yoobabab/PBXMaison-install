@@ -28,6 +28,30 @@ with sync_playwright() as p:
         log(f"✔ Softphone web {ext} enregistré sur le PBX (WebSocket via Nginx)")
         pages[ext] = pg
     a, b = pages[a_ext], pages[b_ext]
+    if mode == "video":
+        vstate = """() => { const v=[...document.querySelectorAll('#vgrid video')]; return v.map(x => x.videoWidth); }"""
+        a.click(f".tcard[data-id='{b_ext}'] [data-vcall]")
+        b.wait_for_selector("#answerv", timeout=20000)
+        log(f"✔ Appel vidéo {a_ext} → {b_ext} : bouton « répondre en vidéo » proposé")
+        b.click("#answerv")
+        a.wait_for_function("[...document.querySelectorAll('#vgrid video')].some(v => v.videoWidth > 0)", timeout=20000)
+        b.wait_for_function("[...document.querySelectorAll('#vgrid video')].some(v => v.videoWidth > 0)", timeout=20000)
+        log(f"✔ Vidéo reçue des deux côtés ({a.evaluate(vstate)} / {b.evaluate(vstate)} px de large)")
+        shot(a, "7-appel-video")
+        a.click("#hang"); b.wait_for_selector("#dial", timeout=15000); a.wait_for_timeout(1500)
+        # Réunion vidéo (ConfBridge en SFU) : les deux rejoignent la salle 500
+        for pg in (a, b):
+            pg.goto(f"{base}/softphone#/equipe"); pg.wait_for_selector("#reg.on", timeout=20000)
+            pg.click("[data-room='500']")
+            pg.wait_for_selector("#dur", timeout=20000)
+        a.wait_for_function("[...document.querySelectorAll('#vgrid video')].some(v => v.videoWidth > 0)", timeout=30000)
+        b.wait_for_function("[...document.querySelectorAll('#vgrid video')].some(v => v.videoWidth > 0)", timeout=30000)
+        log(f"✔ Réunion 500 : chacun voit la vidéo de l'autre ({a.evaluate(vstate)} / {b.evaluate(vstate)})")
+        shot(a, "8-reunion")
+        a.click("#hang"); b.click("#hang"); a.wait_for_timeout(1000)
+        log("✔ Vidéo OK")
+        browser.close()
+        sys.exit(0)
     if mode == "callflow":
         def call_and_answer(number, dtmf=None, label=""):
             a.click("#opendial"); a.fill("#num", number); a.click("#dial")

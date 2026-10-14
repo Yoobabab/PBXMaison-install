@@ -45,6 +45,9 @@ const I = {
   keypad: () => svg('<circle cx="6" cy="5" r="1.3"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="5" r="1.3"/><circle cx="6" cy="11" r="1.3"/><circle cx="12" cy="11" r="1.3"/><circle cx="18" cy="11" r="1.3"/><circle cx="6" cy="17" r="1.3"/><circle cx="12" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/><circle cx="12" cy="22" r="1.1"/>'),
   star: (on) => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>`,
   x: () => svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+  video: (s) => svg('<rect x="3" y="6.5" width="12.5" height="11" rx="2"/><path d="m15.5 10.5 5.5-3v9l-5.5-3"/>', s || 20),
+  videooff: () => svg('<path d="M3 3l18 18M15.5 12.5V8.5a2 2 0 0 0-2-2H8M5 6.5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8.5a2 2 0 0 0 1.6-.8M15.5 10.5l5.5-3v9"/>'),
+  full: () => svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
   chat: () => svg('<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>'),
   send: () => svg('<path d="M4 12 20 4l-6 16-3-7z"/>'),
   book: () => svg('<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c.6-1.8 2-2.6 3.5-2.6s2.9.8 3.5 2.6"/>'),
@@ -312,7 +315,9 @@ function pageTeam(el) {
       <label class="search">${I.search()}<input id="tq" type="search" placeholder="Rechercher un collègue, ou taper un numéro puis Entrée" autocomplete="off"></label>
       <div class="chips-f">${[["all", "Tous"], ["fav", "Favoris"], ["online", "En ligne"]].map(([k, l]) => `<button class="chipf ${teamFilter === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
     </div>
+    ${(me.rooms || []).length ? `<div class="rooms"><span class="s">Réunions</span>${me.rooms.map((r) => `<button class="room" data-room="${esc(r.number)}" title="Rejoindre en vidéo${r.pin ? " (code PIN demandé)" : ""}">${I.video(18)}<span><strong>${esc(r.name)}</strong><span class="s">${esc(r.number)}${r.pin ? " · PIN" : ""}</span></span></button>`).join("")}</div>` : ""}
     <div class="tgrid" id="tgrid"></div>`;
+  $$("[data-room]", el).forEach((b) => b.onclick = () => call(b.dataset.room, { video: true }));
   const q = $("#tq");
   q.oninput = drawTeam;
   q.onkeydown = (e) => {
@@ -345,11 +350,12 @@ function drawTeam() {
       <div class="tname" title="${esc(c.name)}">${esc(c.name)}</div>
       <div class="text">${esc(c.id)}${c.devices?.length ? ` · <span class="devs-i">${c.devices.map((d) => I.device(d)).join("")}</span>` : ""}</div>
       <div class="tstat ${p.cls}">${p.label}</div>
-      <div class="tact"><button class="cbtn" data-call="${esc(c.id)}" title="Appeler ${esc(c.name)}">${I.phone()}</button><button class="cbtn chatb" data-chat="${esc(c.id)}" title="Écrire à ${esc(c.name)}">${I.chat()}</button></div>
+      <div class="tact"><button class="cbtn" data-call="${esc(c.id)}" title="Appeler ${esc(c.name)}">${I.phone()}</button><button class="cbtn vidb" data-vcall="${esc(c.id)}" title="Appel vidéo">${I.video(18)}</button><button class="cbtn chatb" data-chat="${esc(c.id)}" title="Écrire à ${esc(c.name)}">${I.chat()}</button></div>
     </div>`;
   }).join("") || (dialCard ? "" : `<div class="empty-st">${teamFilter === "fav" ? "Aucun favori : clique sur l'étoile d'un collègue pour l'ajouter." : "Aucun collègue trouvé."}</div>`));
   wireCalls(g);
   $$("[data-chat]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); openChatWith([b.dataset.chat]); });
+  $$("[data-vcall]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); call(b.dataset.vcall, { video: true }); });
   $$("[data-fav]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); drawTeam(); });
 }
 function wireCalls(r) { $$("[data-call]", r).forEach((b) => b.onclick = (e) => { e.stopPropagation(); call(b.dataset.call); }); }
@@ -846,12 +852,17 @@ function callState() {
 function renderInCall(d) {
   const est = session.isEstablished(), held = session.isOnHold().local, muted = session.isMuted().audio;
   const label = callInfo.name || fmtNum(callInfo.number);
-  d.innerHTML = `<div class="dr-head"><strong>Appel</strong><button class="ghost-ic" id="drclose" title="Réduire">${I.x()}</button></div>
+  const vid = !!(callInfo.video || remoteVideo.size), camOff = session.isMuted().video;
+  $("#drawer").classList.toggle("wide", vid);
+  d.innerHTML = `<div class="dr-head"><strong>${vid ? "Appel vidéo" : "Appel"}</strong><button class="ghost-ic" id="drclose" title="Réduire">${I.x()}</button></div>
     <div class="dr-body">
-      <div class="sp-call">${avatar(callInfo.name || callInfo.number, "", "xl")}
+      ${vid ? `<div class="vstage" id="vstage"><div class="vgrid empty" id="vgrid"></div><video id="vlocal" autoplay playsinline muted></video>
+        <div class="vcap"><strong>${esc(label)}</strong> · <span class="cstate">${callState()}</span></div></div>` : `<div class="sp-call">${avatar(callInfo.name || callInfo.number, "", "xl")}
         <div class="cname">${esc(label)}</div>${callInfo.name ? `<div class="s">${esc(fmtNum(callInfo.number))}</div>` : ""}
-        <div class="cstate">${callState()}</div></div>
-      <div class="sp-incall">
+        <div class="cstate">${callState()}</div></div>`}
+      <div class="sp-incall ${vid ? "v" : ""}">
+        ${vid ? `<button class="opt ${camOff ? "on" : ""}" id="cam" ${est ? "" : "disabled"}>${camOff ? I.videooff() : I.video()}<span>${camOff ? "Caméra coupée" : "Caméra"}</span></button>
+        <button class="opt" id="fs">${I.full()}<span>Plein écran</span></button>` : ""}
         <button class="opt ${muted ? "on" : ""}" id="mute">${muted ? I.micoff() : I.mic()}<span>${muted ? "Micro coupé" : "Muet"}</span></button>
         <button class="opt ${held ? "on" : ""}" id="hold" ${est ? "" : "disabled"}>${I.pause()}<span>${held ? "Reprendre" : "Attente"}</span></button>
         <button class="opt" id="kp" ${est ? "" : "disabled"}>${I.keypad()}<span>Clavier</span></button>
@@ -866,6 +877,9 @@ function renderInCall(d) {
     </div>`;
   $("#drclose").onclick = () => openDrawer(false);
   $("#hang").onclick = hangup;
+  $("#cam")?.addEventListener("click", () => { camOff ? session.unmute({ video: true }) : session.mute({ video: true }); renderDrawer(); });
+  $("#fs")?.addEventListener("click", () => { const v = $("#vstage"); document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen?.().catch(() => {}); });
+  if (vid) drawVideos();
   $("#mute").onclick = () => { muted ? session.unmute({ audio: true }) : session.mute({ audio: true }); renderDrawer(); renderCallbar(); };
   $("#hold").onclick = () => { held ? session.unhold() : session.hold(); setTimeout(() => { renderDrawer(); renderCallbar(); }, 300); };
   $("#kp").onclick = () => { $("#dtmf").hidden = !$("#dtmf").hidden; $("#xferbox").hidden = true; };
@@ -930,7 +944,8 @@ function connect() {
     const remote = s.remote_identity;
     callInfo = originator === "remote"
       ? { direction: "in", number: remote.uri.user, name: remote.display_name || nameOf(remote.uri.user) }
-      : { direction: "out", number: callInfo?.number || remote.uri.user, name: nameOf(callInfo?.number || remote.uri.user) };
+      : { direction: "out", number: callInfo?.number || remote.uri.user, name: nameOf(callInfo?.number || remote.uri.user) || roomName(callInfo?.number), video: !!callInfo?.video };
+    if (originator === "remote") callInfo.offerVideo = /\bm=video [1-9]/.test(String(s._request?.body || ""));
     s.on("peerconnection", (e) => hookAudio(e.peerconnection));
     s.on("icecandidate", (e) => { if (e.candidate.type === "srflx" || e.candidate.type === "relay") e.ready(); });
     s.on("progress", () => { if (callInfo.direction === "out") { callInfo.ringing = true; stopTone?.(); stopTone = tone(RINGBACK, "tones"); renderDrawer(); renderCallbar(); } });
@@ -952,24 +967,61 @@ function connect() {
   ua.start();
 }
 
+function roomName(num) { const r = (me?.rooms || []).find((x) => x.number === num); return r ? `Réunion ${r.name}` : ""; }
 function nameOf(num) { return contacts.find((c) => c.id === num)?.name || (num === me.user.id ? me.user.name : "") || dirByNumber(num)?.name || ""; }
 
+// Médias distants : l'audio va dans <audio id=remote>, chaque flux vidéo (1 en appel, plusieurs en réunion) dans une vignette
+let remoteAudio = null;
+const remoteVideo = new Map();
 function hookAudio(pc) {
-  pc.addEventListener("track", (ev) => { const a = $("#remote"); a.srcObject = ev.streams[0]; a.play().catch(() => {}); });
+  if (pc._callikoe) return; pc._callikoe = true;
+  pc.addEventListener("track", (ev) => {
+    if (ev.track.kind === "audio") {
+      remoteAudio ||= new MediaStream();
+      if (!remoteAudio.getTracks().includes(ev.track)) remoteAudio.addTrack(ev.track);
+      const a = $("#remote"); a.srcObject = remoteAudio; a.play().catch(() => {});
+      return;
+    }
+    const st = ev.streams[0] || new MediaStream([ev.track]);
+    const drop = () => { if (!st.getVideoTracks().some((t) => t.readyState === "live" && !t.muted)) { remoteVideo.delete(st.id); drawVideos(); } };
+    remoteVideo.set(st.id, st);
+    ev.track.addEventListener("ended", drop); ev.track.addEventListener("mute", drop);
+    ev.track.addEventListener("unmute", () => { remoteVideo.set(st.id, st); drawVideos(); });
+    st.addEventListener("removetrack", drop);
+    if (callInfo) callInfo.video = true;
+    if (session) { renderDrawer(); }
+  });
 }
+function localVideoStream() {
+  const t = session?.connection?.getSenders().map((x) => x.track).find((x) => x?.kind === "video");
+  return t ? new MediaStream([t]) : null;
+}
+function drawVideos() {
+  const g = $("#vgrid"); if (!g) return;
+  const live = [...remoteVideo.values()].filter((s) => s.getVideoTracks().some((t) => t.readyState === "live"));
+  g.dataset.n = String(Math.min(live.length, 9));
+  const have = new Set([...g.querySelectorAll("video")].map((v) => v.dataset.sid));
+  for (const v of g.querySelectorAll("video")) if (!live.some((s) => s.id === v.dataset.sid)) v.remove();
+  for (const s of live) if (!have.has(s.id)) { const v = document.createElement("video"); v.autoplay = true; v.playsInline = true; v.muted = true; v.dataset.sid = s.id; v.srcObject = s; g.append(v); v.play().catch(() => {}); }
+  g.classList.toggle("empty", !live.length);
+  const lv = $("#vlocal"); const ls = localVideoStream();
+  if (lv && ls && lv.srcObject?.getVideoTracks()[0] !== ls.getVideoTracks()[0]) { lv.srcObject = ls; lv.play().catch(() => {}); }
+  if (lv) lv.hidden = !ls || session?.isMuted().video;
+}
+const videoConstraint = () => ({ width: { ideal: 1280 }, height: { ideal: 720 } });
 
-function call(raw) {
+function call(raw, { video = false } = {}) {
   const num = clean(raw);
   if (!num) return;
   if (session) return toast("Un appel est déjà en cours.", "bad");
   if (!ua || regState !== "on") return toast("Le softphone n'est pas connecté au PBX.", "bad");
   audioReady();
-  callInfo = { direction: "out", number: num, name: nameOf(num) };
+  callInfo = { direction: "out", number: num, name: nameOf(num) || roomName(num), video };
   try {
     const s = ua.call(`sip:${num}@${me.sip.domain}`, {
-      mediaConstraints: { audio: micConstraint(), video: false },
-      pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] },
-      rtcOfferConstraints: { offerToReceiveAudio: true, offerToReceiveVideo: false },
+      mediaConstraints: { audio: micConstraint(), video: video ? videoConstraint() : false },
+      pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }], bundlePolicy: "max-bundle" },
+      rtcOfferConstraints: { offerToReceiveAudio: true, offerToReceiveVideo: video },
     });
     if (s.connection) hookAudio(s.connection);
   } catch (e) { toast(`Appel impossible : ${e.message}`, "bad"); callInfo = null; }
@@ -986,7 +1038,8 @@ function finish(status, cause) {
   if (callInfo) addHistory({ direction: callInfo.direction, number: callInfo.number, name: callInfo.name, status, at: new Date().toISOString(), duration: startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0 });
   const msg = status === "failed" && cause && !["Canceled", "Terminated"].includes(cause) ? ({ Busy: "Occupé", Rejected: "Refusé", Unavailable: "Indisponible", "Not Found": "Numéro inconnu", "User Denied Media Access": "Accès au micro refusé" }[cause] || cause) : "";
   const wasIncomingMissed = status === "missed";
-  session = null; callInfo = null; startedAt = 0;
+  session = null; callInfo = null; startedAt = 0; remoteVideo.clear(); remoteAudio = null;
+  $("#drawer")?.classList.remove("wide");
   renderDrawer(); renderCallbar();
   if (msg) { toast(`Appel terminé : ${msg}`, "bad"); const h = $("#dhint"); if (h) { h.textContent = `Appel terminé : ${msg}`; h.classList.add("err"); } }
   if (!msg && !wasIncomingMissed && drawerOpen) setTimeout(() => { if (!session) openDrawer(false); }, 1200);
@@ -1004,12 +1057,15 @@ function showIncoming() {
     try { notif = new Notification("Appel entrant", { body: `${label}${callInfo.name ? ` (${fmtNum(callInfo.number)})` : ""}`, tag: "callikoe-call", requireInteraction: true }); notif.onclick = () => { window.focus(); notif.close(); }; } catch { /* */ }
   }
   $("#incoming").innerHTML = `<div class="sp-incoming panel">${avatar(callInfo.name || callInfo.number, "", "")}
-    <div class="grow"><div class="s">Appel entrant</div><div class="cname">${esc(label)}</div>${callInfo.name ? `<div class="s">${esc(fmtNum(callInfo.number))}</div>` : ""}</div>
-    <div class="row"><button class="btn round hang" id="decline" title="Refuser">${I.phone(22)}</button><button class="btn round call" id="answer" title="Répondre">${I.phone(22)}</button></div></div>`;
-  $("#answer").onclick = () => {
-    try { session.answer({ mediaConstraints: { audio: micConstraint(), video: false }, pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] } }); }
+    <div class="grow"><div class="s">${callInfo.offerVideo ? "Appel vidéo entrant" : "Appel entrant"}</div><div class="cname">${esc(label)}</div>${callInfo.name ? `<div class="s">${esc(fmtNum(callInfo.number))}</div>` : ""}</div>
+    <div class="row"><button class="btn round hang" id="decline" title="Refuser">${I.phone(22)}</button>${callInfo.offerVideo ? `<button class="btn round call" id="answerv" title="Répondre en vidéo">${I.video(22)}</button>` : ""}<button class="btn round call" id="answer" title="Répondre">${I.phone(22)}</button></div></div>`;
+  const answer = (video) => {
+    callInfo.video = video;
+    try { session.answer({ mediaConstraints: { audio: micConstraint(), video: video ? videoConstraint() : false }, pcConfig: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }], bundlePolicy: "max-bundle" } }); }
     catch (e) { toast(`Impossible de répondre : ${e.message}`, "bad"); }
   };
+  $("#answer").onclick = () => answer(false);
+  $("#answerv")?.addEventListener("click", () => answer(true));
   $("#decline").onclick = () => { try { session.terminate({ status_code: 486 }); } catch { /* */ } };
   renderCallbar();
 }

@@ -10,19 +10,19 @@ import { UserError, STATUSES, displayName, nationalNumber, ringsForGroups } from
 
 export const KINDS = {
   group: "Groupe d'appel", queue: "File d'attente", ivr: "SVI (standard automatique)", groupvm: "Messagerie de groupe",
-  schedule: "Horaires", rule: "Règle entrante", prompt: "Annonce", flow: "Routage",
+  schedule: "Horaires", rule: "Règle entrante", prompt: "Annonce", flow: "Routage", conf: "Salle de réunion",
 };
 /** Étapes d'un routage (éditeur visuel / description en texte), enchaînées de gauche à droite. */
 export const STEP_TYPES = {
   ring: "Faire sonner des utilisateurs", group: "Groupe d'appel", queue: "File d'attente", prompt: "Lire une annonce",
   ivr: "Répondeur numérique (SVI)", user: "Utilisateur (avec ses renvois)", user_vm: "Boîte vocale d'un utilisateur",
-  groupvm: "Boîte vocale de groupe", external: "Numéro externe", hangup: "Terminer l'appel",
+  groupvm: "Boîte vocale de groupe", conf: "Salle de réunion", external: "Numéro externe", hangup: "Terminer l'appel",
 };
 /** Étapes après lesquelles rien ne peut suivre (l'appel ne revient pas). */
-export const TERMINAL_STEPS = ["ivr", "user", "user_vm", "groupvm", "external", "hangup"];
+export const TERMINAL_STEPS = ["ivr", "user", "user_vm", "groupvm", "conf", "external", "hangup"];
 export const BRANCHES = { open: "Heures d'ouverture", closed: "Bureau fermé", break: "Pause", holiday: "Jour férié / congés" };
 /** Objets qui ont un numéro interne (composable depuis un poste). */
-export const NUMBERED = ["group", "queue", "ivr", "groupvm"];
+export const NUMBERED = ["group", "queue", "ivr", "groupvm", "conf"];
 export const DEST_TYPES = {
   hangup: "Terminer l'appel", user: "Utilisateur", user_vm: "Boîte vocale d'un utilisateur", group: "Groupe d'appel",
   ivr: "Répondeur numérique (SVI)", queue: "File d'attente", groupvm: "Boîte vocale de groupe",
@@ -61,6 +61,7 @@ export function defaultObject(kind) {
       announce_position: true, announce_holdtime: false, greeting: "", moh: "", periodic: [], periodic_freq: 30, no_answer: hang, ...OFFICE };
     case "ivr": return { name: "", number: "", prompt: "", timeout: 5, retries: 2, direct_dial: true, options: {}, invalid: hang, ...OFFICE };
     case "groupvm": return { name: "", number: "", pin: "", members: [] };
+    case "conf": return { name: "", number: "", pin: "", max_members: 20, video: true };
     case "schedule": return { name: "", week: Object.fromEntries(DAYS.map(([d]) => [d, ["mon", "tue", "wed", "thu", "fri"].includes(d) ? [["09:00", "12:00"], ["14:00", "18:00"]] : []])),
       holidays_fr: true, holidays: [], override: "auto" };
     case "rule": return { name: "", dids: [], is_default: false, schedule: "", open: hang, closed: hang, break: null, holiday: null };
@@ -197,6 +198,14 @@ export function validateObject(kind, input, current, ctx) {
       d.options = opts;
     }
     if (input.invalid !== undefined) d.invalid = validateDest(input.invalid, ctx, "invalid");
+  } else if (kind === "conf") {
+    if (input.pin !== undefined) {
+      const pin = String(input.pin).trim();
+      if (pin && !/^\d{4,8}$/.test(pin)) throw new UserError("Code PIN : 4 à 8 chiffres (ou vide).", "pin");
+      d.pin = pin;
+    }
+    d.max_members = int(input.max_members, 2, 100, d.max_members, "Participants maximum", "max_members");
+    if (input.video !== undefined) d.video = !!input.video;
   } else if (kind === "groupvm") {
     if (input.pin !== undefined) {
       const pin = String(input.pin).trim();
@@ -519,6 +528,13 @@ export function buildCallflowDialplan(m) {
     hopGuard(L);
     const tails = officeGate(L, o, m);
     L.push(` same => n,Goto(ivr-${o.number},s,1)`, ` same => n(loop),Log(WARNING,Boucle de renvois détectée : SVI ${o.number})`, " same => n,Hangup()", ...tails);
+  }
+  for (const o of byKind(m.objects, "conf")) {
+    // Salle de réunion : audio pour les téléphones, vidéo (SFU) pour les softphones web
+    L.push(`; ---- Réunion ${o.number} ${nameOf(o)}`, `exten => ${o.number},1,NoOp(Réunion ${o.number} ${nameOf(o)})`, " same => n,Set(CDR(dest_kind)=conf)", " same => n,Answer()");
+    if (o.data.pin) L.push(` same => n,Authenticate(${o.data.pin})`);
+    L.push(` same => n,Set(CONFBRIDGE(bridge,max_members)=${o.data.max_members})`, ` same => n,Set(CONFBRIDGE(bridge,video_mode)=${o.data.video ? "sfu" : "none"})`,
+      ` same => n,ConfBridge(conf-${o.number},callikoe_bridge,callikoe_user,callikoe_menu)`, " same => n,Hangup()");
   }
   for (const o of byKind(m.objects, "groupvm")) {
     L.push(`; ---- Messagerie de groupe ${o.number} ${nameOf(o)}`, `exten => ${o.number},1,NoOp(Messagerie de groupe ${o.number})`,
@@ -968,6 +984,7 @@ function expandObjectBody(o, m, path, depth) {
       nd.children.push({ label: `Aucun choix (${d.timeout} s) ou erreur, après ${d.retries} répétition${d.retries > 1 ? "s" : ""}`, node: expand(d.invalid, m, path, depth + 1) });
       return nd;
     }
+    case "conf": return node("conf", `Salle de réunion ${o.number} · ${d.name}`, { detail: [`${d.max_members} participants max${d.pin ? " · code PIN" : ""}${d.video ? " · vidéo depuis le softphone web" : ""}`] });
     case "groupvm": return node("voicemail", `Messagerie de groupe ${o.number} · ${d.name}`, { detail: [`Voyant chez : ${d.members.join(", ") || "personne"}`] });
     default: return node("none", d.name);
   }

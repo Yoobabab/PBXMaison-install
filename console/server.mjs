@@ -282,6 +282,7 @@ export async function buildApp({ db, ami } = {}) {
         secure: https || /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) },
       server: { host: sipServer().host, voicemail: "*97" },
       contacts: await team(u.id),
+      rooms: (await pbx.listObjects("conf")).map((o) => ({ number: o.number, name: o.name, pin: !!o.data.pin })),
     };
   });
   app.get("/api/u/calls", { preHandler: requireWebUser }, async (req) => ({ calls: await pbx.userCalls(webUser(req).ext, 150) }));

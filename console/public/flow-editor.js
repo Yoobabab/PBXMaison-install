@@ -4,14 +4,14 @@ const esc = (v) => h.esc(v);
 const fmtP = (n) => /^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "");
 const objs = (kind) => cf.objects.filter((o) => o.kind === kind);
 const userName = (id) => cf.users.find((u) => u.id === id)?.name || id;
-const ICON = { did: "☎", schedule: "🕘", ring: "🔔", group: "👥", queue: "⏳", prompt: "🔊", ivr: "☰", user: "👤", user_vm: "✉", groupvm: "📮", external: "↗", hangup: "✕" };
+const ICON = { conf: "🎥", did: "☎", schedule: "🕘", ring: "🔔", group: "👥", queue: "⏳", prompt: "🔊", ivr: "☰", user: "👤", user_vm: "✉", groupvm: "📮", external: "↗", hangup: "✕" };
 const PALETTE = [
   ["Entrée", [["did", "SDA (numéro appelé)"], ["schedule", "Horaires"]]],
   ["Étapes (l'appel continue si personne ne répond)", [["ring", "Faire sonner des utilisateurs"], ["group", "Groupe d'appel"], ["queue", "File d'attente"], ["prompt", "Lire une annonce"]]],
-  ["Fin du routage", [["user_vm", "Boîte vocale d'un utilisateur"], ["groupvm", "Boîte vocale de groupe"], ["ivr", "Répondeur numérique (SVI)"], ["user", "Utilisateur (avec ses renvois)"], ["external", "Numéro externe"], ["hangup", "Terminer l'appel"]]],
+  ["Fin du routage", [["user_vm", "Boîte vocale d'un utilisateur"], ["groupvm", "Boîte vocale de groupe"], ["ivr", "Répondeur numérique (SVI)"], ["conf", "Salle de réunion"], ["user", "Utilisateur (avec ses renvois)"], ["external", "Numéro externe"], ["hangup", "Terminer l'appel"]]],
 ];
-const SHORT = { ring: "Sonnerie", group: "Groupe d'appel", queue: "File d'attente", prompt: "Annonce", ivr: "SVI", user: "Utilisateur", user_vm: "Boîte vocale", groupvm: "Boîte de groupe", external: "Numéro externe", hangup: "Fin de l'appel" };
-const TERMINAL = ["ivr", "user", "user_vm", "groupvm", "external", "hangup"];
+const SHORT = { conf: "Réunion", ring: "Sonnerie", group: "Groupe d'appel", queue: "File d'attente", prompt: "Annonce", ivr: "SVI", user: "Utilisateur", user_vm: "Boîte vocale", groupvm: "Boîte de groupe", external: "Numéro externe", hangup: "Fin de l'appel" };
+const TERMINAL = ["ivr", "user", "user_vm", "groupvm", "conf", "external", "hangup"];
 const BR = { open: "Heures d'ouverture", closed: "Bureau fermé", break: "Pause", holiday: "Jour férié / congés" };
 
 let flow = null, sel = null, activeRow = "open", errAt = null, cur = null;
@@ -118,6 +118,7 @@ function describe(st) {
     case "group": { const g = o("group", st.target); return g ? `${g.number} · ${g.name} · ${st.time || g.data.ring_time} s` : "Choisis le groupe"; }
     case "queue": { const q = o("queue", st.target); return q ? `${q.number} · ${q.name}` : "Choisis la file"; }
     case "ivr": { const q = o("ivr", st.target); return q ? `${q.number} · ${q.name}` : "Choisis le SVI"; }
+    case "conf": { const q = o("conf", st.target); return q ? `${q.number} · ${q.name}` : "Choisis la salle"; }
     case "prompt": return o("prompt", st.target)?.name || "Choisis l'annonce";
     case "groupvm": { const q = o("groupvm", st.target); return q ? `${q.number} · ${q.name}` : "Choisis la boîte"; }
     case "user": case "user_vm": return st.target ? `${st.target} · ${userName(st.target)}` : "Choisis l'utilisateur";
@@ -172,7 +173,7 @@ function addNew(type, b, at) {
   if (type === "schedule") { h.$("#fsched").focus(); return; }
   if (!flow.branches[b]) flow.branches[b] = [];
   const st = { type, ...(type === "ring" ? { users: [], strategy: "all", time: 20 } : type === "group" ? { target: objs("group")[0]?.id || "", time: null } : type === "hangup" ? {} : { target: "" }) };
-  if (["queue", "ivr", "prompt", "groupvm"].includes(type) && objs(type).length === 1) st.target = objs(type)[0].id;
+  if (["queue", "ivr", "prompt", "groupvm", "conf"].includes(type) && objs(type).length === 1) st.target = objs(type)[0].id;
   flow.branches[b].splice(at, 0, st);
   sel = { b, i: at }; activeRow = b; errAt = null; draw(); panel();
 }
@@ -186,7 +187,7 @@ function panel() {
   const opt = (list, v, empty) => `<option value="">${esc(empty)}</option>${list.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("")}`;
   const objOpts = (kind) => objs(kind).map((o) => [o.id, `${o.number ? o.number + " · " : ""}${o.name}`]);
   const users = cf.users.map((u) => [u.id, `${u.id} · ${u.name}`]);
-  const create = { group: "groupes", queue: "files", ivr: "svi", groupvm: "messageries", prompt: "annonces" }[st.type];
+  const create = { group: "groupes", queue: "files", ivr: "svi", groupvm: "messageries", conf: "reunions", prompt: "annonces" }[st.type];
   let body = "";
   if (st.type === "ring") {
     body = `<span class="dl">Qui sonne ?</span><div class="chips fe-uchips">${cf.users.map((u) => `<button type="button" class="chip ${st.users.includes(u.id) ? "on" : ""}" data-u="${esc(u.id)}">${esc(u.id)} · ${esc(u.name)}</button>`).join("")}</div>
@@ -197,7 +198,7 @@ function panel() {
     body = `<label>Groupe d'appel<select data-f="target">${opt(objOpts("group"), st.target, "— Choisir —")}</select></label>
       <label>Durée de sonnerie (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || "")}" placeholder="Celle du groupe (${esc(objs("group").find((g) => g.id === st.target)?.data.ring_time ?? 20)} s)"></label>
       ${st.target ? `<p><a href="#/gestion/groupes/${esc(st.target)}">Modifier les membres du groupe</a></p>` : ""}`;
-  } else if (["queue", "ivr", "groupvm", "prompt"].includes(st.type)) {
+  } else if (["queue", "ivr", "groupvm", "conf", "prompt"].includes(st.type)) {
     body = `<label>${esc(cf.options.step_types[st.type])}<select data-f="target">${opt(objOpts(st.type), st.target, "— Choisir —")}</select></label>
       ${st.type === "prompt" && st.target ? `<audio controls src="/api/prompts/${esc(st.target)}/audio"></audio>` : ""}`;
   } else if (st.type === "user" || st.type === "user_vm") {

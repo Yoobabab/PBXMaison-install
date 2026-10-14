@@ -3,9 +3,9 @@
 import { renderFlowEditor, flowSummary } from "./flow-editor.js";
 let h = null;
 const TABS = [["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
-  ["svi", "SVI", "ivr"], ["messageries", "Messageries de groupe", "groupvm"], ["annonces", "Annonces", "prompt"], ["traceur", "Traceur", ""], ["renvois", "Où sont les renvois ?", ""]];
+  ["svi", "SVI", "ivr"], ["messageries", "Messageries de groupe", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["traceur", "Traceur", ""], ["renvois", "Où sont les renvois ?", ""]];
 const KIND_TAB = Object.fromEntries(TABS.filter((t) => t[2]).map(([s, , k]) => [k, s]));
-const RANGES = { group: 600, queue: 700, ivr: 800, groupvm: 900 };
+const RANGES = { group: 600, queue: 700, ivr: 800, groupvm: 900, conf: 500 };
 const IVR_KEYS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"];
 const DAY_SHORT = { mon: "Lun", tue: "Mar", wed: "Mer", thu: "Jeu", fri: "Ven", sat: "Sam", sun: "Dim" };
 let cf = null; // { objects, users, options, trunk_dids, timezone }
@@ -41,6 +41,7 @@ const INTRO = {
   queue: "L'appelant patiente en musique jusqu'à ce qu'un agent se libère ; la position dans la file peut être annoncée.",
   ivr: "Standard automatique : « Tapez 1 pour le service commercial… ». L'appelant peut aussi composer directement un numéro de poste.",
   groupvm: "Une boîte vocale partagée : le voyant s'allume chez tous les membres, qui l'écoutent dans le softphone ou avec *98.",
+  conf: "Salles de réunion : on compose le numéro depuis n'importe quel poste. Depuis le softphone web, la réunion est aussi en vidéo.",
   prompt: "Messages audio utilisés par les SVI, les files d'attente et les règles (« Nous sommes fermés… »).",
 };
 function summary(o) {
@@ -55,6 +56,7 @@ function summary(o) {
     case "queue": return `${mem(d.members)}<div class="s">${esc(cf.options.queue_strategies[d.strategy])} · attente max ${d.max_wait} s → ${esc(destText(d.no_answer))}</div>`;
     case "ivr": return `${Object.keys(d.options).map((k) => `<strong>${esc(k)}</strong> ${esc(destText(d.options[k]))}`).join(" · ") || '<span class="s">aucune touche</span>'}`;
     case "groupvm": return mem(d.members);
+    case "conf": return `${d.max_members} participants max${d.pin ? " · code PIN" : ""}${d.video ? " · vidéo" : ""}`;
     default: return "";
   }
 }
@@ -121,7 +123,7 @@ function frHolidays(y) {
 
 // ---------------------------------------------------------------- Champs communs
 const KEY_LABELS = { hangup: "Terminer l'appel", user: "Connecter à un utilisateur", user_vm: "Connecter à une boîte vocale", group: "Connecter à un groupe d'appel",
-  ivr: "Connecter à un répondeur numérique", queue: "Connecter à une file d'attente", groupvm: "Connecter à une boîte vocale de groupe",
+  ivr: "Connecter à un répondeur numérique", queue: "Connecter à une file d'attente", groupvm: "Connecter à une boîte vocale de groupe", conf: "Connecter à une salle de réunion",
   external: "Transférer vers un numéro externe", prompt: "Lire une annonce puis raccrocher" };
 function destPicker(name, dest, { label, selfId, allowNone = false, noneLabel = "— Rien —", withPrompt = true, keyLabels = false } = {}) {
   const type = dest?.type || (allowNone ? "none" : "hangup");
@@ -131,7 +133,7 @@ function destPicker(name, dest, { label, selfId, allowNone = false, noneLabel = 
   const targetsFor = (k) => k === "user" || k === "user_vm" ? users : objs(k).filter((o) => o.id !== selfId).map((o) => [o.id, objLabel(o)]);
   return `<div class="dest" data-dest="${esc(name)}">${label ? `<span class="dl">${esc(label)}</span>` : ""}
     <div class="row"><select name="${esc(name)}.type">${allowNone ? `<option value="none" ${type === "none" ? "selected" : ""}>${esc(noneLabel)}</option>` : ""}${opt(types, type)}</select>
-    ${["user", "user_vm", "group", "queue", "ivr", "groupvm", "prompt"].map((k) => {
+    ${["user", "user_vm", "group", "queue", "ivr", "groupvm", "conf", "prompt"].map((k) => {
       const list = targetsFor(k);
       const on = type === k;
       return `<select name="${esc(name)}.target" data-for="${k}" ${on ? "" : "hidden disabled"}><option value="">${list.length ? "— Choisir —" : "— Aucun : crée-le d'abord —"}</option>${opt(list, on ? dest.target : "")}</select>`;
@@ -277,7 +279,7 @@ function renderForm(head, kind, id) {
   if (id && !o) { h.app.innerHTML = `${head}<div class="flash bad">Introuvable.</div>`; return; }
   const d = o?.data || defaults(kind);
   const tab = KIND_TAB[kind];
-  const numbered = ["group", "queue", "ivr", "groupvm"].includes(kind);
+  const numbered = ["group", "queue", "ivr", "groupvm", "conf"].includes(kind);
   let body = "";
   if (kind === "group") {
     body = `${didChips(d, id)}
@@ -324,6 +326,10 @@ function renderForm(head, kind, id) {
       <label class="check"><input type="checkbox" name="direct_dial" ${d.direct_dial ? "checked" : ""}> L'appelant peut composer directement un numéro de poste</label></div>
       <div class="grid2">${destPicker("invalid", d.invalid, { label: "Aucun choix ou touche invalide (après les répétitions)", selfId: id })}</div>
       ${officeFields(d, id)}`;
+  } else if (kind === "conf") {
+    body = `<div class="grid3"><label>Code PIN (facultatif)<input name="pin" inputmode="numeric" value="${esc(d.pin)}" placeholder="Aucun"><span class="hint">Demandé en entrant dans la salle.</span></label>
+      ${num("max_members", "Participants maximum", d.max_members, 2, 100)}
+      <label class="check"><input type="checkbox" name="video" ${d.video ? "checked" : ""}> Vidéo pour les participants du softphone web</label></div>`;
   } else if (kind === "groupvm") {
     body = `<div class="grid3"><label>Code PIN (4 à 8 chiffres)<input name="pin" inputmode="numeric" value="${esc(d.pin)}" placeholder="Généré si vide"><span class="hint">Pour écouter avec *98 depuis un téléphone.</span></label></div>
       ${membersPicker("members", d.members, { label: "Membres (voyant de messagerie + écoute dans le softphone)" })}`;
@@ -377,6 +383,7 @@ function defaults(kind) {
     queue: { name: "", strategy: "ringall", members: [], member_timeout: 15, max_wait: 300, wrapup: 5, announce_position: true, announce_holdtime: false, greeting: "", moh: "", periodic: [], periodic_freq: 30, no_answer: hang, ...office },
     ivr: { name: "", prompt: "", timeout: 5, retries: 2, direct_dial: true, options: {}, invalid: hang, ...office },
     groupvm: { name: "", pin: "", members: [] },
+    conf: { name: "", pin: "", max_members: 20, video: true },
     schedule: { name: "", week: { mon: [["09:00", "12:00"], ["14:00", "18:00"]], tue: [["09:00", "12:00"], ["14:00", "18:00"]], wed: [["09:00", "12:00"], ["14:00", "18:00"]], thu: [["09:00", "12:00"], ["14:00", "18:00"]], fri: [["09:00", "12:00"], ["14:00", "18:00"]], sat: [], sun: [] }, holidays_fr: true, holidays: [], override: "auto" },
     rule: { name: "", dids: [], is_default: !objs("rule").some((r) => r.data.is_default) && !cf.trunk_dids.length, schedule: "", open: hang, closed: hang, holiday: null },
   }[kind];

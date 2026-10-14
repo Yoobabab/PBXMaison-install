@@ -49,6 +49,8 @@ const genAuthId = () => crypto.randomBytes(16).toString("base64").replace(/[^A-Z
 const genPassword = () => crypto.randomBytes(24).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 20);
 const hostOk = (h) => /^[A-Za-z0-9.-]+$/.test(h) && h.includes(".");
 
+const WEB_CODECS = "g722,alaw,ulaw,vp8,h264";
+
 export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   const templates = () => loadTemplates(templatesFile);
   const countryCode = () => env().PBX_COUNTRY_CODE || "33";
@@ -292,11 +294,13 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency) VALUES ($1, 5, 'yes', 0)", [id]);
     await c.query(
       `INSERT INTO ps_endpoints (id, aors, auth, context, disallow, allow, callerid, direct_media, webrtc, dtls_auto_generate_cert,
-         dtmf_mode, language, mailboxes, set_var)
-       VALUES ($1, $1, $1, 'from-internal', 'all', 'g722,alaw,ulaw', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5)`,
+         dtmf_mode, language, mailboxes, set_var, max_video_streams)
+       VALUES ($1, $1, $1, 'from-internal', 'all', '${WEB_CODECS}', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5, 16)`,
       [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
   }
   async function ensureWebEndpoints() {
+    // Vidéo (appels vidéo, réunions) : VP8 / H.264, jusqu'à 16 flux vidéo pour les réunions
+    await db.query(`UPDATE ps_endpoints SET allow = '${WEB_CODECS}', max_video_streams = 16 WHERE id LIKE '%-web' AND (allow IS DISTINCT FROM '${WEB_CODECS}' OR max_video_streams IS DISTINCT FROM 16)`);
     const missing = await db.query(`SELECT x.* FROM pbxmaison_extensions x
       WHERE EXISTS (SELECT 1 FROM ps_endpoints e WHERE e.id = x.id)
         AND NOT EXISTS (SELECT 1 FROM ps_endpoints w WHERE w.id = x.id || '-web')`);

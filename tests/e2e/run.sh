@@ -205,6 +205,12 @@ api GET "/api/trace?n=0465001541" | grep -q 'Routage test' && pass "Traceur : SD
 if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" "" callflow 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Gestion d'appels OK"; then pass "Appels réels : groupe 600 et SVI 800 (touche 1)"; else
   sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appels gestion d'appels"; fi
 
+# Vidéo : appel vidéo entre deux softphones, puis réunion vidéo (salle 500, ConfBridge SFU)
+api POST /api/callflow/conf '{"name":"Réunion équipe","number":"500","max_members":10,"video":true}' | grep -q '"number":"500"' && pass "Salle de réunion 500 créée" || fail "salle de réunion"
+sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 204-web' | grep -iE "^\s*allow\s*:" | grep -qi "vp8" && pass "Softphone web : vidéo VP8 autorisée" || { sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 204-web' | grep -iE "allow|video" >> "$OUT"; fail "codecs vidéo"; }
+if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" "" video 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Vidéo OK"; then pass "Appel vidéo et réunion vidéo réels entre navigateurs"; else
+  sudo tail -n 40 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "vidéo"; fi
+
 # Journal des appels (CDR dans PostgreSQL)
 sudo /usr/sbin/asterisk -rx 'cdr show status' | grep -qi "Adaptive ODBC" && pass "Journal des appels : enregistrement dans PostgreSQL actif" || { sudo /usr/sbin/asterisk -rx 'cdr show status' >> "$OUT"; fail "cdr status"; }
 sleep 2
