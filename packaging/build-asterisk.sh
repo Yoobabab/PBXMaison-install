@@ -19,8 +19,13 @@ export DEBIAN_FRONTEND=noninteractive
 mkdir -p "$OUT"
 
 apt-get update -q
-apt-get install -y -q --no-install-recommends ca-certificates wget build-essential file debconf-utils >/dev/null
-echo "libvpb1 libvpb1/countrycode string 33" | debconf-set-selections
+# Dépendances de compilation (liste explicite plutôt que contrib/scripts/install_prereq,
+# qui installe aussi des paquets inutiles et télécharge des sources supplémentaires)
+apt-get install -y -q --no-install-recommends \
+  ca-certificates wget curl file patch bzip2 xz-utils build-essential pkg-config autoconf automake libtool python3 \
+  libedit-dev libjansson-dev libxml2-dev uuid-dev libsqlite3-dev libssl-dev libncurses-dev libsrtp2-dev \
+  libcurl4-openssl-dev libxslt1-dev unixodbc-dev libspeex-dev libspeexdsp-dev libogg-dev libvorbis-dev \
+  libgsm1-dev liburiparser-dev libpopt-dev libopusfile-dev libsndfile1-dev
 
 cd /usr/src
 wget -q -O asterisk.tar.gz "$URL"
@@ -30,8 +35,8 @@ VERSION="$(basename "$SRC" | sed 's/^asterisk-//')"
 cd "$SRC"
 echo "== Asterisk $VERSION pour $TARGET"
 
-contrib/scripts/install_prereq install >/dev/null
-./configure --with-jansson-bundled --with-pjproject-bundled >/dev/null
+echo "== configure"
+./configure --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -n 25
 make -s menuselect.makeopts >/dev/null
 menuselect/menuselect \
   --enable res_odbc --enable res_config_odbc --enable cdr_odbc --enable cel_odbc \
@@ -40,11 +45,15 @@ menuselect/menuselect \
   --enable CORE-SOUNDS-EN-ALAW --enable CORE-SOUNDS-EN-ULAW \
   --enable MOH-OPSOUND-ALAW --enable MOH-OPSOUND-ULAW --enable MOH-OPSOUND-G722 \
   menuselect.makeopts
-make -s -j"$(nproc)" >/dev/null
+echo "== make ($(nproc) cœurs)"
+make -s -j"$(nproc)" 2>&1 | grep -E -i "error|erreur" | head -n 40 || true
+test -x main/asterisk || { echo "Échec de la compilation"; exit 1; }
 
 STAGE=/tmp/stage
 rm -rf "$STAGE"
-make -s install DESTDIR="$STAGE" >/dev/null
+echo "== make install (+ sons)"
+make -s install DESTDIR="$STAGE" 2>&1 | grep -v -E '\.{10}' | tail -n 20 || true
+test -x "$STAGE/usr/sbin/asterisk" || { echo "Échec de make install"; exit 1; }
 # Pas de fichiers de configuration d'exemple : PBXMaison écrit les siens
 rm -rf "$STAGE/etc/asterisk"
 # Outils de création du schéma de base (alembic) et modèles de config utiles

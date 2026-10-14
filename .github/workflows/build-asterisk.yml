@@ -40,7 +40,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          msg="$(tail -n 60 build.log 2>/dev/null | cut -c1-200 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          msg="$(grep -v -E '\.{10}' build.log 2>/dev/null | tail -n 45 | cut -c1-200 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
           echo "::error title=Échec ${{ matrix.target }}::${msg}"
       - uses: actions/upload-artifact@v4
         with:
