@@ -10,6 +10,7 @@ import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mj
 import { MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType } from "./phones.mjs";
 import { parseRouting } from "./nlroute.mjs";
+import { summarize, forUser } from "./cdr.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
 import { nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 
@@ -905,6 +906,34 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   async function trace(number) { return traceNumber(number, await traceModel()); }
   async function forwardsReport() { return listForwards(await traceModel()); }
 
+
+  // ------------------------------------------------------------------ Journal des appels (CDR)
+  const CDR_COLS = `linkedid, uniqueid, sequence, calldate AT TIME ZONE 'UTC' AS calldate, enddate AT TIME ZONE 'UTC' AS enddate,
+    clid, src, dst, channel, dstchannel, lastapp, lastdata, duration, billsec, disposition, did, direction, rule`;
+  const trunkSet = async () => new Set((await db.query("SELECT id FROM pbxmaison_trunks")).rows.map((r) => r.id));
+  /** Journal complet (console) : jours glissants, filtres simples. */
+  async function callLog({ days = 7, q = "", direction = "", status = "", limit = 500 } = {}) {
+    const d = Math.min(Math.max(Number(days) || 7, 1), 366);
+    const r = await db.query(`SELECT ${CDR_COLS} FROM cdr WHERE linkedid IN (
+        SELECT DISTINCT linkedid FROM cdr WHERE calldate > (now() AT TIME ZONE 'UTC') - make_interval(days => $1) ORDER BY 1 LIMIT 20000)
+      ORDER BY calldate`, [d]);
+    let calls = summarize(r.rows, await trunkSet());
+    const needle = String(q || "").replace(/[\s.]/g, "").toLowerCase();
+    if (needle) calls = calls.filter((c) => [c.from.number, c.from.name, c.to.number, c.did, c.answered_by, ...c.rang, c.rule].join(" ").toLowerCase().replace(/\s/g, "").includes(needle));
+    if (direction) calls = calls.filter((c) => c.direction === direction);
+    if (status) calls = calls.filter((c) => c.status === status);
+    return { calls: calls.slice(0, Math.min(Number(limit) || 500, 5000)), total: calls.length };
+  }
+  /** Historique d'un utilisateur (softphone) : ses appels passés et reçus. */
+  async function userCalls(ext, limit = 100) {
+    const like = [`PJSIP/${ext}-%`];
+    const r = await db.query(`SELECT ${CDR_COLS} FROM cdr WHERE linkedid IN (
+        SELECT linkedid FROM cdr WHERE calldate > (now() AT TIME ZONE 'UTC') - interval '90 days'
+          AND (channel LIKE $1 OR dstchannel LIKE $1 OR lastdata LIKE $2) ORDER BY calldate DESC LIMIT $3)
+      ORDER BY calldate`, [like[0], `${ext}@%`, limit * 4]);
+    return forUser(summarize(r.rows, await trunkSet()), ext).slice(0, limit);
+  }
+
   async function nextFreeExtension() {
     const r = await db.query("SELECT id FROM ps_endpoints WHERE id ~ '^[1-9][0-9]{2}$' UNION SELECT number FROM pbxmaison_objects WHERE number IS NOT NULL");
     const used = new Set(r.rows.map((x) => x.id));
@@ -919,7 +948,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
-    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow,
+    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow, callLog, userCalls,
   };
 }
 

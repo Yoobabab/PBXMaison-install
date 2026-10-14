@@ -205,6 +205,15 @@ api GET "/api/trace?n=0465001541" | grep -q 'Routage test' && pass "Traceur : SD
 if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" "" callflow 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Gestion d'appels OK"; then pass "Appels réels : groupe 600 et SVI 800 (touche 1)"; else
   sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appels gestion d'appels"; fi
 
+# Journal des appels (CDR dans PostgreSQL)
+sudo /usr/sbin/asterisk -rx 'cdr show status' | grep -qi "Adaptive ODBC" && pass "Journal des appels : enregistrement dans PostgreSQL actif" || { sudo /usr/sbin/asterisk -rx 'cdr show status' >> "$OUT"; fail "cdr status"; }
+sleep 2
+C="$(api GET '/api/cdr?days=1&direction=internal&status=answered')"
+echo "$C" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const c=JSON.parse(s).calls;process.exit(c.some(x=>x.from.ext==="204"&&x.answered_by==="205"&&x.talk>0)?0:1)})' && pass "Journal : appel 204 → 205 répondu, durée de conversation" || { echo "$C" | cut -c1-500 >> "$OUT"; sudo -u postgres psql -d asterisk -c "select calldate,src,dst,channel,dstchannel,disposition,billsec,linkedid from cdr order by id desc limit 8" >> "$OUT" 2>&1; fail "journal cdr"; }
+api GET '/api/cdr?days=1' | grep -q '"rang":\["205"' && pass "Journal : appels vers le groupe / SVI (qui a sonné)" || fail "journal groupe"
+curl -sS -b "$UJ" "$API/api/u/calls" | grep -q '"direction":"out"' && pass "Softphone : historique des appels lu depuis le PBX" || fail "historique softphone"
+api GET '/api/cdr.csv?days=1' | head -1 | grep -q "Répondu par" && pass "Journal : export CSV" || fail "csv"
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"

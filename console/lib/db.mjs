@@ -70,6 +70,21 @@ export function createDb(cfg) {
         PRIMARY KEY (kind, id)
       );
       CREATE UNIQUE INDEX IF NOT EXISTS pbxmaison_objects_number ON pbxmaison_objects (number) WHERE number IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS cdr (
+        id bigserial PRIMARY KEY,
+        calldate timestamp NOT NULL DEFAULT (now() AT TIME ZONE 'UTC'),
+        answerdate timestamp, enddate timestamp,
+        clid varchar(160) NOT NULL DEFAULT '', src varchar(80) NOT NULL DEFAULT '', dst varchar(80) NOT NULL DEFAULT '',
+        dcontext varchar(80) NOT NULL DEFAULT '', channel varchar(160) NOT NULL DEFAULT '', dstchannel varchar(160) NOT NULL DEFAULT '',
+        lastapp varchar(80) NOT NULL DEFAULT '', lastdata varchar(255) NOT NULL DEFAULT '',
+        duration integer NOT NULL DEFAULT 0, billsec integer NOT NULL DEFAULT 0, disposition varchar(45) NOT NULL DEFAULT '',
+        amaflags integer NOT NULL DEFAULT 0, accountcode varchar(40) NOT NULL DEFAULT '', uniqueid varchar(150) NOT NULL DEFAULT '',
+        userfield varchar(255) NOT NULL DEFAULT '', linkedid varchar(150) NOT NULL DEFAULT '', peeraccount varchar(40) NOT NULL DEFAULT '',
+        sequence integer NOT NULL DEFAULT 0,
+        did varchar(40) NOT NULL DEFAULT '', direction varchar(12) NOT NULL DEFAULT '', dest_kind varchar(20) NOT NULL DEFAULT '', rule varchar(80) NOT NULL DEFAULT ''
+      );
+      CREATE INDEX IF NOT EXISTS cdr_calldate ON cdr (calldate);
+      CREATE INDEX IF NOT EXISTS cdr_linkedid ON cdr (linkedid);
       CREATE TABLE IF NOT EXISTS pbxmaison_devices (
         endpoint text PRIMARY KEY,
         online boolean NOT NULL DEFAULT false,

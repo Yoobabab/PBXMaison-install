@@ -280,6 +280,7 @@ export async function buildApp({ db, ami } = {}) {
       contacts: await team(u.id),
     };
   });
+  app.get("/api/u/calls", { preHandler: requireWebUser }, async (req) => ({ calls: await pbx.userCalls(webUser(req).ext, 150) }));
   app.get("/api/u/team", { preHandler: requireWebUser }, async (req) => ({ contacts: await team(webUser(req).ext) }));
   app.put("/api/u/status", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
@@ -381,6 +382,16 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/prompts/:id/audio", { preHandler: requireUser }, async (req, reply) =>
     reply.type("audio/wav").header("cache-control", "no-store").send(fs.createReadStream(await pbx.promptFile(req.params.id))));
   app.post("/api/callflow-parse", { preHandler: requireUser }, async (req) => pbx.parseFlow(String(req.body?.text || "").slice(0, 2000)));
+  app.get("/api/cdr", { preHandler: requireUser }, async (req) => pbx.callLog(req.query || {}));
+  app.get("/api/cdr.csv", { preHandler: requireUser }, async (req, reply) => {
+    const { calls } = await pbx.callLog({ ...(req.query || {}), limit: 5000 });
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [["Date", "Sens", "Statut", "De", "Nom", "Vers", "SDA", "Règle", "Répondu par", "Durée totale (s)", "Conversation (s)"].join(";"),
+      ...calls.map((c) => [new Date(c.start).toLocaleString("fr-FR", { timeZone: pbxEnv().PBX_TIMEZONE || "Europe/Paris" }),
+        { in: "Entrant", out: "Sortant", internal: "Interne" }[c.direction] || c.direction,
+        { answered: "Répondu", missed: "Manqué", voicemail: "Messagerie", busy: "Occupé", failed: "Échec" }[c.status] || c.status, c.from.number, c.from.name, c.to.number, c.did, c.rule, c.answered_by, c.duration, c.talk].map(q).join(";"))];
+    return reply.type("text/csv; charset=utf-8").header("content-disposition", 'attachment; filename="journal-appels.csv"').send("\ufeff" + lines.join("\r\n"));
+  });
   app.get("/api/trace", { preHandler: requireUser }, async (req) => pbx.trace(req.query?.n));
   app.get("/api/forwards", { preHandler: requireUser }, async () => ({ forwards: await pbx.forwardsReport() }));
 

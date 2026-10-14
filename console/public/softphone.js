@@ -111,7 +111,14 @@ let vmList = [], vmEnabled = false, drawerOpen = false, poll = null;
 let page = "equipe", sub = "";
 const histKey = () => `callikoe_hist_${me?.user.id}`;
 const favKey = () => `callikoe_fav_${me?.user.id}`;
-const history = () => store.get(histKey(), []);
+// Historique : celui du PBX (journal des appels) dès qu'il est chargé, sinon celui de ce navigateur
+let serverCalls = null;
+const history = () => serverCalls || store.get(histKey(), []);
+async function refreshCalls() {
+  try { serverCalls = (await api("GET", "/api/u/calls")).calls; } catch { return; }
+  badges();
+  if (page === "appels") renderPage();
+}
 const addHistory = (h) => store.set(histKey(), [h, ...history()].slice(0, 200));
 const favs = () => new Set(store.get(favKey(), []));
 function toggleFav(id) { const f = favs(); f.has(id) ? f.delete(id) : f.add(id); store.set(favKey(), [...f]); }
@@ -160,6 +167,7 @@ async function start() {
   applySinks();
   connect();
   refreshVoicemail();
+  refreshCalls();
   stopPolling();
   poll = setInterval(refreshTeam, 10_000);
   setInterval(refreshVoicemail, 60_000);
@@ -347,11 +355,11 @@ function pageCalls(el) {
       <div class="ltabs">${[["all", "Tous"], ["missed", "Manqués"], ["in", "Entrants"], ["out", "Sortants"]].map(([k, l]) => `<button class="${callFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
       <ul class="rows">${list.map((h, i) => `<li class="${h.number === selNum ? "sel" : ""}" data-sel="${esc(h.number)}" data-i="${i}">
           <span class="dir ${h.status === "missed" ? "missed" : h.direction}">${h.status === "missed" ? I.missed() : h.direction === "in" ? I.inArrow() : I.outArrow()}</span>
-          <span class="grow"><strong class="${h.status === "missed" ? "red" : ""}">${esc(h.name || fmtNum(h.number))}</strong><span class="s">${h.name ? esc(fmtNum(h.number)) + " · " : ""}${h.status === "missed" ? "Manqué" : h.status === "failed" ? "Échec" : fmtDur(h.duration || 0)}</span></span>
+          <span class="grow"><strong class="${h.status === "missed" ? "red" : ""}">${esc(h.name || nameOf(h.number) || fmtNum(h.number))}</strong><span class="s">${h.name || nameOf(h.number) ? esc(fmtNum(h.number)) + " · " : ""}${statusText(h)}</span></span>
           <span class="when">${esc(fmtWhen(h.at))}</span>
           <button class="cbtn sm" data-call="${esc(h.number)}" title="Rappeler">${I.phone(16)}</button>
         </li>`).join("") || '<li class="empty-st">Aucun appel.</li>'}</ul>
-      <p class="hint pad-s">Historique enregistré dans ce navigateur.${all.length ? ' <a href="#" id="hclear">Effacer</a>' : ""}</p>
+      <p class="hint pad-s">${serverCalls ? "Journal des appels du PBX (90 derniers jours)." : `Historique enregistré dans ce navigateur.${all.length ? ' <a href="#" id="hclear">Effacer</a>' : ""}`}</p>
     </section>
     <section class="panel detp" id="detail"></section>
   </div>`;
@@ -377,11 +385,15 @@ function drawCallDetail(all) {
     </div>
     <h3 class="sec">Historique avec ce correspondant</h3>
     <ul class="rows plain">${items.map((h) => `<li><span class="dir ${h.status === "missed" ? "missed" : h.direction}">${h.status === "missed" ? I.missed() : h.direction === "in" ? I.inArrow() : I.outArrow()}</span>
-      <span class="grow">${h.status === "missed" ? "Appel manqué" : h.status === "failed" ? "Appel non abouti" : h.direction === "in" ? "Appel entrant" : "Appel sortant"}</span>
+      <span class="grow">${h.status === "missed" ? "Appel manqué" : h.status === "failed" ? "Appel non abouti" : h.status === "voicemail" ? "Message laissé sur ta messagerie" : h.status === "answered_elsewhere" ? `Répondu par ${esc(nameOf(h.answered_by) || h.answered_by)}` : h.direction === "in" ? "Appel entrant" : "Appel sortant"}</span>
       <span class="s">${h.status === "answered" ? fmtDur(h.duration || 0) + " · " : ""}${esc(fmtWhen(h.at))}</span></li>`).join("")}</ul>`;
   wireCalls(d);
   $("#dback").onclick = () => { selNum = ""; renderPage(); };
   $("#dfav")?.addEventListener("click", () => { toggleFav(c.id); drawCallDetail(all); });
+}
+
+function statusText(h) {
+  return { missed: "Manqué", failed: "Échec", voicemail: "Messagerie", answered_elsewhere: `Répondu par ${nameOf(h.answered_by) || h.answered_by}` }[h.status] || fmtDur(h.duration || 0);
 }
 
 // ------------------------------------------------------------------ Messagerie vocale
@@ -804,6 +816,7 @@ function finish(status, cause) {
   if (!msg && !wasIncomingMissed && drawerOpen) setTimeout(() => { if (!session) openDrawer(false); }, 1200);
   if (page === "appels") renderPage();
   badges();
+  setTimeout(refreshCalls, 2500); // le PBX écrit le journal à la fin de l'appel
 }
 
 let blink = null, notif = null;

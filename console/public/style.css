@@ -341,3 +341,10 @@ td.acts{text-align:right;white-space:nowrap}
 body.wide main{max-width:none;padding-left:24px;padding-right:24px}
 @media (max-width:1300px){.fe-grid{grid-template-columns:200px minmax(0,1fr)}.fe-side{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
 .fe-grid.has-side{grid-template-columns:210px minmax(0,1fr) 270px}
+
+/* Journal des appels */
+.dirc{display:inline-flex;width:28px;height:28px;border-radius:50%;align-items:center;justify-content:center;font-weight:700;background:var(--info-soft)}
+.dirc.in{background:var(--ok-soft);color:var(--ok)}
+.dirc.out{background:var(--accent-soft);color:var(--accent)}
+table.cdr td{font-size:14px}
+.filters select{width:auto}
