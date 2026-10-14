@@ -54,7 +54,7 @@ function setNav(active) {
   const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"],
     ["#/routes", "Routes", "routes"], ["#/appels", "Appels en cours", "calls"], ["#/systeme", "Système", "sys"]];
   $("#nav").innerHTML = state?.logged_in ? links.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${l}</a>`).join("") : "";
-  $("#user").innerHTML = state?.logged_in ? `<span class="hide-sm">${esc(state.email || "")}</span><button id="logout">Déconnexion</button>` : "";
+  $("#user").innerHTML = state?.logged_in ? `<button id="logout" title="Connecté : ${esc(state.email || "")}">Déconnexion</button>` : "";
   $("#logout")?.addEventListener("click", async () => { await api("POST", "/api/logout"); state.logged_in = false; location.hash = "#/"; route(); });
   $("#pbx-name").textContent = state?.pbx?.name || "Console PBX";
   document.title = state?.pbx?.name ? `${state.pbx.name} · Console` : "Console PBX";
