@@ -991,7 +991,7 @@ async function route() {
     else if (h === "#/telephones") await renderPhones();
     else if ((m = h.match(/^#\/utilisateurs\/nouveau(?:\?depuis=(\d{3}))?$/))) await renderUserNew(m[1]);
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
-    else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "regles", m[2] || null);
+    else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "routages", m[2] || null);
     else if (h === "#/routes") await renderRoutes();
     else if (h === "#/appels") await renderCalls();
     else if (h === "#/systeme") await renderSystem();

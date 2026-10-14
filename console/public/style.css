@@ -270,3 +270,74 @@ td.acts{text-align:right;white-space:nowrap}
 .tn .ti{width:24px;text-align:center;font-size:16px;flex:none}
 .tn .td{color:var(--muted);font-size:13px;margin-top:2px}
 @media (max-width:640px){.tree ul{margin-left:8px;padding-left:10px}.week .dname{width:auto}}
+
+/* ---------- Routages : éditeur visuel */
+.fe-nl{border:1px dashed var(--accent);background:var(--accent-soft);border-radius:12px;padding:14px 16px}
+.fe-nl textarea{margin:8px 0 10px;background:var(--panel)}
+.fe-nl .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.fe-prop{margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:14px}
+.fe-prop ul{margin:6px 0 0;padding-left:20px}
+.fe-warn{margin-top:10px;border-left:3px solid #f59e0b;padding-left:10px;color:var(--warn)}
+.fe-grid{display:grid;grid-template-columns:210px minmax(0,1fr) 230px;border-top:1px solid var(--line);min-height:420px}
+.fe-pal{border-right:1px solid var(--line);padding:14px;background:var(--bg)}
+.fe-pg{margin-bottom:14px}
+.fe-pt{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-bottom:6px}
+.fe-pi{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:9px;padding:8px 10px;margin-bottom:6px;cursor:grab;font-size:13px;font-weight:600;user-select:none}
+.fe-pi:hover{border-color:var(--accent);box-shadow:0 4px 12px rgba(20,20,40,.08)}
+.fe-pi.end{border-left-color:#6b7280}
+.fe-pi.in{border-left-color:#16a34a}
+.fe-ic{width:22px;text-align:center;flex:none}
+.fe-canvas{padding:16px;overflow-x:auto;background-image:radial-gradient(var(--line) 1px,transparent 1px);background-size:16px 16px}
+.fe-entry{display:flex;align-items:stretch;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.fe-did,.fe-sch{display:flex;gap:8px;background:var(--panel);border:1px solid var(--line);border-top:4px solid #16a34a;border-radius:12px;padding:10px 12px;min-width:220px;max-width:340px}
+.fe-sch{border-top-color:#2563eb}
+.fe-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.fe-chip{display:inline-flex;align-items:center;gap:4px;background:var(--ok-soft);color:var(--ok);font-weight:600;font-size:13px;border-radius:99px;padding:2px 4px 2px 10px}
+.fe-chip button{border:0;background:none;color:inherit;cursor:pointer;font-size:11px}
+.fe-mini{padding:5px 8px;font-size:13px;margin-top:4px}
+.fe-arrow{align-self:center;font-size:20px;color:var(--muted)}
+.fe-row{display:flex;gap:10px;align-items:flex-start;width:max-content;min-width:100%;border:1px solid transparent;border-radius:12px;padding:8px;margin-bottom:10px}
+.fe-row.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent-soft) 45%,transparent)}
+.fe-rl{width:130px;flex:none;display:flex;flex-direction:column;gap:6px;padding-top:6px}
+.fe-rbtn{border:0;background:none;text-align:left;font:inherit;font-weight:700;font-size:13px;color:var(--ink);cursor:pointer;padding:0}
+.switch.sm{font-size:12px}
+.switch.sm span{width:28px;height:16px}
+.switch.sm span::after{width:10px;height:10px}
+.switch.sm input:checked+span::after{transform:translateX(12px)}
+.fe-chain{display:flex;align-items:center;gap:4px;flex-wrap:nowrap;min-height:84px}
+.fe-same{color:var(--muted);font-style:italic;padding:10px}
+.fe-card{width:172px;flex:none;background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--accent);border-radius:12px;padding:8px 10px;cursor:pointer;box-shadow:0 2px 6px rgba(20,20,40,.05);position:relative}
+.fe-card.end{border-top-color:#6b7280}
+.fe-card.sel{outline:2px solid var(--accent);outline-offset:1px}
+.fe-card.bad{border-color:var(--bad);border-top-color:var(--bad)}
+.fe-ch{display:flex;align-items:center;gap:6px;font-size:13px}
+.fe-ch strong{flex:1;min-width:0;line-height:1.25}
+.fe-x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:11px;padding:2px 4px;border-radius:6px}
+.fe-x:hover{color:var(--bad);background:var(--bad-soft)}
+.fe-cs{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.35}
+.fe-err{font-size:12px;color:var(--bad);font-weight:600;margin-top:4px}
+.fe-link{flex:none;display:flex;flex-direction:column;align-items:center;color:var(--muted);font-size:18px;line-height:1;min-width:58px}
+.fe-link span{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px;text-align:center}
+.dz{width:8px;align-self:stretch;border-radius:6px;transition:width .12s,background .12s}
+.fe-dragging .dz{width:26px;background:var(--accent-soft);border:1px dashed var(--accent)}
+.dz.over,.fe-dragging .dz.over{width:60px;background:var(--accent);opacity:.5}
+.dz.end{width:auto;min-width:150px;min-height:70px;display:flex;align-items:center;justify-content:center;text-align:center;border:2px dashed var(--line);color:var(--muted);font-size:12.5px;padding:8px;background:transparent}
+.fe-dragging .dz.end{border-color:var(--accent);color:var(--accent);width:auto}
+.dz.end.over{background:var(--accent-soft);opacity:1}
+.dz-in.over{outline:2px dashed var(--accent);outline-offset:3px}
+.fe-side{border-left:1px solid var(--line);padding:14px;background:var(--bg)}
+.fe-help ol{padding-left:18px;margin:8px 0 0;font-size:13.5px}
+.fe-help li{margin-bottom:6px}
+.fe-pan .fe-ch{margin-bottom:12px;font-size:15px}
+.fe-uchips{max-height:220px;overflow:auto;margin-bottom:10px}
+.fe-uchips .chip{font-size:12.5px;padding:4px 10px}
+.fe-pan .row{display:flex;gap:8px;justify-content:flex-end}
+.fe-pan audio{width:100%}
+.fe-foot{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;border-top:1px solid var(--line)}
+.fe-foot .row{display:flex;gap:10px}
+.fe-name{max-width:420px;margin-bottom:8px}
+@media (max-width:720px){.fe-grid{grid-template-columns:1fr}.fe-pal{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:10px;overflow-x:auto}.fe-pg{min-width:200px}.fe-rl{width:90px}}
+
+body.wide main{max-width:none;padding-left:24px;padding-right:24px}
+@media (max-width:1300px){.fe-grid{grid-template-columns:200px minmax(0,1fr)}.fe-side{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}}
+.fe-grid.has-side{grid-template-columns:210px minmax(0,1fr) 270px}

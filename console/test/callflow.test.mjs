@@ -161,3 +161,29 @@ test("groupe cyclique, heures de bureau d'un groupe, SDA directe, file avancée"
   assert.throws(() => validateObject("ivr", { name: "I", number: "801", dids: "04 65 00 15 41" }, null, ctx(m)), /déjà attribuée à : groupe/);
   assert.equal(validateObject("ivr", { name: "I", number: "801", closed: { type: "hangup", prompt: "p1" } }, null, ctx(m)).data.closed.prompt, "p1");
 });
+
+test("routage (éditeur visuel) : validation, génération, traceur", () => {
+  const m = model();
+  const c = { ...ctx(m), selfId: null };
+  const v = validateObject("flow", { name: "Accueil", dids: "04 65 00 15 45", schedule: "s1", branches: {
+    open: [{ type: "prompt", target: "p1" }, { type: "ring", users: ["201"], time: 30 }, { type: "group", target: "g1", time: 15 }, { type: "queue", target: "q1" }, { type: "user_vm", target: "201" }],
+    closed: [{ type: "prompt", target: "p1" }, { type: "hangup" }], break: null, holiday: [] } }, null, c);
+  assert.equal(v.data.branches.open.length, 5);
+  assert.equal(v.data.branches.break, null);
+  assert.throws(() => validateObject("flow", { name: "X", dids: "04 65 00 15 46", branches: { open: [{ type: "hangup" }, { type: "user_vm", target: "201" }] } }, null, c), /rien ne peut suivre/);
+  assert.throws(() => validateObject("flow", { name: "X", dids: "04 65 00 15 40", branches: { open: [{ type: "hangup" }] } }, null, c), /déjà dans la règle/);
+  assert.throws(() => validateObject("flow", { name: "X", is_default: true, branches: { open: [{ type: "hangup" }] } }, null, c), /déjà la règle par défaut|par défaut/);
+  m.objects.push({ kind: "flow", id: "f1", number: null, data: v.data });
+  const t = buildCallflowDialplan(m);
+  assert.match(t, /\[did-rules\]\nexten => 0465001545,1,Goto\(flow-f1,s,1\)/);
+  assert.match(t, /\[flow-f1\][\s\S]*GotoIf\(\$\["\$\{GOSUB_RETVAL\}" = "closed"\]\?b-closed\)/);
+  assert.match(t, /n\(b-open\),NoOp[\s\S]*Playback\(\/var\/lib\/pbxmaison\/sounds\/p1\)\n same => n,Dial\(PJSIP\/201&PJSIP\/201-web,30/);
+  assert.match(t, /Dial\(PJSIP\/201&PJSIP\/201-web&PJSIP\/202&PJSIP\/202-web,15/); // groupe : 203 absent exclu
+  assert.match(t, /Queue\(q700,t,,,120\)\n same => n,VoiceMail\(201@default,u\)/);
+  assert.match(t, /n\(b-closed\),NoOp\(Bureau fermé\)[\s\S]*Hangup\(\)/);
+  assert.doesNotMatch(t, /b-break/);
+  const r = traceNumber("0465001545", m);
+  assert.equal(r.root.children[0].label, "Routage");
+  assert.match(JSON.stringify(r), /Étape 2 · Sonne 30 s/);
+  assert.deepEqual(referencesTo("queue", "q1", m.objects).map((x) => x.id), ["i1", "f1"]);
+});

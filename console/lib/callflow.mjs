@@ -10,8 +10,17 @@ import { UserError, STATUSES, displayName, nationalNumber, ringsForGroups } from
 
 export const KINDS = {
   group: "Groupe d'appel", queue: "File d'attente", ivr: "SVI (standard automatique)", groupvm: "Messagerie de groupe",
-  schedule: "Horaires", rule: "Règle entrante", prompt: "Annonce",
+  schedule: "Horaires", rule: "Règle entrante", prompt: "Annonce", flow: "Routage",
 };
+/** Étapes d'un routage (éditeur visuel / description en texte), enchaînées de gauche à droite. */
+export const STEP_TYPES = {
+  ring: "Faire sonner des utilisateurs", group: "Groupe d'appel", queue: "File d'attente", prompt: "Lire une annonce",
+  ivr: "Répondeur numérique (SVI)", user: "Utilisateur (avec ses renvois)", user_vm: "Boîte vocale d'un utilisateur",
+  groupvm: "Boîte vocale de groupe", external: "Numéro externe", hangup: "Terminer l'appel",
+};
+/** Étapes après lesquelles rien ne peut suivre (l'appel ne revient pas). */
+export const TERMINAL_STEPS = ["ivr", "user", "user_vm", "groupvm", "external", "hangup"];
+export const BRANCHES = { open: "Heures d'ouverture", closed: "Bureau fermé", break: "Pause", holiday: "Jour férié / congés" };
 /** Objets qui ont un numéro interne (composable depuis un poste). */
 export const NUMBERED = ["group", "queue", "ivr", "groupvm"];
 export const DEST_TYPES = {
@@ -56,6 +65,7 @@ export function defaultObject(kind) {
       holidays_fr: true, holidays: [], override: "auto" };
     case "rule": return { name: "", dids: [], is_default: false, schedule: "", open: hang, closed: hang, break: null, holiday: null };
     case "prompt": return { name: "", file: "", duration: 0 };
+    case "flow": return { name: "", dids: [], is_default: false, schedule: "", branches: { open: [], closed: null, break: null, holiday: null } };
     default: throw new UserError("Type d'objet inconnu.");
   }
 }
@@ -235,19 +245,67 @@ export function validateObject(kind, input, current, ctx) {
     if (input.dids !== undefined) d.dids = validDids(input.dids, ctx, "dids");
     if (!d.is_default && !d.dids.length) throw new UserError("Indique au moins une SDA, ou coche « règle par défaut ».", "dids");
     if (d.is_default) {
-      const other = ctx.objects.find((o) => o.kind === "rule" && o.id !== ctx.selfId && o.data.is_default);
-      if (other) throw new UserError(`La règle « ${other.data.name} » est déjà la règle par défaut.`, "is_default");
+      const other = ctx.objects.find((o) => (o.kind === "rule" || o.kind === "flow") && o.id !== ctx.selfId && o.data.is_default);
+      if (other) throw new UserError(`« ${other.data.name} » est déjà la règle par défaut.`, "is_default");
     }
     if (input.schedule !== undefined) d.schedule = input.schedule ? (ctx.objects.some((o) => o.kind === "schedule" && o.id === input.schedule) ? input.schedule : (() => { throw new UserError("Horaires introuvables.", "schedule"); })()) : "";
     if (input.open !== undefined) d.open = validateDest(input.open, ctx, "open");
     if (input.closed !== undefined) d.closed = validateDest(input.closed, ctx, "closed");
     if (input.holiday !== undefined) d.holiday = validateDest(input.holiday, ctx, "holiday", { allowNull: true });
     if (input.break !== undefined) d.break = validateDest(input.break, ctx, "break", { allowNull: true });
+  } else if (kind === "flow") {
+    if (input.dids !== undefined) d.dids = validDids(input.dids, ctx, "dids");
+    if (input.is_default !== undefined) d.is_default = !!input.is_default;
+    if (d.is_default) {
+      const other = ctx.objects.find((o) => (o.kind === "rule" || o.kind === "flow") && o.id !== ctx.selfId && o.data.is_default);
+      if (other) throw new UserError(`« ${other.data.name} » est déjà le routage par défaut.`, "is_default");
+    }
+    if (!d.is_default && !d.dids.length) throw new UserError("Glisse au moins une SDA, ou coche « routage par défaut ».", "dids");
+    if (input.schedule !== undefined) {
+      if (input.schedule && !ctx.objects.some((o) => o.kind === "schedule" && o.id === input.schedule)) throw new UserError("Horaires introuvables.", "schedule");
+      d.schedule = input.schedule || "";
+    }
+    if (input.branches !== undefined) {
+      const b = { open: validateSteps(input.branches?.open || [], ctx, "branches.open"), closed: null, break: null, holiday: null };
+      for (const k of ["closed", "break", "holiday"]) {
+        const v = input.branches?.[k];
+        b[k] = Array.isArray(v) && d.schedule ? validateSteps(v, ctx, `branches.${k}`) : null;
+      }
+      d.branches = b;
+    }
+    if (!d.branches.open.length) throw new UserError("Ajoute au moins une étape au routage.", "branches.open");
   } else if (kind === "prompt") {
     // fichier et durée posés par le serveur après conversion
   }
   return { number: d.number || null, name: d.name, data: d };
 }
+
+/** Valide une suite d'étapes ; une étape « terminale » doit être la dernière. */
+export function validateSteps(list, ctx, field) {
+  if (!Array.isArray(list)) throw new UserError("Étapes invalides.", field);
+  if (list.length > 12) throw new UserError("12 étapes maximum.", field);
+  const out = [];
+  list.forEach((st, i) => {
+    const f = `${field}.${i}`;
+    const type = String(st?.type || "");
+    if (!STEP_TYPES[type]) throw new UserError(`Étape ${i + 1} : type inconnu.`, f);
+    if (i > 0 && TERMINAL_STEPS.includes(out[i - 1].type)) throw new UserError(`Étape ${i + 1} : rien ne peut suivre « ${STEP_TYPES[out[i - 1].type]} » (l'appel ne revient pas).`, f);
+    if (type === "ring") {
+      const users = validMembers(st.users, ctx, f);
+      if (!users.length) throw new UserError(`Étape ${i + 1} : choisis qui doit sonner.`, f);
+      if (!["all", "hunt"].includes(st.strategy || "all")) throw new UserError("Stratégie inconnue.", f);
+      out.push({ type, users, strategy: st.strategy || "all", time: int(st.time, 5, 300, 20, `Étape ${i + 1} : durée de sonnerie`, f) });
+    } else if (type === "group") {
+      const t = validateDest({ type: "group", target: st.target }, ctx, f).target;
+      out.push({ type, target: t, time: st.time === undefined || st.time === "" || st.time === null ? null : int(st.time, 5, 300, null, `Étape ${i + 1} : durée de sonnerie`, f) });
+    } else {
+      const v = validateDest({ type, target: st.target }, ctx, f);
+      out.push({ type, target: v.target });
+    }
+  });
+  return out;
+}
+const flowSteps = (d) => Object.entries(d.branches || {}).flatMap(([b, list]) => (list || []).map((st, i) => ({ b, i, st })));
 
 /** Références vers un objet (avant suppression) : [{ kind, id, name, where }] */
 export function referencesTo(kind, id, objects, users) {
@@ -268,11 +326,16 @@ export function referencesTo(kind, id, objects, users) {
     for (const [k, v] of Object.entries(d.options || {})) if (hit(v)) where.push(`touche ${k}`);
     if (kind === "prompt" && (d.greeting === id || d.prompt === id)) where.push("annonce d'accueil");
     if (kind === "schedule" && d.schedule === id) where.push("horaires");
+    for (const { b, i, st } of flowSteps(d)) {
+      if (st.type === kind && st.target === id) where.push(`étape ${i + 1} (${BRANCHES[b].toLowerCase()})`);
+      if (kind === "user" && (st.type === "user" || st.type === "user_vm") && st.target === id) where.push(`étape ${i + 1} (${BRANCHES[b].toLowerCase()})`);
+    }
     if (where.length) refs.push({ kind: o.kind, id: o.id, name: d.name, where: where.join(", ") });
   }
   if (kind === "user") {
     // membres de groupes, files, messageries de groupe
     for (const o of objects) if ((o.data.members || []).includes(id)) refs.push({ kind: o.kind, id: o.id, name: o.data.name, where: "membre" });
+    for (const o of objects) if (flowSteps(o.data).some(({ st }) => st.type === "ring" && st.users.includes(id))) refs.push({ kind: o.kind, id: o.id, name: o.data.name, where: "sonne dans une étape" });
   }
   void users;
   return refs;
@@ -531,9 +594,84 @@ export function buildCallflowDialplan(m) {
     }
   }
 
+  // Routages (éditeur visuel / description en texte)
+  for (const o of byKind(m.objects, "flow")) {
+    for (const did of o.data.dids) L.splice(L.indexOf("[did-rules]") + 1, 0, `exten => ${did},1,Goto(flow-${o.id},s,1)`);
+    if (o.data.is_default) L.splice(L.indexOf("[did-rules]") + 1, 0, `exten => default,1,Goto(flow-${o.id},s,1)`);
+  }
+  for (const o of byKind(m.objects, "flow")) L.push("", ...buildFlow(o, m));
+
   // Messagerie d'un utilisateur en destination directe
   L.push("", "[vm-direct]", "exten => _XXX,1,VoiceMail(${EXTEN}@default,u)", " same => n,Hangup()", "");
   return L.join("\n");
+}
+
+/** Lignes d'une étape de routage : [[label, application], …] */
+function stepLines(st, m, tag) {
+  const out = [];
+  const add = (app, label = "") => out.push([label, app]);
+  const ringUsers = (users, strategy, time) => {
+    const ring = ringers(users, m.users);
+    if (!ring.length) { add(`NoOp(Personne ne peut sonner : ${users.join(" ")})`); return; }
+    const targets = strategy === "hunt" ? ring.map(devices) : [ring.map(devices).join("&")];
+    for (const t of targets) { add(`Dial(${t},${time},tb(pickup-mark^s^1))`); add('GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)'); }
+  };
+  switch (st.type) {
+    case "ring": ringUsers(st.users, st.strategy, st.time); break;
+    case "group": {
+      const g = find(m.objects, "group", st.target);
+      if (!g) { add("NoOp(Groupe supprimé)"); break; }
+      const d = g.data, time = st.time || d.ring_time;
+      if (d.cid_prefix) add(`ExecIf($["\${CID_PFX}" = ""]?Set(CALLERID(name)=${d.cid_prefix} \${CALLERID(name)}))`), add("Set(CID_PFX=1)");
+      if (d.strategy === "page") { const r = ringers(d.members, m.users); if (r.length) { add(`Page(${r.map(devices).join("&")},db(page-headers^s^1)i,${time})`); add("Goto(end)"); } break; }
+      if (d.strategy === "rotate") {
+        const ring = ringers(d.members, m.users);
+        if (!ring.length) { add("NoOp(Aucun membre disponible)"); break; }
+        add(`Set(LOCAL(MEMBERS)=${ring.join("&")})`); add(`Set(LOCAL(I)=$[0\${RR_${g.number}} % ${ring.length}])`); add(`Set(GLOBAL(RR_${g.number})=$[\${I} + 1])`); add("Set(LOCAL(K)=0)");
+        add(`GotoIf($[\${K} >= ${ring.length}]?done-${tag})`, `next-${tag}`);
+        add(`Set(LOCAL(M)=\${CUT(MEMBERS,&,$[(\${I} + \${K}) % ${ring.length} + 1])})`);
+        add(`Dial(PJSIP/\${M}&PJSIP/\${M}-web,${time},tb(pickup-mark^s^1))`);
+        add('GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)');
+        add("Set(K=$[${K} + 1])"); add(`Goto(next-${tag})`); add("NoOp()", `done-${tag}`);
+        break;
+      }
+      ringUsers(d.members, d.strategy === "hunt" ? "hunt" : "all", time);
+      break;
+    }
+    case "queue": {
+      const q = find(m.objects, "queue", st.target);
+      if (!q) { add("NoOp(File supprimée)"); break; }
+      add("Answer()");
+      const gr = q.data.greeting && find(m.objects, "prompt", q.data.greeting);
+      if (gr?.data?.file) add(`Playback(${promptPath(m.soundsDir, gr)})`);
+      add(`Queue(q${q.number},t,,,${q.data.max_wait})`);
+      break;
+    }
+    case "prompt": {
+      const p = find(m.objects, "prompt", st.target);
+      if (p?.data?.file) { add("Answer()"); add(`Playback(${promptPath(m.soundsDir, p)})`); }
+      break;
+    }
+    default: for (const a of destApps({ type: st.type, target: st.target }, m)) add(a);
+  }
+  return out;
+}
+function buildFlow(o, m) {
+  const d = o.data;
+  const L = [`[flow-${o.id}]`, `exten => s,1,NoOp(${nameOf(o)})`, ` same => n,Set(CDR(rule)=${nameOf(o)})`];
+  const sched = d.schedule && find(m.objects, "schedule", d.schedule);
+  const branches = ["open", ...(sched ? ["closed", "break", "holiday"].filter((b) => d.branches[b]) : [])];
+  if (sched && branches.length > 1) {
+    L.push(` same => n,Gosub(sched-${sched.id},s,1)`);
+    for (const b of branches.slice(1)) L.push(` same => n,GotoIf($["\${GOSUB_RETVAL}" = "${b}"]?b-${b})`);
+  }
+  for (const b of branches) {
+    L.push(` same => n(b-${b}),NoOp(${BRANCHES[b]})`);
+    d.branches[b].forEach((st, i) => { for (const [label, app] of stepLines(st, m, `${b}-${i}`)) L.push(` same => n${label ? `(${label})` : ""},${app}`); });
+    L.push(" same => n,Hangup()");
+  }
+  L.push(" same => n(end),Hangup()");
+  return L;
 }
 
 /** Contenu de queues_callikoe.conf (inclus dans queues.conf). */
@@ -608,7 +746,8 @@ export function traceNumber(input, m) {
   const userDid = [...m.users.values()].find((u) => u.dids.includes(n));
   const rule = m.objects.find((o) => o.kind === "rule" && o.data.dids.includes(n));
   const objDid = m.objects.find((o) => OFFICE_KINDS.includes(o.kind) && (o.data.dids || []).includes(n));
-  const isOurs = m.trunkDids.has(n) || userDid || rule || objDid;
+  const flow = m.objects.find((o) => o.kind === "flow" && o.data.dids.includes(n));
+  const isOurs = m.trunkDids.has(n) || userDid || rule || objDid || flow;
   if (isOurs) {
     const head = node("did", `SDA ${fmt(n)}`, { detail: [] });
     if (!m.trunkDids.has(n)) { head.status = "warn"; head.detail.push("Ce numéro n'est déclaré dans aucun trunk (Trunks › SDA) : vérifie que l'opérateur l'envoie bien sur ce PBX."); }
@@ -620,9 +759,11 @@ export function traceNumber(input, m) {
       head.children.push({ label: "SDA directe", node: expand({ type: objDid.kind, target: objDid.id }, m, [], 0) });
     } else if (rule) {
       head.children.push({ label: "Règle entrante", node: expandRule(rule, m, [], 0) });
+    } else if (flow) {
+      head.children.push({ label: "Routage", node: expandFlow(flow, m) });
     } else {
-      const def = m.objects.find((o) => o.kind === "rule" && o.data.is_default);
-      if (def) head.children.push({ label: "Aucune règle pour cette SDA → règle par défaut", node: expandRule(def, m, [], 0) });
+      const def = m.objects.find((o) => (o.kind === "rule" || o.kind === "flow") && o.data.is_default);
+      if (def) head.children.push({ label: "Aucune règle pour cette SDA → routage par défaut", node: def.kind === "flow" ? expandFlow(def, m) : expandRule(def, m, [], 0) });
       else head.children.push({ label: "Aucune règle pour cette SDA", node: legacyInbound(m) });
     }
     roots.push(head);
@@ -659,6 +800,52 @@ function memberNode(id, m) {
   else if (!u.options.accept_group_calls) { nd.status = "warn"; nd.detail.push("Refuse les appels de groupe : ne sonne pas"); }
   else if (!devs.length) { nd.status = "warn"; nd.detail.push("Sonne, mais aucun appareil connecté"); }
   else nd.detail.push(`Sonne : ${devs.join(", ")}`);
+  return nd;
+}
+
+function expandFlow(o, m) {
+  const d = o.data;
+  const nd = node("rule", `Routage « ${d.name} »`, { detail: [] });
+  const sched = d.schedule && find(m.objects, "schedule", d.schedule);
+  const now = sched ? scheduleState(sched.data, m.now || new Date(), m.tz) : "open";
+  if (sched) nd.detail.push(`Horaires « ${sched.data.name} » : ${describeWeek(sched.data.week)}`);
+  else nd.detail.push("Toujours ouvert (pas d'horaires)");
+  const branches = ["open", ...(sched ? ["closed", "break", "holiday"] : [])];
+  for (const b of branches) {
+    const list = d.branches[b];
+    const effective = list || d.branches.open;
+    const label = `${sched ? BRANCHES[b] : "Tous les appels"}${!list && b !== "open" ? " (même routage qu'ouvert)" : ""}${sched && b === now ? " ← maintenant" : ""}`;
+    if (!list && b !== "open") { nd.children.push({ label, node: node("info", "Accepté comme aux heures d'ouverture", { status: "info" }), current: b === now }); continue; }
+    nd.children.push({ label, node: chainNode(effective, 0, m, []), current: sched && b === now });
+  }
+  return nd;
+}
+/** Suite d'étapes en arbre : chaque étape a pour enfant la suivante (« sans réponse »). */
+function chainNode(steps, i, m, path) {
+  if (i >= steps.length) return node("hangup", "Fin du routage : raccroche", { status: "warn" });
+  const st = steps[i];
+  let nd;
+  if (st.type === "ring") {
+    nd = node("group", `Étape ${i + 1} · Sonne ${st.time} s${st.strategy === "hunt" ? " (l'un après l'autre)" : ""}`, { detail: [] });
+    for (const x of st.users) nd.children.push({ label: "Sonne", node: memberNode(x, m) });
+    if (!ringers(st.users, m.users).length) { nd.status = "bad"; nd.detail.push("Personne ne peut décrocher en ce moment."); }
+  } else if (st.type === "group") {
+    const g = find(m.objects, "group", st.target);
+    nd = g ? node("group", `Étape ${i + 1} · Groupe ${g.number} · ${g.data.name}`, { detail: [`${GROUP_STRATEGIES[g.data.strategy]}, ${st.time || g.data.ring_time} s`] }) : node("none", "Groupe supprimé", { status: "bad" });
+    if (g) { for (const x of g.data.members) nd.children.push({ label: "Membre", node: memberNode(x, m) }); if (!ringers(g.data.members, m.users).length) { nd.status = "bad"; nd.detail.push("Personne ne peut décrocher en ce moment."); } }
+  } else if (st.type === "queue") {
+    const q = find(m.objects, "queue", st.target);
+    nd = q ? node("queue", `Étape ${i + 1} · File ${q.number} · ${q.data.name}`, { detail: [`Attente max ${q.data.max_wait} s`] }) : node("none", "File supprimée", { status: "bad" });
+    if (q) for (const x of q.data.members) nd.children.push({ label: "Agent", node: memberNode(x, m) });
+  } else if (st.type === "prompt") {
+    const p = find(m.objects, "prompt", st.target);
+    nd = node("prompt", `Étape ${i + 1} · Annonce « ${p?.data.name || "?"} »`, { status: p ? "ok" : "bad" });
+  } else {
+    const t = expand({ type: st.type, target: st.target }, m, path, 1);
+    t.title = `Étape ${i + 1} · ${t.title}`;
+    return t;
+  }
+  nd.children.push({ label: st.type === "prompt" ? "Puis" : st.type === "queue" ? "Attente dépassée / aucun agent" : "Sans réponse", node: chainNode(steps, i + 1, m, path) });
   return nd;
 }
 

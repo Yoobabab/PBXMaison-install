@@ -194,6 +194,14 @@ api GET "/api/trace?n=0465001540" | grep -q '"SVI 800 · Standard"' && pass "Tra
 api GET /api/forwards | grep -q '"forwards":\[' && pass "Où sont les renvois : liste disponible" || fail "renvois"
 sudo grep -E "ERROR|WARNING" /var/log/asterisk/messages | grep -iE "pbx_config|extensions|app_queue|queues\.conf|res_musiconhold" | tail -5 > ast-err2.txt || true
 if [[ -s ast-err2.txt ]]; then cat ast-err2.txt >> "$OUT"; fail "Erreurs Asterisk (gestion d'appels)"; else pass "Aucune erreur Asterisk au chargement de la gestion d'appels"; fi
+# Routage décrit en texte → proposition → validation (éditeur visuel)
+P="$(api POST /api/callflow-parse '{"text":"Quand on appelle le 04 65 00 15 41 : poste 205 sonne 20 s puis groupe Accueil puis la messagerie de groupe"}')"
+echo "$P" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);const o=r.proposal.branches.open;process.exit(r.proposal.dids[0]==="0465001541"&&o.length===3&&o[0].type==="ring"&&o[0].users[0]==="205"&&o[0].time===20&&o[1].type==="group"&&o[2].type==="groupvm"?0:1)})' && pass "Routage décrit en texte : SDA, sonnerie 20 s, groupe, messagerie de groupe compris" || { echo "$P" | cut -c1-400 >> "$OUT"; fail "analyse du texte"; }
+FL="$(echo "$P" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s).proposal;console.log(JSON.stringify({...p,name:"Routage test"}))})')"
+FID="$(api POST /api/callflow/flow "$FL" | jid)"
+sleep 1
+sudo /usr/sbin/asterisk -rx 'dialplan show 0465001541@did-rules' | grep -q "flow-$FID" && sudo /usr/sbin/asterisk -rx "dialplan show s@flow-$FID" | grep -q 'Dial(PJSIP/205&PJSIP/205-web,20' && pass "Routage validé : SDA → étapes appliquées dans Asterisk" || { sudo /usr/sbin/asterisk -rx "dialplan show s@flow-$FID" | head -15 >> "$OUT"; fail "routage flow"; }
+api GET "/api/trace?n=0465001541" | grep -q 'Routage test' && pass "Traceur : SDA → routage visuel" || fail "traceur routage"
 if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" "" callflow 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Gestion d'appels OK"; then pass "Appels réels : groupe 600 et SVI 800 (touche 1)"; else
   sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appels gestion d'appels"; fi
 

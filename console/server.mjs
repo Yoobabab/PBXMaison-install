@@ -15,8 +15,8 @@ import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import * as vm from "./lib/voicemail.mjs";
-import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS } from "./lib/callflow.mjs";
-const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS };
+import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
+const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
 
 if (!settings.sessionSecret) { console.error("SESSION_SECRET manquant"); process.exit(1); }
@@ -380,6 +380,7 @@ export async function buildApp({ db, ami } = {}) {
   app.put("/api/prompts/:id", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => pbx.savePrompt(req.params.id, req.body?.name, wavOf(req.body), currentUser(req).email));
   app.get("/api/prompts/:id/audio", { preHandler: requireUser }, async (req, reply) =>
     reply.type("audio/wav").header("cache-control", "no-store").send(fs.createReadStream(await pbx.promptFile(req.params.id))));
+  app.post("/api/callflow-parse", { preHandler: requireUser }, async (req) => pbx.parseFlow(String(req.body?.text || "").slice(0, 2000)));
   app.get("/api/trace", { preHandler: requireUser }, async (req) => pbx.trace(req.query?.n));
   app.get("/api/forwards", { preHandler: requireUser }, async () => ({ forwards: await pbx.forwardsReport() }));
 

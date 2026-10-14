@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
 import { MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType } from "./phones.mjs";
+import { parseRouting } from "./nlroute.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
 import { nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 
@@ -426,6 +427,10 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const where = [];
       if ((o.data.members || []).includes(num)) where.push("membre (retiré automatiquement)");
       for (const [f, dest] of destFields(o.data)) if ((dest?.type === "user" || dest?.type === "user_vm") && dest.target === num) where.push(`destination « ${f} » (→ raccrocher)`);
+      for (const list of Object.values(o.data.branches || {})) for (const st of list || []) {
+        if (st.type === "ring" && st.users.includes(num)) where.push("sonne dans une étape (retiré automatiquement)");
+        if ((st.type === "user" || st.type === "user_vm") && st.target === num) where.push("destination d'une étape (étape supprimée)");
+      }
       if (where.length) callflow.push({ kind: o.kind, kind_label: KINDS[o.kind], id: o.id, number: o.number, name: o.name, where });
     }
     if (callflow.some((c) => c.where.some((w) => w.startsWith("destination")))) forwards.push(...callflow.filter((c) => c.where.some((w) => w.startsWith("destination")))
@@ -461,6 +466,12 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         let changed = false;
         if ((d.members || []).includes(num)) { d.members = d.members.filter((x) => x !== num); changed = true; }
         for (const [f, dest, set] of destFields(d)) if ((dest?.type === "user" || dest?.type === "user_vm") && dest.target === num) { set({ type: "hangup", target: "" }); changed = true; void f; }
+        for (const b of Object.keys(d.branches || {})) {
+          if (!d.branches[b]) continue;
+          const kept = d.branches[b].map((st) => st.type === "ring" ? { ...st, users: st.users.filter((x) => x !== num) } : st)
+            .filter((st) => !(st.type === "ring" && !st.users.length) && !((st.type === "user" || st.type === "user_vm") && st.target === num));
+          if (JSON.stringify(kept) !== JSON.stringify(d.branches[b])) { d.branches[b] = kept; changed = true; }
+        }
         if (changed) await c.query("UPDATE pbxmaison_objects SET data = $3, updated_at = now(), updated_by = $4 WHERE kind = $1 AND id = $2", [o.kind, o.id, JSON.stringify(d), by || ""]);
       }
     });
@@ -814,6 +825,12 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         if (kind === "prompt" && d.greeting === id) { d.greeting = ""; changed = true; }
         if (kind === "prompt" && d.prompt === id) { d.prompt = ""; changed = true; }
         if (kind === "schedule" && d.schedule === id) { d.schedule = ""; changed = true; }
+        if (other.kind === "flow") for (const b of Object.keys(d.branches || {})) {
+          if (!d.branches[b]) continue;
+          const kept = d.branches[b].filter((st) => !(st.type === kind && st.target === id));
+          if (kept.length !== d.branches[b].length) { d.branches[b] = kept; changed = true; }
+          if (kind === "schedule" && b !== "open") { d.branches[b] = null; changed = true; }
+        }
         if (changed) await c.query("UPDATE pbxmaison_objects SET data = $3, updated_at = now(), updated_by = $4 WHERE kind = $1 AND id = $2", [other.kind, other.id, JSON.stringify(d), by || ""]);
       }
       await c.query("DELETE FROM pbxmaison_objects WHERE kind = $1 AND id = $2", [kind, id]);
@@ -877,6 +894,14 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     return { users: new Map(users.map((u) => [u.id, u])), objects, registered, outboundTrunk: routes.outbound_trunk,
       trunkDids: new Set(trunks.rows.flatMap((r) => r.dids || [])), legacyInbound: routes.inbound, cc: countryCode(), tz: tz(), now: new Date() };
   }
+  async function parseFlow(text) {
+    const [users, objects, trunks] = await Promise.all([loadUsers(), loadObjects(), db.query("SELECT dids FROM pbxmaison_trunks")]);
+    return parseRouting(text, {
+      users: users.map((u) => ({ id: u.id, name: displayName(u), first_name: u.first_name, last_name: u.last_name, mobile: u.mobile })),
+      objects: objects.map((o) => ({ kind: o.kind, id: o.id, number: o.number, name: o.name })),
+      trunkDids: trunks.rows.flatMap((r) => r.dids || []), cc: countryCode(),
+    });
+  }
   async function trace(number) { return traceNumber(number, await traceModel()); }
   async function forwardsReport() { return listForwards(await traceModel()); }
 
@@ -894,7 +919,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
-    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport,
+    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow,
   };
 }
 
