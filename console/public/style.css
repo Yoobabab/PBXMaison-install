@@ -117,3 +117,8 @@ footer{max-width:1120px;margin:auto;padding:0 16px 30px;color:var(--muted);font-
   .hide-sm{display:none}
   header nav{order:3;flex-basis:100%}
 }
+.pw-wrap{position:relative;display:block}
+.pw-wrap input{padding-right:42px}
+.pw-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--muted);padding:6px;cursor:pointer;display:flex;border-radius:6px}
+.pw-eye:hover{color:var(--ink)}
+.pw-eye:focus-visible{outline:2px solid var(--accent)}

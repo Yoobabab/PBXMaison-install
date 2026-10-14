@@ -520,3 +520,29 @@ async function route() {
 }
 window.addEventListener("hashchange", () => { clearInterval(timer); route(); });
 route();
+
+// ---------------------------------------------------------------- Œil sur les mots de passe
+const EYE = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="2"/></svg>';
+function addPasswordEyes(root = document) {
+  for (const input of root.querySelectorAll('input[type="password"]:not([data-eye])')) {
+    input.dataset.eye = "1";
+    const wrap = document.createElement("span");
+    wrap.className = "pw-wrap";
+    input.replaceWith(wrap);
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "pw-eye"; btn.innerHTML = EYE;
+    btn.title = btn.ariaLabel = "Afficher le mot de passe";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.innerHTML = show ? EYE_OFF : EYE;
+      btn.title = btn.ariaLabel = show ? "Masquer le mot de passe" : "Afficher le mot de passe";
+      input.focus();
+    });
+    wrap.append(input, btn);
+  }
+}
+new MutationObserver(() => addPasswordEyes()).observe(document.body, { childList: true, subtree: true });
+addPasswordEyes();
