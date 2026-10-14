@@ -83,7 +83,10 @@ rm -rf "$APP.new" && mv "$TMP/app" "$APP.new"
 if [[ -d "$APP/console/node_modules" ]]; then mv "$APP/console/node_modules" "$APP.new/console/node_modules"; fi
 rm -rf "$APP.old" && { [[ -d "$APP" ]] && mv "$APP" "$APP.old" || true; } && mv "$APP.new" "$APP" && rm -rf "$APP.old"
 chmod 755 "$APP/pbx/bin/pbx-configure"
-ok "Code installé dans $APP (${REF})"
+# Révision installée (menu Mises à jour de la console)
+COMMIT="$(curl -fsSL -H "Accept: application/vnd.github.sha" "https://api.github.com/repos/${REPO}/commits/${REF}" 2>/dev/null | head -c 40 || true)"
+[[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || COMMIT=""
+ok "Code installé dans $APP (${REF}$([[ -n "$COMMIT" ]] && echo " · ${COMMIT:0:7}") · version $(cat "$APP/VERSION" 2>/dev/null || echo "?"))"
 
 # =============================================================================
 step "Moteur téléphonique (Asterisk précompilé)"
@@ -111,6 +114,8 @@ chown -R asterisk:asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asteri
 install -d -o asterisk -g asterisk -m 2770 /var/spool/asterisk/voicemail /var/spool/asterisk/voicemail/default
 chmod -R g+rwX /var/spool/asterisk/voicemail
 find /var/spool/asterisk/voicemail -type d -exec chmod g+s {} +
+# Enregistrements des appels (lus par la console : groupe asterisk)
+install -d -o asterisk -g asterisk -m 2770 /var/spool/asterisk/monitor /var/spool/asterisk/monitor/callikoe
 cat > /etc/systemd/system/asterisk.service <<'EOF'
 [Unit]
 Description=Asterisk (Callikoe)
@@ -270,6 +275,9 @@ BEHIND_NAT='${BEHIND_NAT}'
 IS_WSL='${IS_WSL}'
 OS_NAME='${PRETTY_NAME}'
 INSTALLED_AT='$(date -Is)'
+REPO='${REPO}'
+REF='${REF}'
+COMMIT='${COMMIT}'
 EOF
 chmod 644 "$ETC/install.state"
 "$APP/pbx/bin/pbx-configure" nginx
@@ -316,23 +324,14 @@ EOF
   nft -c -f /etc/nftables.conf && systemctl enable nftables >/dev/null 2>&1 && nft -f /etc/nftables.conf
   ok "Pare-feu actif (SSH port ${SSH_PORTS}, SIP, audio, web ; le reste est bloqué)"
 fi
-cat > /etc/fail2ban/jail.d/pbxmaison.conf <<'EOF'
-[asterisk]
-enabled  = true
-backend  = auto
-filter   = asterisk
-logpath  = /var/log/asterisk/security
-           /var/log/asterisk/messages
-maxretry = 5
-findtime = 10m
-bantime  = 1h
-banaction = %(banaction_allports)s
-ignoreip = 127.0.0.1/8 ::1
-EOF
+# Réglages gardés d'une installation à l'autre (modifiables dans la console : Sécurité)
+if ! grep -q "callikoe-manual" /etc/fail2ban/jail.d/pbxmaison.conf 2>/dev/null; then
+  "$APP/pbx/bin/pbx-configure" f2b settings 5 10 60 "" >/dev/null || warn "Réglages fail2ban non écrits"
+fi
 touch /var/log/asterisk/security /var/log/asterisk/messages
 chown asterisk:asterisk /var/log/asterisk/security /var/log/asterisk/messages
 systemctl restart fail2ban || warn "fail2ban n'a pas redémarré (journalctl -u fail2ban)"
-ok "fail2ban : 5 échecs en 10 min → IP bannie 1 h"
+ok "fail2ban actif (réglages : console › Sécurité)"
 
 # =============================================================================
 step "Assistant de configuration"

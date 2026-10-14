@@ -19,6 +19,7 @@ import { parseCsv } from "./lib/contacts.mjs";
 import { migrateChat, createChat } from "./lib/chat.mjs";
 import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
+import { createAdminService } from "./lib/admin.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
 
 if (!settings.sessionSecret) { console.error("SESSION_SECRET manquant"); process.exit(1); }
@@ -30,6 +31,9 @@ export async function buildApp({ db, ami } = {}) {
   await migrateChat(db);
   const pbx = createPbxService({ db, ami, templatesFile: TEMPLATES_FILE, routesFile: routesPath(VAR), env: pbxEnv });
   const chat = createChat(db, { users: () => pbx.loadUsers() });
+  const admin = createAdminService({ db, ami, pbx });
+  await admin.migrate();
+  pbx.setExtraDialplan(() => admin.dialplanParts());
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 1_048_576 });
   await app.register(cookie);
@@ -68,6 +72,14 @@ export async function buildApp({ db, ami } = {}) {
     if ((await userCount()) === 0 && tokenValid(token)) return;
     return reply.code(403).send({ error: "Lien d'installation invalide : utilise l'adresse affichée à la fin de l'installation." });
   };
+
+  // Accès à la console limité à certaines adresses IP (Sécurité) ; le softphone et le provisioning restent accessibles
+  app.addHook("onRequest", async (req, reply) => {
+    if (!req.url.startsWith("/api/") || req.url.startsWith("/api/u/") || req.url === "/api/health") return;
+    const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
+    if (!admin.consoleAllowed(ip)) return reply.code(403).send({ error: `Accès à la console refusé depuis ${ip} (Sécurité › Accès à la console).` });
+  });
+  const clientIp = (req) => String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
 
   // ---------------------------------------------------------------- État général
   app.get("/api/health", async () => ({ ok: true }));
@@ -362,8 +374,10 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/phone-options", { preHandler: requireUser }, async () => ({
     ...pbx.phoneOptions(), provisioning_url: await pbx.provisioningUrl(sipServer()), timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris" }));
   app.get("/api/extensions/:id/phone.cfg", { preHandler: requireUser }, async (req, reply) => {
-    const { user, text } = await pbx.phoneConfig(req.params.id, sipServer());
-    reply.header("content-disposition", `attachment; filename="${user.phone.mac || "poste-" + user.id}.cfg"`);
+    const { user, text, format } = await pbx.phoneConfig(req.params.id, sipServer());
+    const base = user.phone.mac || "poste-" + user.id;
+    const fname = format === "grandstream" ? `cfg${base}.xml` : format === "snom" ? `${base}.xml` : `${base}.cfg`;
+    reply.header("content-disposition", `attachment; filename="${fname}"`);
     return reply.type("text/plain; charset=utf-8").send(text);
   });
   app.post("/api/extensions/:id/phone/notify", { preHandler: requireUser }, async (req) => pbx.notifyPhone(req.params.id, req.body?.action));
@@ -430,6 +444,71 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/routes", { preHandler: requireUser }, async () => pbx.getRoutes());
   app.put("/api/routes", { preHandler: requireUser }, async (req) => pbx.setRoutes(req.body || {}));
 
+  // ---------------------------------------------------------------- Règles sortantes
+  app.get("/api/outbound", { preHandler: requireUser }, async () => admin.listOutbound());
+  app.post("/api/outbound", { preHandler: requireUser }, async (req) => admin.saveOutbound(null, req.body || {}));
+  app.put("/api/outbound/:id", { preHandler: requireUser }, async (req) => admin.saveOutbound(req.params.id, req.body || {}));
+  app.delete("/api/outbound/:id", { preHandler: requireUser }, async (req) => admin.deleteOutbound(req.params.id));
+  app.put("/api/outbound-order", { preHandler: requireUser }, async (req) => admin.orderOutbound(req.body?.ids));
+
+  // ---------------------------------------------------------------- Sécurité
+  app.get("/api/security", { preHandler: requireUser }, async () => admin.getSecurity());
+  app.put("/api/security", { preHandler: requireUser }, async (req) => admin.setSecurity(req.body || {}, clientIp(req)));
+  app.post("/api/security/ban", { preHandler: requireUser }, async (req) => admin.banIp(req.body?.ip, true));
+  app.post("/api/security/unban", { preHandler: requireUser }, async (req) => admin.banIp(req.body?.ip, false));
+
+  // ---------------------------------------------------------------- Enregistrements
+  app.get("/api/recording", { preHandler: requireUser }, async () => admin.getRecording());
+  app.put("/api/recording", { preHandler: requireUser }, async (req) => admin.setRecording(req.body || {}));
+  app.get("/api/recordings", { preHandler: requireUser }, async (req) => admin.listRecordings(req.query || {}));
+  app.get("/api/recordings/file", { preHandler: requireUser }, async (req, reply) => {
+    const f = await admin.recordingFile(req.query?.f);
+    if (req.query?.dl === "1") reply.header("content-disposition", `attachment; filename="appel-${path.basename(f)}"`);
+    return reply.type("audio/wav").header("cache-control", "private, no-store").send(fs.createReadStream(f));
+  });
+  app.delete("/api/recordings/file", { preHandler: requireUser }, async (req) => admin.deleteRecording(req.query?.f));
+
+  // ---------------------------------------------------------------- Codes raccourcis
+  app.get("/api/shortcodes", { preHandler: requireUser }, async () => admin.getShortcodes());
+  app.put("/api/shortcodes", { preHandler: requireUser }, async (req) => admin.setShortcodes(req.body || {}));
+  app.get("/api/u/shortcodes", { preHandler: requireWebUser }, async () => admin.getShortcodes());
+
+  // ---------------------------------------------------------------- Sauvegardes
+  app.get("/api/backups", { preHandler: requireUser }, async () => admin.getBackups());
+  app.put("/api/backups", { preHandler: requireUser }, async (req) => admin.setBackups(req.body || {}));
+  app.post("/api/backups/run", { preHandler: requireUser }, async () => admin.runBackup("manual"));
+  app.post("/api/backups/test-remote", { preHandler: requireUser }, async (req) => admin.testRemote(req.body || {}));
+  app.post("/api/backups/restore", { preHandler: requireUser }, async (req) => admin.restoreBackup(String(req.body?.file || "")));
+  app.get("/api/backups/restore", { preHandler: requireUser }, async () => admin.restoreStatus());
+  app.get("/api/backups/file/:file", { preHandler: requireUser }, async (req, reply) => {
+    const f = (await import("./lib/backup.mjs")).backupPath(req.params.file);
+    if (!f || !fs.existsSync(f)) return reply.code(404).send({ error: "Sauvegarde introuvable." });
+    return reply.type("application/gzip").header("content-disposition", `attachment; filename="${req.params.file}"`).send(fs.createReadStream(f));
+  });
+  app.register(async (scope) => {
+    scope.addContentTypeParser("application/octet-stream", { bodyLimit: 4 * 1024 ** 3 }, (req, payload, done) => done(null, payload));
+    scope.post("/api/backups/upload", { preHandler: requireUser, bodyLimit: 4 * 1024 ** 3 }, async (req) => admin.stageUpload(req.body));
+  });
+
+  // ---------------------------------------------------------------- Mises à jour, licence
+  app.get("/api/updates", { preHandler: requireUser }, async (req) => admin.getUpdates({ check: req.query?.check === "1" }));
+  app.post("/api/updates/start", { preHandler: requireUser }, async () => admin.startUpdate());
+  app.get("/api/updates/status", { preHandler: requireUser }, async () => admin.updateStatus());
+  app.get("/api/license", { preHandler: requireUser }, async () => admin.getLicense());
+
+  // ---------------------------------------------------------------- Alertes
+  app.get("/api/alerts", { preHandler: requireUser }, async () => admin.getAlerts());
+  app.put("/api/alerts", { preHandler: requireUser }, async (req) => admin.setAlerts(req.body || {}));
+  app.delete("/api/alerts/log", { preHandler: requireUser }, async () => admin.clearAlerts());
+  app.post("/api/alerts/check", { preHandler: requireUser }, async () => { await admin.monitor(); return admin.getAlerts(); });
+
+  // ---------------------------------------------------------------- Passerelles et DECT
+  app.get("/api/gateways", { preHandler: requireUser }, async () => admin.listGateways());
+  app.post("/api/gateways", { preHandler: requireUser }, async (req) => admin.saveGateway(null, req.body || {}));
+  app.put("/api/gateways/:id", { preHandler: requireUser }, async (req) => admin.saveGateway(req.params.id, req.body || {}));
+  app.delete("/api/gateways/:id", { preHandler: requireUser }, async (req) => admin.deleteGateway(req.params.id));
+  app.get("/api/gateways/:id/setup", { preHandler: requireUser }, async (req) => admin.gatewaySetup(req.params.id, sipServer()));
+
   app.get("/api/calls", { preHandler: requireUser }, async () => pbx.listCalls());
 
   // Application monopage : toute autre route renvoie index.html
@@ -439,6 +518,7 @@ export async function buildApp({ db, ami } = {}) {
   });
 
   app.decorate("pbx", pbx);
+  app.decorate("admin", admin);
   app.addHook("onClose", async () => { ami.close(); await db.end(); });
   return app;
 }
@@ -451,5 +531,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
   if (isConfigured()) app.pbx.applyDialplan().catch((e) => console.error("Plan de numérotation non régénéré :", e.message));
   // Suivi des connexions des téléphones (« connecté depuis… »)
   setInterval(() => { if (isConfigured()) app.pbx.trackDevices().catch(() => {}); }, 20_000).unref();
+  // Codes de statut, surveillance (alertes), sauvegardes programmées, purge des enregistrements
+  app.admin.start();
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => app.close().then(() => process.exit(0)));
 }

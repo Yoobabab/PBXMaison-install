@@ -1,20 +1,44 @@
-// Gestion d'appels › Routages : éditeur visuel (glisser-déposer de gauche à droite) et routage décrit en texte.
+// Gestion d'appels › Routages : éditeur visuel simplifié (étapes de gauche à droite, glisser-déposer ou bouton +)
+// et routage décrit en texte (proposition à valider).
 let h = null, cf = null;
 const esc = (v) => h.esc(v);
 const fmtP = (n) => /^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "");
 const objs = (kind) => cf.objects.filter((o) => o.kind === kind);
 const userName = (id) => cf.users.find((u) => u.id === id)?.name || id;
-const ICON = { conf: "🎥", did: "☎", schedule: "🕘", ring: "🔔", group: "👥", queue: "⏳", prompt: "🔊", ivr: "☰", user: "👤", user_vm: "✉", groupvm: "📮", external: "↗", hangup: "✕" };
-const PALETTE = [
-  ["Entrée", [["did", "SDA (numéro appelé)"], ["schedule", "Horaires"]]],
-  ["Étapes (l'appel continue si personne ne répond)", [["ring", "Faire sonner des utilisateurs"], ["group", "Groupe d'appel"], ["queue", "File d'attente"], ["prompt", "Lire une annonce"]]],
-  ["Fin du routage", [["user_vm", "Boîte vocale d'un utilisateur"], ["groupvm", "Boîte vocale de groupe"], ["ivr", "Répondeur numérique (SVI)"], ["conf", "Salle de réunion"], ["user", "Utilisateur (avec ses renvois)"], ["external", "Numéro externe"], ["hangup", "Terminer l'appel"]]],
+
+// Icônes au trait (24×24), cohérentes avec le reste de la console
+const P = {
+  did: '<path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/><path d="M15 3v6h6M21 3l-6 6"/>',
+  schedule: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  ring: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  group: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.3.2 4 1.7 4.5 4.5"/>',
+  queue: '<path d="M4 6h10M4 12h10M4 18h7"/><circle cx="18.5" cy="16.5" r="3.5"/><path d="M18.5 15v1.7l1 .8"/>',
+  prompt: '<path d="M4 9.5v5h3.5L12 19V5L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  ivr: '<rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8 8h.01M12 8h.01M16 8h.01M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01" stroke-width="2.6"/>',
+  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-3.8 3.7-6 7-6s6.2 2.2 7 6"/>',
+  user_vm: '<circle cx="6.5" cy="12" r="3.5"/><circle cx="17.5" cy="12" r="3.5"/><path d="M6.5 15.5h11"/>',
+  groupvm: '<path d="M3 13l2.5-7h13L21 13v6H3z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
+  conf: '<rect x="3" y="6.5" width="12.5" height="11" rx="2"/><path d="m15.5 10.5 5.5-3v9l-5.5-3"/>',
+  external: '<path d="M7 17 17 7M9 7h8v8"/>',
+  hangup: '<path d="M3.5 13.5c4.7-4 12.3-4 17 0l-2 2.5-3-1.2v-2.3a10 10 0 0 0-7 0v2.3l-3 1.2z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>', grip: '<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="2.8"/>',
+  arrow: '<path d="M4 12h15M14 6l6 6-6 6"/>', spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+};
+const icon = (k, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[k] || ""}</svg>`;
+
+const STEPS = [
+  ["ring", "Sonnerie", "Faire sonner une ou plusieurs personnes"], ["group", "Groupe d'appel", "Un groupe existant"], ["queue", "File d'attente", "Mise en attente avec musique"],
+  ["prompt", "Annonce", "Jouer un message puis continuer"],
 ];
-const SHORT = { conf: "Réunion", ring: "Sonnerie", group: "Groupe d'appel", queue: "File d'attente", prompt: "Annonce", ivr: "SVI", user: "Utilisateur", user_vm: "Boîte vocale", groupvm: "Boîte de groupe", external: "Numéro externe", hangup: "Fin de l'appel" };
-const TERMINAL = ["ivr", "user", "user_vm", "groupvm", "conf", "external", "hangup"];
+const ENDS = [
+  ["user_vm", "Boîte vocale", "Messagerie d'un utilisateur"], ["groupvm", "Boîte de groupe", "Messagerie partagée"], ["ivr", "SVI", "Menu « tapez 1, tapez 2 »"],
+  ["user", "Utilisateur", "Avec ses propres renvois"], ["conf", "Réunion", "Salle de réunion"], ["external", "Numéro externe", "Renvoi vers un mobile…"], ["hangup", "Fin de l'appel", "Raccrocher"],
+];
+const LABEL = Object.fromEntries([...STEPS, ...ENDS].map(([k, l]) => [k, l]));
+const TERMINAL = ENDS.map(([k]) => k);
 const BR = { open: "Heures d'ouverture", closed: "Bureau fermé", break: "Pause", holiday: "Jour férié / congés" };
 
-let flow = null, sel = null, activeRow = "open", errAt = null, cur = null;
+let flow = null, sel = null, tab = "open", errAt = null, cur = null, adding = null;
 
 export function flowSummary(cfData, helpers, d) {
   h = helpers; cf = cfData;
@@ -25,84 +49,148 @@ export function renderFlowEditor(helpers, cfData, head, id) {
   h = helpers; cf = cfData;
   cur = id && id !== "nouveau" ? cf.objects.find((o) => o.kind === "flow" && o.id === id) : null;
   flow = cur ? structuredClone(cur.data) : { name: "", dids: [], is_default: false, schedule: "", branches: { open: [], closed: null, break: null, holiday: null } };
-  sel = null; activeRow = "open"; errAt = null;
-  document.body.classList.add("wide");
-  window.addEventListener("hashchange", () => document.body.classList.remove("wide"), { once: true });
-  h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed fe">
-    <div class="pad"><p style="margin:0 0 12px"><a href="#/gestion/routages">← Routages</a></p>
-      <div class="fe-nl">
-        <label for="nlt" class="dl">Décris le routage, je le construis pour toi</label>
-        <textarea id="nlt" rows="3" placeholder="Ex. : Quand on appelle le 04 65 00 15 40 : Accueil sonne 30 s puis groupe avec Paul et Julie pendant 15 s puis messagerie de Marine. En dehors des horaires : annonce Fermé puis raccrocher."></textarea>
-        <div class="row"><button type="button" class="btn" id="nlgo">Proposer le routage</button><span class="hint">Rien n'est appliqué tant que tu n'as pas cliqué sur « Valider et appliquer ».</span></div>
-        <div id="nlres"></div>
-      </div>
+  sel = null; tab = "open"; errAt = null; adding = null;
+  h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed fx">
+    <div class="fx-top">
+      <a href="#/gestion/routages" class="fx-back">← Routages</a>
+      <input id="fname" class="fx-name" maxlength="50" value="${esc(flow.name)}" placeholder="Nom du routage (ex. Standard principal)" aria-label="Nom du routage">
+      <div class="fx-actions">${cur ? '<button type="button" class="btn ghost" id="fdel">Supprimer</button>' : ""}${cur?.data.dids[0] ? `<a class="btn ghost" href="#/gestion/traceur/${esc(cur.data.dids[0])}">Tracer</a>` : ""}<button type="button" class="btn" id="fsave">Valider et appliquer</button></div>
     </div>
-    <div class="fe-grid">
-      <aside class="fe-pal">${PALETTE.map(([title, items]) => `<div class="fe-pg"><span class="fe-pt">${esc(title)}</span>${items.map(([t, l]) => `<div class="fe-pi ${TERMINAL.includes(t) ? "end" : t === "did" || t === "schedule" ? "in" : ""}" draggable="true" data-new="${t}" title="Glisse-moi dans le schéma (ou clique pour ajouter à la ligne active)"><span class="fe-ic">${ICON[t]}</span>${esc(l)}</div>`).join("")}</div>`).join("")}
-        <p class="hint">Glisse les cadres de gauche à droite dans le schéma, ou clique dessus pour les ajouter à la ligne active.</p></aside>
-      <section class="fe-canvas" id="canvas"></section>
-      <aside class="fe-side" id="side"></aside>
+    <details class="fx-nl" ${cur ? "" : "open"}><summary>${icon("spark", 18)} Décrire le routage en une phrase</summary>
+      <div class="fx-nlb"><textarea id="nlt" rows="2" placeholder="Ex. : Quand on appelle le 04 65 00 15 40 : Paul sonne 30 s puis groupe Accueil puis messagerie de Julie. En dehors des horaires Bureau : annonce Fermé puis raccrocher."></textarea>
+      <div class="fx-row"><button type="button" class="btn" id="nlgo">Proposer le routage</button><span class="hint">Je construis le schéma ci-dessous ; rien n'est appliqué avant « Valider ».</span></div>
+      <div id="nlres"></div></div></details>
+    <div class="fx-entry">
+      <div class="fx-box"><span class="fx-bi">${icon("did", 18)}</span><div class="fx-bc"><span class="fx-bl">Numéros appelés (SDA)</span>
+        <div class="fx-chips" id="dids"></div></div></div>
+      <div class="fx-box"><span class="fx-bi">${icon("schedule", 18)}</span><div class="fx-bc"><span class="fx-bl">Horaires</span>
+        <select id="fsched"><option value="">Toujours ouvert</option>${objs("schedule").map((s) => `<option value="${esc(s.id)}" ${flow.schedule === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div></div>
+      <label class="check fx-def"><input type="checkbox" id="fdef" ${flow.is_default ? "checked" : ""}> Routage par défaut (SDA sans règle)</label>
     </div>
-    <div class="pad fe-foot"><div class="grow"><label class="fe-name">Nom du routage<input id="fname" maxlength="50" value="${esc(flow.name)}" placeholder="Routage standard"></label>
-      <label class="check"><input type="checkbox" id="fdef" ${flow.is_default ? "checked" : ""}> Routage par défaut (toutes les SDA qui n'ont pas de règle)</label></div>
-      <div class="row">${cur ? '<button type="button" class="btn ghost" id="fdel">Supprimer</button>' : ""}${cur?.data.dids[0] ? `<a class="btn ghost" href="#/gestion/traceur/${esc(cur.data.dids[0])}">Tracer</a>` : ""}<button type="button" class="btn" id="fsave">Valider et appliquer</button></div>
-      <div id="fmsg" style="flex-basis:100%"></div></div>
-  </div>`;
+    <nav class="fx-tabs" id="tabs"></nav>
+    <div class="fx-stage"><div class="fx-chain" id="chain"></div></div>
+    <div class="fx-pickhost" id="pickhost"></div>
+    <div class="fx-msg" id="fmsg"></div>
+  </div>
+  <div class="fx-drawer" id="side" aria-hidden="true"></div><div class="fx-scrim" id="scrim"></div>`;
   h.$("#fname").oninput = (e) => { flow.name = e.target.value; };
-  h.$("#fdef").onchange = (e) => { flow.is_default = e.target.checked; };
+  h.$("#fdef").onchange = (e) => { flow.is_default = e.target.checked; drawDids(); };
   h.$("#fsave").onclick = save;
   h.$("#fdel")?.addEventListener("click", del);
   h.$("#nlgo").onclick = propose;
-  h.app.querySelectorAll("[data-new]").forEach((p) => {
-    p.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", `new:${p.dataset.new}`); e.dataTransfer.effectAllowed = "copy"; document.body.classList.add("fe-dragging"); });
-    p.addEventListener("dragend", () => document.body.classList.remove("fe-dragging"));
-    p.addEventListener("click", () => addNew(p.dataset.new, activeRow, (flow.branches[activeRow] || flow.branches.open).length));
-  });
-  draw();
+  h.$("#fsched").onchange = (e) => {
+    flow.schedule = e.target.value;
+    if (!flow.schedule) { flow.branches.closed = flow.branches.break = flow.branches.holiday = null; tab = "open"; }
+    else if (flow.branches.closed === null) flow.branches.closed = [];
+    draw();
+  };
+  h.$("#scrim").onclick = closePanel;
+  drawDids(); draw();
 }
 
-// ---------------------------------------------------------------- Schéma
-function draw() {
-  const c = h.$("#canvas");
-  const rows = ["open", ...(flow.schedule ? ["closed", "break", "holiday"] : [])];
-  c.innerHTML = `<div class="fe-entry">
-      <div class="fe-did dz-in" data-drop="did"><span class="fe-ic">☎</span><div class="grow"><strong>SDA</strong>
-        <div class="fe-chips">${flow.dids.map((d) => `<span class="fe-chip">${esc(fmtP(d))}<button type="button" data-rmdid="${esc(d)}" title="Retirer">✕</button></span>`).join("") || (flow.is_default ? '<span class="s">Par défaut : toutes les SDA sans règle</span>' : '<span class="s">Glisse une SDA ici</span>')}</div>
-        <select id="adddid" class="fe-mini"><option value="">+ Ajouter une SDA…</option>${freeDids().map((d) => `<option value="${esc(d.did)}">${esc(fmtP(d.did))} (${esc(d.trunk)})</option>`).join("")}<option value="__autre">Autre numéro…</option></select></div></div>
-      <div class="fe-arrow">→</div>
-      <div class="fe-sch dz-in" data-drop="schedule"><span class="fe-ic">🕘</span><div class="grow"><strong>Horaires</strong>
-        <select id="fsched" class="fe-mini"><option value="">Aucun : toujours ouvert</option>${objs("schedule").map((s) => `<option value="${esc(s.id)}" ${flow.schedule === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>
-        ${objs("schedule").length ? "" : '<a class="s" href="#/gestion/horaires/nouveau">Créer des horaires</a>'}</div></div>
-    </div>
-    ${rows.map((b) => {
-      const list = flow.branches[b];
-      const same = b !== "open" && !list;
-      return `<div class="fe-row ${activeRow === b ? "active" : ""}" data-row="${b}">
-        <div class="fe-rl"><button type="button" class="fe-rbtn" data-act="${b}" title="Ligne active : les cadres cliqués s'ajoutent ici">${flow.schedule ? esc(BR[b]) : "Tous les appels"}</button>
-          ${b !== "open" ? `<label class="switch sm"><input type="checkbox" data-same="${b}" ${same ? "checked" : ""}><span></span> Comme ouvert</label>` : ""}</div>
-        <div class="fe-chain">${same ? '<div class="fe-same">Même routage qu\'aux heures d\'ouverture</div>' : chain(b, list)}</div></div>`;
-    }).join("")}`;
-  wire(c);
+// ---------------------------------------------------------------- Entrée (SDA)
+function freeDids() {
+  const used = new Set(); for (const o of cf.objects) if (o.id !== cur?.id) for (const d of o.data.dids || []) used.add(d);
+  for (const u of cf.users) for (const d of u.dids || []) used.add(d);
+  return cf.trunk_dids.filter((d) => !used.has(d.did) && !flow.dids.includes(d.did));
 }
-function chain(b, list) {
-  const parts = [];
+function drawDids() {
+  const box = h.$("#dids");
+  box.innerHTML = `${flow.dids.map((d) => `<span class="fx-chip">${esc(fmtP(d))}<button type="button" data-rmdid="${esc(d)}" aria-label="Retirer ${esc(fmtP(d))}">${icon("x", 12)}</button></span>`).join("")}
+    ${flow.is_default && !flow.dids.length ? '<span class="s">Toutes les SDA sans règle</span>' : ""}
+    <select id="adddid" class="fx-add"><option value="">+ Ajouter</option>${freeDids().map((d) => `<option value="${esc(d.did)}">${esc(fmtP(d.did))}</option>`).join("")}<option value="__autre">Autre numéro…</option></select>
+    <input id="otherdid" class="fx-other" placeholder="04 12 34 56 78" hidden>`;
+  box.querySelectorAll("[data-rmdid]").forEach((x) => x.onclick = () => { flow.dids = flow.dids.filter((d) => d !== x.dataset.rmdid); drawDids(); });
+  const sel2 = h.$("#adddid"), other = h.$("#otherdid");
+  sel2.onchange = () => {
+    if (sel2.value === "__autre") { other.hidden = false; other.focus(); sel2.value = ""; return; }
+    if (sel2.value) { flow.dids.push(sel2.value); drawDids(); }
+  };
+  other.onkeydown = (e) => { if (e.key !== "Enter") return; e.preventDefault(); const v = other.value.replace(/[\s.]/g, "").replace(/^\+33/, "0"); if (/^0[1-9]\d{8}$/.test(v) && !flow.dids.includes(v)) { flow.dids.push(v); drawDids(); } else other.classList.add("bad"); };
+}
+
+// ---------------------------------------------------------------- Étapes
+function draw() {
+  const tabs = ["open", ...(flow.schedule ? ["closed", "break", "holiday"] : [])];
+  if (!tabs.includes(tab)) tab = "open";
+  h.$("#tabs").innerHTML = tabs.length > 1 ? tabs.map((b) => `<button type="button" class="${b === tab ? "on" : ""}" data-tab="${b}">${esc(BR[b])}<span class="s">${b !== "open" && !flow.branches[b] ? "comme ouvert" : `${(flow.branches[b] || []).length} étape${(flow.branches[b] || []).length > 1 ? "s" : ""}`}</span></button>`).join("") : "";
+  h.$("#tabs").hidden = tabs.length < 2;
+  h.$("#tabs").querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => { tab = b.dataset.tab; sel = null; adding = null; closePanel(); draw(); });
+  const c = h.$("#chain");
+  if (tab !== "open" && !flow.branches[tab]) {
+    h.$("#pickhost").innerHTML = "";
+    c.innerHTML = `<div class="fx-same"><p><strong>${esc(BR[tab])}</strong> : les appels suivent le même routage qu'aux heures d'ouverture.</p><button type="button" class="btn" id="custom">Définir un routage différent</button></div>`;
+    h.$("#custom").onclick = () => { flow.branches[tab] = []; draw(); };
+    return;
+  }
+  const list = flow.branches[tab];
+  const parts = [`<div class="fx-start">${icon("did", 22)}<span>Appel entrant</span></div>`];
   list.forEach((st, i) => {
-    parts.push(dz(b, i));
-    if (i > 0) parts.push(`<div class="fe-link"><span>${esc(linkLabel(list[i - 1]))}</span>→</div>`);
-    const bad = errAt && errAt.b === b && errAt.i === i;
+    parts.push(link(i === 0 ? "" : linkLabel(list[i - 1]), i));
     const after = i > 0 && TERMINAL.includes(list[i - 1].type);
-    parts.push(`<div class="fe-card ${TERMINAL.includes(st.type) ? "end" : ""} ${sel?.b === b && sel?.i === i ? "sel" : ""} ${bad || after || !valid(st) ? "bad" : ""}" draggable="true" data-card="${b}:${i}">
-      <div class="fe-ch"><span class="fe-ic">${ICON[st.type]}</span><strong>${esc(SHORT[st.type])}</strong><button type="button" class="fe-x" data-rm="${b}:${i}" title="Retirer">✕</button></div>
-      <div class="fe-cs">${esc(describe(st))}</div>
-      ${after ? '<div class="fe-err">Rien ne peut suivre l\'étape précédente.</div>' : !valid(st) ? '<div class="fe-err">À compléter : clique pour régler.</div>' : bad ? `<div class="fe-err">${esc(errAt.msg)}</div>` : ""}</div>`);
+    const bad = (errAt && errAt.b === tab && errAt.i === i) || after || !valid(st);
+    parts.push(`<div class="fx-card ${TERMINAL.includes(st.type) ? "end" : ""} ${sel === i ? "sel" : ""} ${bad ? "bad" : ""}" draggable="true" data-card="${i}" tabindex="0" role="button" aria-label="${esc(LABEL[st.type])} : régler">
+      <div class="fx-ch"><span class="fx-ci">${icon(st.type)}</span><span class="fx-ct">${esc(LABEL[st.type])}</span><span class="fx-grip" title="Glisser pour déplacer">${icon("grip", 16)}</span></div>
+      <div class="fx-cs">${esc(describe(st))}</div>
+      ${after ? '<div class="fx-err">Rien ne peut suivre l\'étape précédente</div>' : !valid(st) ? '<div class="fx-err">À régler</div>' : errAt?.b === tab && errAt.i === i ? `<div class="fx-err">${esc(errAt.msg)}</div>` : ""}</div>`);
   });
   const last = list.at(-1);
-  if (list.length) parts.push(`<div class="fe-link"><span>${esc(last && TERMINAL.includes(last.type) ? "" : linkLabel(last))}</span>${last && TERMINAL.includes(last.type) ? "" : "→"}</div>`);
-  parts.push(`<div class="dz end" data-dz="${b}:${list.length}">${list.length ? (last && TERMINAL.includes(last.type) ? "Fin" : "Glisse l'étape suivante ici (sinon : raccroche)") : "Glisse la première étape ici"}</div>`);
-  return parts.join("");
+  if (!last || !TERMINAL.includes(last.type)) {
+    parts.push(link(last ? linkLabel(last) : "", list.length, true));
+    parts.push(`<button type="button" class="fx-addbtn ${adding === list.length ? "on" : ""}" data-add="${list.length}">${icon("plus", 22)}<span>${list.length ? "Ajouter la suite" : "Ajouter la première étape"}</span></button>`);
+    if (last) parts.push(`<div class="fx-endnote">sinon : raccroche</div>`);
+  }
+  c.innerHTML = parts.join("");
+  h.$("#pickhost").innerHTML = adding !== null ? picker() : "";
+  wireChain(c); wireChain(h.$("#pickhost"));
 }
-const dz = (b, i) => `<div class="dz" data-dz="${b}:${i}"></div>`;
+function link(label, i, isEnd = false) {
+  return `<div class="fx-link" data-dz="${i}"><span>${esc(label)}</span>${icon("arrow", 18)}${isEnd ? "" : `<button type="button" class="fx-ins" data-add="${i}" title="Insérer une étape ici">${icon("plus", 14)}</button>`}</div>`;
+}
 const linkLabel = (st) => !st ? "" : st.type === "prompt" ? "puis" : st.type === "queue" ? "attente dépassée" : "sans réponse";
+function picker() {
+  const prevTerminal = adding > 0 && TERMINAL.includes(flow.branches[tab][adding - 1]?.type);
+  const tile = ([k, l, d]) => `<button type="button" class="fx-tile ${TERMINAL.includes(k) ? "end" : ""}" data-new="${k}" draggable="true"><span class="fx-ci">${icon(k)}</span><span><strong>${esc(l)}</strong><small>${esc(d)}</small></span></button>`;
+  return `<div class="fx-picker" id="picker"><div class="fx-ph"><strong>Que doit-il se passer ${adding === 0 ? "en premier" : "ensuite"} ?</strong><button type="button" class="fx-x" id="pclose" aria-label="Fermer">${icon("x", 16)}</button></div>
+    ${prevTerminal ? "" : `<span class="fx-pl">Étapes (si personne ne répond, l'appel passe à la suite)</span><div class="fx-tiles">${STEPS.map(tile).join("")}</div>`}
+    <span class="fx-pl">Fin du routage</span><div class="fx-tiles">${ENDS.map(tile).join("")}</div></div>`;
+}
+function wireChain(c) {
+  c.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => { adding = adding === Number(b.dataset.add) ? null : Number(b.dataset.add); sel = null; closePanel(); draw(); h.$("#picker")?.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
+  h.$("#pclose")?.addEventListener("click", () => { adding = null; draw(); });
+  c.querySelectorAll("[data-new]").forEach((b) => {
+    b.onclick = () => addStep(b.dataset.new, adding);
+    b.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", `new:${b.dataset.new}`); document.body.classList.add("fx-dragging"); });
+    b.addEventListener("dragend", () => document.body.classList.remove("fx-dragging"));
+  });
+  c.querySelectorAll("[data-card]").forEach((el) => {
+    const open = () => { sel = Number(el.dataset.card); adding = null; draw(); panel(); };
+    el.onclick = open; el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
+    el.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", `move:${el.dataset.card}`); document.body.classList.add("fx-dragging"); el.classList.add("dragging"); });
+    el.addEventListener("dragend", () => { document.body.classList.remove("fx-dragging"); el.classList.remove("dragging"); });
+  });
+  c.querySelectorAll("[data-dz]").forEach((z) => {
+    z.addEventListener("dragover", (e) => { e.preventDefault(); z.classList.add("over"); });
+    z.addEventListener("dragleave", () => z.classList.remove("over"));
+    z.addEventListener("drop", (e) => {
+      e.preventDefault(); z.classList.remove("over"); document.body.classList.remove("fx-dragging");
+      const data = e.dataTransfer.getData("text/plain"), at = Number(z.dataset.dz);
+      if (data.startsWith("new:")) return addStep(data.slice(4), at);
+      const from = Number(data.split(":")[1]); const list = flow.branches[tab];
+      const [st] = list.splice(from, 1); const to = from < at ? at - 1 : at; list.splice(to, 0, st);
+      sel = null; errAt = null; draw();
+    });
+  });
+}
+function addStep(type, at) {
+  const list = flow.branches[tab];
+  const st = { type, ...(type === "ring" ? { users: [], strategy: "all", time: 20 } : type === "group" ? { target: objs("group")[0]?.id || "", time: null } : type === "hangup" ? {} : { target: "" }) };
+  if (["queue", "ivr", "prompt", "groupvm", "conf"].includes(type) && objs(type).length === 1) st.target = objs(type)[0].id;
+  list.splice(at ?? list.length, 0, st);
+  adding = null; errAt = null; sel = at ?? list.length - 1;
+  draw();
+  if (!valid(st) || type === "ring" || type === "group") panel();
+}
 function valid(st) {
   switch (st.type) {
     case "ring": return st.users?.length > 0;
@@ -113,104 +201,51 @@ function valid(st) {
 }
 function describe(st) {
   const o = (kind, id) => cf.objects.find((x) => x.kind === kind && x.id === id);
+  const num = (x) => x ? `${x.number ? x.number + " · " : ""}${x.name}` : "";
   switch (st.type) {
-    case "ring": return st.users?.length ? `${st.time || 20} s · ${st.users.map(userName).join(", ")}${st.users.length > 1 ? (st.strategy === "hunt" ? " (l'un après l'autre)" : " (en même temps)") : ""}` : "Choisis qui sonne";
-    case "group": { const g = o("group", st.target); return g ? `${g.number} · ${g.name} · ${st.time || g.data.ring_time} s` : "Choisis le groupe"; }
-    case "queue": { const q = o("queue", st.target); return q ? `${q.number} · ${q.name}` : "Choisis la file"; }
-    case "ivr": { const q = o("ivr", st.target); return q ? `${q.number} · ${q.name}` : "Choisis le SVI"; }
-    case "conf": { const q = o("conf", st.target); return q ? `${q.number} · ${q.name}` : "Choisis la salle"; }
-    case "prompt": return o("prompt", st.target)?.name || "Choisis l'annonce";
-    case "groupvm": { const q = o("groupvm", st.target); return q ? `${q.number} · ${q.name}` : "Choisis la boîte"; }
+    case "ring": return st.users?.length ? `${st.users.map(userName).join(", ")} · ${st.time || 20} s${st.users.length > 1 ? (st.strategy === "hunt" ? " l'un après l'autre" : " ensemble") : ""}` : "Choisis qui sonne";
+    case "group": { const g = o("group", st.target); return g ? `${num(g)} · ${st.time || g.data.ring_time} s` : "Choisis le groupe"; }
     case "user": case "user_vm": return st.target ? `${st.target} · ${userName(st.target)}` : "Choisis l'utilisateur";
     case "external": return st.target ? fmtP(st.target) : "Saisis le numéro";
     case "hangup": return "L'appel est raccroché";
-    default: return "";
+    default: return num(o(st.type, st.target)) || "À choisir";
   }
 }
-function freeDids() {
-  const used = new Set(); for (const o of cf.objects) if (o.id !== cur?.id) for (const d of o.data.dids || []) used.add(d);
-  for (const u of cf.users) for (const d of u.dids || []) used.add(d);
-  return cf.trunk_dids.filter((d) => !used.has(d.did) && !flow.dids.includes(d.did));
-}
 
-function wire(c) {
-  c.querySelectorAll("[data-card]").forEach((el) => {
-    el.addEventListener("click", (e) => { if (e.target.closest("[data-rm]")) return; const [b, i] = el.dataset.card.split(":"); sel = { b, i: Number(i) }; activeRow = b; draw(); panel(); });
-    el.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", `move:${el.dataset.card}`); e.dataTransfer.effectAllowed = "move"; document.body.classList.add("fe-dragging"); });
-    el.addEventListener("dragend", () => document.body.classList.remove("fe-dragging"));
-  });
-  c.querySelectorAll("[data-rm]").forEach((b) => b.onclick = () => { const [r, i] = b.dataset.rm.split(":"); flow.branches[r].splice(Number(i), 1); sel = null; errAt = null; draw(); panel(); });
-  c.querySelectorAll("[data-act]").forEach((b) => b.onclick = () => { activeRow = b.dataset.act; draw(); });
-  c.querySelectorAll("[data-same]").forEach((x) => x.onchange = () => { const b = x.dataset.same; flow.branches[b] = x.checked ? null : []; activeRow = x.checked ? "open" : b; sel = null; draw(); panel(); });
-  c.querySelectorAll("[data-rmdid]").forEach((x) => x.onclick = () => { flow.dids = flow.dids.filter((d) => d !== x.dataset.rmdid); draw(); });
-  h.$("#adddid").onchange = (e) => {
-    let v = e.target.value;
-    if (v === "__autre") v = (prompt("Numéro de la SDA :", "") || "").replace(/[\s.]/g, "").replace(/^\+33/, "0");
-    if (/^0[1-9]\d{8}$/.test(v) && !flow.dids.includes(v)) flow.dids.push(v);
-    draw();
-  };
-  h.$("#fsched").onchange = (e) => { flow.schedule = e.target.value; if (!flow.schedule) { flow.branches.closed = flow.branches.break = flow.branches.holiday = null; activeRow = "open"; } else if (flow.branches.closed === null) flow.branches.closed = []; draw(); };
-  const drop = (target, data) => {
-    if (data === "new:did") { h.$("#adddid").focus(); h.$("#adddid").showPicker?.(); return; }
-    if (data === "new:schedule") { h.$("#fsched").focus(); h.$("#fsched").showPicker?.(); return; }
-    if (!target) return;
-    const [b, i] = target.split(":"); const at = Number(i);
-    if (data.startsWith("new:")) return addNew(data.slice(4), b, at);
-    const [, fb, fi] = data.split(":"); const from = Number(fi);
-    const [st] = flow.branches[fb].splice(from, 1);
-    const to = fb === b && from < at ? at - 1 : at;
-    flow.branches[b].splice(to, 0, st);
-    sel = { b, i: to }; draw(); panel();
-  };
-  c.querySelectorAll("[data-dz], [data-drop]").forEach((z) => {
-    z.addEventListener("dragover", (e) => { e.preventDefault(); z.classList.add("over"); });
-    z.addEventListener("dragleave", () => z.classList.remove("over"));
-    z.addEventListener("drop", (e) => { e.preventDefault(); z.classList.remove("over"); document.body.classList.remove("fe-dragging"); drop(z.dataset.dz, e.dataTransfer.getData("text/plain")); });
-  });
-}
-function addNew(type, b, at) {
-  if (type === "did") { h.$("#adddid").focus(); return; }
-  if (type === "schedule") { h.$("#fsched").focus(); return; }
-  if (!flow.branches[b]) flow.branches[b] = [];
-  const st = { type, ...(type === "ring" ? { users: [], strategy: "all", time: 20 } : type === "group" ? { target: objs("group")[0]?.id || "", time: null } : type === "hangup" ? {} : { target: "" }) };
-  if (["queue", "ivr", "prompt", "groupvm", "conf"].includes(type) && objs(type).length === 1) st.target = objs(type)[0].id;
-  flow.branches[b].splice(at, 0, st);
-  sel = { b, i: at }; activeRow = b; errAt = null; draw(); panel();
-}
-
-// ---------------------------------------------------------------- Réglages de l'étape sélectionnée
+// ---------------------------------------------------------------- Réglage d'une étape (panneau latéral)
+function closePanel() { h.$("#side")?.classList.remove("open"); h.$("#scrim")?.classList.remove("on"); }
 function panel() {
   const side = h.$("#side");
-  const st = sel && flow.branches[sel.b]?.[sel.i];
-  h.$(".fe-grid")?.classList.toggle("has-side", !!st);
-  if (!st) { side.innerHTML = `<div class="fe-help"><strong>Comment ça marche ?</strong><ol><li>Glisse une <b>SDA</b> dans le cadre « SDA ».</li><li>Glisse les étapes de gauche à droite : si personne ne répond, l'appel passe au cadre suivant.</li><li>Termine par une <b>boîte vocale</b>, un SVI ou « terminer l'appel ».</li><li>Clique sur un cadre pour le régler (qui sonne, combien de temps…).</li><li>Avec des <b>horaires</b>, une ligne apparaît pour le bureau fermé, les pauses et les jours fériés.</li></ol></div>`; return; }
+  const st = sel !== null && flow.branches[tab]?.[sel];
+  if (!st) { closePanel(); return; }
   const opt = (list, v, empty) => `<option value="">${esc(empty)}</option>${list.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("")}`;
   const objOpts = (kind) => objs(kind).map((o) => [o.id, `${o.number ? o.number + " · " : ""}${o.name}`]);
   const users = cf.users.map((u) => [u.id, `${u.id} · ${u.name}`]);
   const create = { group: "groupes", queue: "files", ivr: "svi", groupvm: "messageries", conf: "reunions", prompt: "annonces" }[st.type];
   let body = "";
   if (st.type === "ring") {
-    body = `<span class="dl">Qui sonne ?</span><div class="chips fe-uchips">${cf.users.map((u) => `<button type="button" class="chip ${st.users.includes(u.id) ? "on" : ""}" data-u="${esc(u.id)}">${esc(u.id)} · ${esc(u.name)}</button>`).join("")}</div>
-      <label>Comment ?<select data-f="strategy"><option value="all" ${st.strategy !== "hunt" ? "selected" : ""}>Tous en même temps</option><option value="hunt" ${st.strategy === "hunt" ? "selected" : ""}>L'un après l'autre (dans l'ordre choisi)</option></select></label>
-      <label>Durée de sonnerie (secondes)${st.strategy === "hunt" ? " par personne" : ""}<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || 20)}"></label>
-      <p class="hint">Les personnes Absentes ou en Ne pas déranger ne sonnent pas.</p>`;
+    body = `<div class="fx-f"><span class="dl">Qui sonne ?</span><input id="uq" type="search" placeholder="Rechercher" class="fx-uq">
+        <div class="fx-users">${cf.users.map((u) => `<label class="fx-u"><input type="checkbox" value="${esc(u.id)}" ${st.users.includes(u.id) ? "checked" : ""}><span><strong>${esc(u.name)}</strong> <span class="s">${esc(u.id)}</span></span></label>`).join("")}</div></div>
+      <label>Comment ?<select data-f="strategy"><option value="all" ${st.strategy !== "hunt" ? "selected" : ""}>Tous en même temps</option><option value="hunt" ${st.strategy === "hunt" ? "selected" : ""}>L'un après l'autre</option></select></label>
+      <label>Durée de sonnerie${st.strategy === "hunt" ? " par personne" : ""} (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || 20)}"></label>`;
   } else if (st.type === "group") {
     body = `<label>Groupe d'appel<select data-f="target">${opt(objOpts("group"), st.target, "— Choisir —")}</select></label>
-      <label>Durée de sonnerie (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || "")}" placeholder="Celle du groupe (${esc(objs("group").find((g) => g.id === st.target)?.data.ring_time ?? 20)} s)"></label>
-      ${st.target ? `<p><a href="#/gestion/groupes/${esc(st.target)}">Modifier les membres du groupe</a></p>` : ""}`;
+      <label>Durée de sonnerie (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || "")}" placeholder="Celle du groupe"></label>`;
   } else if (["queue", "ivr", "groupvm", "conf", "prompt"].includes(st.type)) {
-    body = `<label>${esc(cf.options.step_types[st.type])}<select data-f="target">${opt(objOpts(st.type), st.target, "— Choisir —")}</select></label>
+    body = `<label>${esc(LABEL[st.type])}<select data-f="target">${opt(objOpts(st.type), st.target, "— Choisir —")}</select></label>
       ${st.type === "prompt" && st.target ? `<audio controls src="/api/prompts/${esc(st.target)}/audio"></audio>` : ""}`;
   } else if (st.type === "user" || st.type === "user_vm") {
     body = `<label>Utilisateur<select data-f="target">${opt(users, st.target, "— Choisir —")}</select></label>
-      <p class="hint">${st.type === "user" ? "L'appel suit ensuite les renvois réglés dans sa fiche." : "L'appelant laisse un message dans la boîte vocale de cet utilisateur."}</p>`;
+      <p class="hint">${st.type === "user" ? "L'appel suit ensuite les renvois de sa fiche." : "L'appelant laisse un message dans sa boîte vocale."}</p>`;
   } else if (st.type === "external") {
     body = `<label>Numéro<input data-f="target" inputmode="tel" placeholder="06 12 34 56 78" value="${esc(fmtP(st.target))}"></label>`;
   } else body = '<p class="hint">L\'appel est raccroché.</p>';
-  side.innerHTML = `<div class="fe-pan"><div class="fe-ch"><span class="fe-ic">${ICON[st.type]}</span><strong>${esc(cf.options.step_types[st.type])}</strong></div>
-    <div class="stack">${body}${create ? `<p class="hint"><a href="#/gestion/${create}/nouveau" target="_blank">+ Créer (nouvel onglet)</a> puis recharge cette page.</p>` : ""}</div>
-    <div class="row" style="margin-top:14px"><button type="button" class="btn ghost sm" id="pdel">Retirer l'étape</button><button type="button" class="btn sm" id="pok">OK</button></div></div>`;
-  side.querySelectorAll("[data-u]").forEach((b) => b.onclick = () => { const id = b.dataset.u; st.users = st.users.includes(id) ? st.users.filter((x) => x !== id) : [...st.users, id]; b.classList.toggle("on"); draw(); });
+  side.innerHTML = `<div class="fx-ph"><span class="fx-ci">${icon(st.type)}</span><strong>${esc(LABEL[st.type])}</strong><button type="button" class="fx-x" id="pclose2" aria-label="Fermer">${icon("x", 16)}</button></div>
+    <div class="fx-pb stack">${body}${create ? `<p class="hint"><a href="#/gestion/${create}/nouveau" target="_blank" rel="noopener">Créer un nouvel élément</a> (nouvel onglet), puis recharge cette page.</p>` : ""}</div>
+    <div class="fx-pf"><button type="button" class="btn ghost" id="pdel">Retirer l'étape</button><button type="button" class="btn" id="pok">Terminé</button></div>`;
+  side.classList.add("open"); h.$("#scrim").classList.add("on");
+  side.querySelectorAll(".fx-u input").forEach((i) => i.onchange = () => { const id = i.value; st.users = i.checked ? [...st.users, id] : st.users.filter((x) => x !== id); draw(); });
+  h.$("#uq")?.addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); side.querySelectorAll(".fx-u").forEach((l) => { l.hidden = q && !l.textContent.toLowerCase().includes(q); }); });
   side.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
     const f = el.dataset.f; let v = el.value;
     if (f === "time") v = v ? Number(v) : (st.type === "group" ? null : 20);
@@ -218,8 +253,8 @@ function panel() {
     st[f] = v; errAt = null; draw();
     if (f === "strategy" || (f === "target" && st.type === "prompt")) panel();
   }));
-  h.$("#pdel").onclick = () => { flow.branches[sel.b].splice(sel.i, 1); sel = null; draw(); panel(); };
-  h.$("#pok").onclick = () => { sel = null; draw(); panel(); };
+  h.$("#pdel").onclick = () => { flow.branches[tab].splice(sel, 1); sel = null; closePanel(); draw(); };
+  h.$("#pok").onclick = h.$("#pclose2").onclick = () => { sel = null; closePanel(); draw(); };
 }
 
 // ---------------------------------------------------------------- Texte → proposition
@@ -229,39 +264,40 @@ async function propose() {
   box.innerHTML = '<p class="hint">Analyse…</p>';
   try {
     const r = await h.api("POST", "/api/callflow-parse", { text });
-    if (!r.proposal) { box.innerHTML = `<div class="warnbox">${r.warnings.map(esc).join("<br>")}</div>`; return; }
+    if (!r.proposal) { box.innerHTML = `<div class="fx-warn">${r.warnings.map(esc).join("<br>")}</div>`; return; }
     const p = r.proposal;
-    flow.dids = p.dids.length ? p.dids : flow.dids;
+    if (p.dids.length) flow.dids = p.dids;
     flow.is_default = p.is_default || flow.is_default;
     flow.schedule = p.schedule || "";
     flow.branches = { open: p.branches.open, closed: p.branches.closed, break: p.branches.break, holiday: p.branches.holiday };
-    if (flow.schedule && flow.branches.closed === null) flow.branches.closed = null;
     if (!flow.name) { flow.name = p.name; h.$("#fname").value = p.name; }
-    h.$("#fdef").checked = flow.is_default;
-    sel = null; errAt = null; draw(); panel();
-    box.innerHTML = `<div class="fe-prop"><strong>Voici ce que j'ai compris</strong> : vérifie le schéma ci-dessous, ajuste si besoin, puis clique sur « Valider et appliquer ».
-      <ul>${r.understood.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-      ${r.warnings.length ? `<div class="fe-warn"><strong>À vérifier :</strong><ul>${r.warnings.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}</div>`;
-    h.$("#canvas").scrollIntoView({ behavior: "smooth", block: "start" });
+    h.$("#fdef").checked = flow.is_default; h.$("#fsched").value = flow.schedule;
+    sel = null; errAt = null; adding = null; tab = "open"; closePanel(); drawDids(); draw();
+    box.innerHTML = `<div class="fx-prop"><strong>Ce que j'ai compris</strong><ul>${r.understood.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      ${r.warnings.length ? `<div class="fx-warn"><strong>À vérifier</strong><ul>${r.warnings.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      <p class="hint" style="margin:6px 0 0">Vérifie le schéma ci-dessous, ajuste si besoin, puis « Valider et appliquer ».</p></div>`;
   } catch (e) { box.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; }
 }
 
 // ---------------------------------------------------------------- Enregistrement
 async function save() {
   const msg = h.$("#fmsg"); msg.innerHTML = "";
-  flow.name = h.$("#fname").value.trim() || flow.name;
+  flow.name = h.$("#fname").value.trim() || flow.name || (flow.dids[0] ? `Routage ${fmtP(flow.dids[0])}` : "");
   const body = { name: flow.name, dids: flow.dids, is_default: flow.is_default, schedule: flow.schedule, branches: flow.branches };
   try {
     await h.api(cur ? "PUT" : "POST", `/api/callflow/flow${cur ? "/" + cur.id : ""}`, body);
     h.setFlash({ text: "Routage validé et appliqué." }); location.hash = "#/gestion/routages";
   } catch (e) {
     const m = /^branches\.(\w+)\.(\d+)$/.exec(e.field || "");
-    if (m) { errAt = { b: m[1], i: Number(m[2]), msg: e.message }; draw(); }
+    if (m) { errAt = { b: m[1], i: Number(m[2]), msg: e.message }; tab = m[1]; draw(); }
     msg.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`;
+    msg.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 }
+let armed = false;
 async function del() {
-  if (!confirm(`Supprimer le routage « ${cur.name} » ? Ses SDA iront vers la règle par défaut.`)) return;
+  const b = h.$("#fdel");
+  if (!armed) { armed = true; b.textContent = "Confirmer la suppression"; setTimeout(() => { armed = false; if (b.isConnected) b.textContent = "Supprimer"; }, 4000); return; }
   try { await h.api("DELETE", `/api/callflow/flow/${cur.id}?force=1`); h.setFlash({ text: "Routage supprimé." }); location.hash = "#/gestion/routages"; }
   catch (e) { h.$("#fmsg").innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; }
 }

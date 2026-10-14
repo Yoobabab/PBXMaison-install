@@ -8,7 +8,8 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
 import { MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
-  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType } from "./phones.mjs";
+  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType, modelById } from "./phones.mjs";
+import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
 import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, PHONE_TYPES } from "./contacts.mjs";
@@ -52,6 +53,9 @@ const hostOk = (h) => /^[A-Za-z0-9.-]+$/.test(h) && h.includes(".");
 const WEB_CODECS = "g722,alaw,ulaw,vp8,h264";
 
 export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
+  // Parties du plan de numérotation fournies par les autres modules (règles sortantes, sécurité, codes, enregistrement)
+  let extra = async () => ({ globals: [], dialplan: "" });
+  const setExtraDialplan = (fn) => { extra = fn; };
   const templates = () => loadTemplates(templatesFile);
   const countryCode = () => env().PBX_COUNTRY_CODE || "33";
   const language = () => env().PBX_LANGUAGE || "fr";
@@ -590,7 +594,34 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const secret = await extensionSecret(num);
     const users = await loadUsers();
     const names = new Map(users.map((x) => [x.id, displayName(x)]));
-    return { user: u, text: buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url: await provisioningUrl(server), assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/` }, names) };
+    const prov_url = await provisioningUrl(server);
+    const model = modelById(u.phone.model);
+    const acc = [{ index: 1, user: u.id, name: displayName(u), auth_id: secret.auth_id, password: secret.password }];
+    const srv = { host: server.host, prov_url, lang: u.phone.settings.language, tz: u.phone.settings.timezone, admin_password: u.phone.admin_password };
+    let text;
+    if (model?.format === "fanvil") text = buildFanvilCfg(acc, srv);
+    else if (model?.format === "snom") text = buildSnomXml(acc, srv);
+    else if (model?.format === "grandstream") text = buildGrandstreamXml(u.phone.mac || "", acc, srv);
+    else text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/` }, names);
+    return { user: u, text, format: model?.format || "yealink" };
+  }
+
+  // ------------------------------------------------------------------ Passerelles et bases DECT
+  async function loadGateways() { return await db.getSetting("gateways", []); }
+  async function gatewayAccounts(g) {
+    const users = new Map((await loadUsers()).map((u) => [u.id, u]));
+    const out = [];
+    for (const p of g.ports) {
+      const u = users.get(p.user);
+      if (!u) continue;
+      const sec = await extensionSecret(p.user);
+      out.push({ index: p.port, user: p.user, name: p.label || displayName(u), auth_id: sec.auth_id, password: sec.password });
+    }
+    return out;
+  }
+  async function gatewayConfig(g, server) {
+    const srv = { host: server.host, prov_url: await provisioningUrl(server), lang: language(), admin_password: g.admin_password };
+    return { text: buildGatewayFile(g, await gatewayAccounts(g), srv), accounts: await gatewayAccounts(g) };
   }
 
   /** Fichier demandé par un téléphone : null si inconnu. */
@@ -601,16 +632,28 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       return { text: yealinkPhonebook(users, await loadContacts()), type: "application/xml" };
     }
     if (/^y0{6}\d{6}\.cfg$/i.test(file)) return { text: "#!version:1.0.0.1\n## Callikoe : tout est dans <mac>.cfg\n" };
-    const m = /^([0-9a-f]{12})\.cfg$/i.exec(file);
-    if (!m) return null;
-    const mac = m[1].toLowerCase();
-    const r = await db.query("SELECT id FROM pbxmaison_extensions WHERE phone->>'mac' = $1", [mac]);
-    if (!r.rowCount) return null;
-    const id = r.rows[0].id;
-    const { text } = await phoneConfig(id, server);
-    await db.query(`UPDATE pbxmaison_extensions SET phone = jsonb_set(phone, '{last_provisioned}', $2::jsonb) WHERE id = $1`,
-      [id, JSON.stringify({ at: new Date().toISOString(), ip: from.ip, user_agent: String(from.user_agent || "").slice(0, 120) })]);
-    return { text, id };
+    const req = provRequest(file);
+    if (!req) return null;
+    const stamp = JSON.stringify({ at: new Date().toISOString(), ip: from.ip, user_agent: String(from.user_agent || "").slice(0, 120) });
+    const r = await db.query("SELECT id FROM pbxmaison_extensions WHERE phone->>'mac' = $1", [req.mac]);
+    if (r.rowCount) {
+      const id = r.rows[0].id;
+      const { text, format } = await phoneConfig(id, server);
+      const want = { cfg: ["yealink", "fanvil"], gs: ["grandstream"], snom: ["snom"] }[req.kind];
+      if (!want.includes(format)) return null;
+      await db.query(`UPDATE pbxmaison_extensions SET phone = jsonb_set(phone, '{last_provisioned}', $2::jsonb) WHERE id = $1`, [id, stamp]);
+      return { text, id, type: format === "snom" || format === "grandstream" ? "application/xml" : undefined };
+    }
+    const gws = await loadGateways();
+    const g = gws.find((x) => x.mac === req.mac);
+    if (!g) return null;
+    const prov = GATEWAY_MODELS.find((m) => m.id === g.model)?.prov;
+    const want = { cfg: ["yealink-dect"], gs: ["gs-ht"], snom: ["snom-dect"] }[req.kind];
+    if (!want.includes(prov)) return null;
+    const { text } = await gatewayConfig(g, server);
+    g.last_provisioned = JSON.parse(stamp);
+    await db.setSetting("gateways", gws);
+    return { text, id: g.id, type: prov === "yealink-dect" ? undefined : "application/xml" };
   }
 
   async function notifyPhone(num, action) {
@@ -680,6 +723,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       if (r.rowCount) ({ outbound_cid: cid, dial_format: fmt, cid_format: cidFmt } = r.rows[0]);
     }
     const byId = new Map(users.map((u) => [u.id, u]));
+    let ext = { globals: [], dialplan: "" };
+    try { ext = await extra(); } catch (e) { console.error("Plan de numérotation (modules) :", e.message); }
     const ringing = routes.inbound.filter((n) => byId.has(n) ? ringsForGroups(byId.get(n)) : true);
     writeAtomic(routesFile, [
       `; Routes — écrit par la console web (${new Date().toISOString()}). Ne pas modifier à la main.`,
@@ -688,6 +733,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       `OUTBOUND_CID = ${cid}`,
       `OUTBOUND_FORMAT = ${fmt}`,
       `OUTBOUND_CID_FORMAT = ${cidFmt}`,
+      ...ext.globals,
       "",
     ].join("\n"));
     const dir = path.dirname(routesFile);
@@ -695,7 +741,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const model = { users: byId, objects, soundsDir: soundsDir(), tz: tz() };
     writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
     const contacts = await loadContacts();
-    writeAtomic(path.join(dir, "extensions_callflow.conf"), buildCallflowDialplan(model) + buildPhonebookDialplan(contacts));
+    writeAtomic(path.join(dir, "extensions_callflow.conf"), buildCallflowDialplan(model) + buildPhonebookDialplan(contacts) + (ext.dialplan || ""));
     writeAtomic(path.join(dir, "queues_callikoe.conf"), buildQueues(model));
     // Musiques d'attente des files : un dossier par file contenant un lien vers l'annonce choisie
     for (const c of mohClasses(model)) {
@@ -710,6 +756,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     for (const [id, boxes] of mailboxesByUser(model)) {
       await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id IN ($1::text, $1::text || '-web') AND mailboxes IS DISTINCT FROM $2", [id, boxes]);
     }
+    // Interception « n'importe quel appel » (code *8) : tous les postes dans le même groupe d'interception
+    await db.query("UPDATE ps_endpoints SET call_group = '1', pickup_group = '1' WHERE context = 'from-internal' AND (call_group IS DISTINCT FROM '1' OR pickup_group IS DISTINCT FROM '1')");
     try { await ami.command("dialplan reload"); } catch { /* rechargé au démarrage d'Asterisk */ }
     try { await ami.command("module reload app_voicemail.so"); } catch { /* idem */ }
     try { await ami.command("moh reload"); } catch { /* idem */ }
@@ -919,7 +967,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
 
   // ------------------------------------------------------------------ Journal des appels (CDR)
   const CDR_COLS = `linkedid, uniqueid, sequence, calldate AT TIME ZONE 'UTC' AS calldate, enddate AT TIME ZONE 'UTC' AS enddate,
-    clid, src, dst, channel, dstchannel, lastapp, lastdata, duration, billsec, disposition, did, direction, rule`;
+    clid, src, dst, channel, dstchannel, lastapp, lastdata, duration, billsec, disposition, did, direction, rule, userfield`;
   const trunkSet = async () => new Set((await db.query("SELECT id FROM pbxmaison_trunks")).rows.map((r) => r.id));
   /** Journal complet (console) : jours glissants, filtres simples. */
   async function callLog({ days = 7, q = "", direction = "", status = "", limit = 500 } = {}) {
@@ -1023,6 +1071,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     getUser, updateUser, applyDialplan, deleteImpact,
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
+    setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
     loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };

@@ -4,10 +4,21 @@
  * console/test/phones.test.mjs).
  */
 import crypto from "node:crypto";
+import { OTHER_PHONES } from "./devices.mjs";
 
 // ------------------------------------------------------------------ Modèles
 // keys : nombre de touches programmables (toutes pages comprises) ; accounts : comptes SIP.
 export const MODELS = [
+  ...[
+  { id: "yealink-t30p", brand: "Yealink", label: "Yealink T30 / T30P", keys: 0 },
+  { id: "yealink-t31w", brand: "Yealink", label: "Yealink T31W", keys: 2 },
+  { id: "yealink-t42u", brand: "Yealink", label: "Yealink T42U", keys: 15 },
+  { id: "yealink-t73u", brand: "Yealink", label: "Yealink T73U / T73W", keys: 3, screen: "320x240" },
+  { id: "yealink-t74u", brand: "Yealink", label: "Yealink T74U / T74W", keys: 27, screen: "480x272" },
+  { id: "yealink-t77u", brand: "Yealink", label: "Yealink T77U", keys: 29, screen: "800x480" },
+  { id: "yealink-cp925", brand: "Yealink", label: "Yealink CP925 (conférence)", keys: 0 },
+  { id: "yealink-cp965", brand: "Yealink", label: "Yealink CP965 (conférence)", keys: 0 },
+  ],
   { id: "yealink-t31p", brand: "Yealink", label: "Yealink T31P", keys: 2 },
   { id: "yealink-t31g", brand: "Yealink", label: "Yealink T31G", keys: 2 },
   { id: "yealink-t33g", brand: "Yealink", label: "Yealink T33G", keys: 4, screen: "320x240" },
@@ -23,8 +34,8 @@ export const MODELS = [
   { id: "yealink-t85w", brand: "Yealink", label: "Yealink T85W", keys: 27, screen: "480x272" },
   { id: "yealink-t87w", brand: "Yealink", label: "Yealink T87W", keys: 29, screen: "800x480" },
   { id: "yealink-t88w", brand: "Yealink", label: "Yealink T88W", keys: 27, screen: "1024x600" },
-];
-const modelById = (id) => MODELS.find((m) => m.id === id);
+].map((m) => ({ format: "yealink", status: "ok", ...m })).concat(OTHER_PHONES);
+export const modelById = (id) => MODELS.find((m) => m.id === id);
 
 // ------------------------------------------------------------------ Réglages
 export const LANGUAGES = { fr: ["Français", "French"], en: ["Anglais", "English"], de: ["Allemand", "German"], es: ["Espagnol", "Spanish"], it: ["Italien", "Italian"], nl: ["Néerlandais", "Dutch"] };

@@ -7,6 +7,11 @@
 #    pbx-configure render            réécrit /etc/asterisk depuis les modèles (mise à jour)
 #    pbx-configure dns               met à jour l'adresse <nom>.callikoe.fr (chaque jour, et au démarrage)
 #    pbx-configure nginx             réécrit la config web (après obtention du certificat)
+#    pbx-configure f2b status|ban <ip>|unban <ip>|settings <tentatives> <fenêtre min> <blocage min> <ip,ip…>
+#                                    protection anti-intrusion (fail2ban), console : Sécurité
+#    pbx-configure backup [--recordings] [--no-voicemail] [--keep N]   archive dans /var/lib/pbxmaison/backups
+#    pbx-configure restore <fichier> restaure une archive (base, sons, messagerie, enregistrements)
+#    pbx-configure update [ref] | update-status   mise à jour de Callikoe (relance l'installeur en arrière-plan)
 #
 #  Sortie : une ligne JSON par étape {"step":…, "status":"ok|warn|error|run", "message":…}
 #  pour que la console affiche la progression.
@@ -256,8 +261,156 @@ EOF
   json termine ok "$(cat "$ETC/activation.txt")"
 }
 
+# ----------------------------------------------------------------------------- Anti-intrusion
+F2B_JAIL=/etc/fail2ban/jail.d/pbxmaison.conf
+valid_ip() { [[ "$1" =~ ^[0-9a-fA-F:.]{3,45}(/[0-9]{1,3})?$ ]]; }
+f2b_banned() { # f2b_banned <jail> → IP séparées par des espaces
+  fail2ban-client status "$1" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p' | tr -s ' \t' ' ' || true
+}
+f2b_write() { # f2b_write <maxretry> <findtime min> <bantime min> <ignoreip séparés par des virgules>
+  local ignore="127.0.0.1/8 ::1 ${4//,/ }"
+  cat > "$F2B_JAIL" <<EOF
+# Callikoe — écrit par la console (Sécurité). Ne pas modifier à la main.
+[asterisk]
+enabled  = true
+backend  = auto
+filter   = asterisk
+logpath  = /var/log/asterisk/security
+           /var/log/asterisk/messages
+maxretry = $1
+findtime = $2m
+bantime  = $3m
+banaction = %(banaction_allports)s
+ignoreip = ${ignore}
+
+# Adresses bloquées à la main depuis la console : blocage permanent
+[callikoe-manual]
+enabled  = true
+backend  = auto
+filter   = callikoe-manual
+logpath  = /var/log/pbxmaison-manual-ban.log
+maxretry = 1
+bantime  = -1
+banaction = %(banaction_allports)s
+ignoreip = 127.0.0.1/8 ::1
+EOF
+  printf '[Definition]\nfailregex = ^CALLIKOE-NEVER-MATCH <HOST>$\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-manual.conf
+  touch /var/log/pbxmaison-manual-ban.log
+}
+cmd_f2b() {
+  command -v fail2ban-client >/dev/null || { echo '{"ok":false,"error":"fail2ban n'"'"'est pas installé"}'; exit 0; }
+  case "${1:-status}" in
+    status)
+      local auto manual active=0
+      systemctl is-active --quiet fail2ban && active=1
+      auto="$(f2b_banned asterisk)"; manual="$(f2b_banned callikoe-manual)"
+      F2B_ACTIVE="$active" F2B_AUTO="$auto" F2B_MANUAL="$manual" node -e '
+        const sp = (s) => (s || "").trim().split(/\s+/).filter(Boolean);
+        process.stdout.write(JSON.stringify({ ok: true, active: process.env.F2B_ACTIVE === "1", auto: sp(process.env.F2B_AUTO), manual: sp(process.env.F2B_MANUAL) }) + "\n");' ;;
+    ban)   valid_ip "${2:-}" || { echo '{"ok":false,"error":"Adresse invalide"}'; exit 1; }
+           grep -q callikoe-manual "$F2B_JAIL" 2>/dev/null || { f2b_write 5 10 60 ""; fail2ban-client reload >/dev/null 2>&1 || systemctl restart fail2ban; sleep 1; }
+           fail2ban-client set callikoe-manual banip "$2" >/dev/null && echo '{"ok":true}' ;;
+    unban) valid_ip "${2:-}" || { echo '{"ok":false,"error":"Adresse invalide"}'; exit 1; }
+           fail2ban-client unban "$2" >/dev/null 2>&1 || true; echo '{"ok":true}' ;;
+    settings)
+      [[ "${2:-}" =~ ^[0-9]+$ && "${3:-}" =~ ^[0-9]+$ && "${4:-}" =~ ^[0-9]+$ ]] || { echo '{"ok":false,"error":"Réglages invalides"}'; exit 1; }
+      local ip; IFS=',' read -ra list <<< "${5:-}"
+      for ip in "${list[@]}"; do [[ -z "$ip" ]] || valid_ip "$ip" || { echo '{"ok":false,"error":"Adresse invalide"}'; exit 1; }; done
+      f2b_write "$2" "$3" "$4" "${5:-}"
+      fail2ban-client reload >/dev/null 2>&1 || systemctl restart fail2ban
+      echo '{"ok":true}' ;;
+    *) echo "Usage : pbx-configure f2b status|ban <ip>|unban <ip>|settings …" >&2; exit 2 ;;
+  esac
+}
+
+# ----------------------------------------------------------------------------- Sauvegarde / restauration
+BK_DIR="$VAR/backups"
+cmd_backup() {
+  local rec=0 vm=1 keep=7
+  while [[ $# -gt 0 ]]; do
+    case "$1" in --recordings) rec=1 ;; --no-voicemail) vm=0 ;; --keep) keep="${2:-7}"; shift ;; esac; shift
+  done
+  [[ "$keep" =~ ^[0-9]+$ ]] || keep=7
+  install -d -m 2750 -o root -g pbxmaison "$BK_DIR"
+  local name tmp
+  name="callikoe-$(date +%Y%m%d-%H%M%S).tar.gz"
+  tmp="$(mktemp -d)"
+  json base run "Export de la base de données…"
+  runuser -u postgres -- pg_dump --clean --if-exists asterisk > "$tmp/database.sql" || { rm -rf "$tmp"; fail base "Export de la base impossible."; }
+  json base ok "Base exportée"
+  mkdir -p "$tmp/etc" "$tmp/var"
+  for f in pbx.env pbx-config.json activation.txt setup.state install.state; do [[ -f "$ETC/$f" ]] && cp -a "$ETC/$f" "$tmp/etc/"; done
+  tar -C "$VAR" --exclude=./backups --exclude=./staging -cf - . | tar -C "$tmp/var" -xf -
+  ((vm)) && [[ -d /var/spool/asterisk/voicemail ]] && cp -a /var/spool/asterisk/voicemail "$tmp/voicemail"
+  ((rec)) && [[ -d /var/spool/asterisk/monitor/callikoe ]] && cp -a /var/spool/asterisk/monitor/callikoe "$tmp/recordings"
+  printf '{"format":1,"created_at":"%s","version":"%s","commit":"%s","voicemail":%s,"recordings":%s}\n' \
+    "$(date -Is)" "$(cat "$APP/VERSION" 2>/dev/null || echo ?)" "${COMMIT:-}" "$( ((vm)) && echo true || echo false)" "$( ((rec)) && echo true || echo false)" > "$tmp/manifest.json"
+  tar -C "$tmp" -czf "$BK_DIR/$name" .
+  rm -rf "$tmp"
+  chown root:pbxmaison "$BK_DIR/$name"; chmod 640 "$BK_DIR/$name"
+  # Conservation : les N plus récentes
+  ls -1t "$BK_DIR"/callikoe-*.tar.gz 2>/dev/null | tail -n +"$((keep + 1))" | xargs -r rm -f
+  json termine ok "$name"
+}
+cmd_restore() {
+  local src="${1:-}"
+  src="$(readlink -f "$src" 2>/dev/null || true)"
+  [[ -f "$src" && ( "$src" == "$BK_DIR/"* || "$src" == "$STAGING/"* ) ]] || fail verification "Fichier refusé (emplacement non autorisé)."
+  local tmp; tmp="$(mktemp -d)"
+  json verification run "Lecture de l'archive…"
+  tar -C "$tmp" -xzf "$src" || { rm -rf "$tmp"; fail verification "Archive illisible."; }
+  [[ -f "$tmp/manifest.json" && -f "$tmp/database.sql" ]] || { rm -rf "$tmp"; fail verification "Ce fichier n'est pas une sauvegarde Callikoe."; }
+  if [[ -f "$ETC/pbx.env" && -f "$tmp/etc/pbx.env" ]]; then
+    local a b; a="$(. "$ETC/pbx.env"; echo "$PBX_ID")"; b="$(. "$tmp/etc/pbx.env"; echo "$PBX_ID")"
+    [[ "$a" == "$b" ]] || { rm -rf "$tmp"; fail verification "Cette sauvegarde vient d'un autre PBX ($b)."; }
+  fi
+  json verification ok "Sauvegarde valide"
+  json base run "Restauration de la base de données…"
+  systemctl stop asterisk 2>/dev/null || true
+  runuser -u postgres -- psql -q -v ON_ERROR_STOP=0 asterisk < "$tmp/database.sql" >/dev/null 2>&1 || true
+  json base ok "Base restaurée"
+  json fichiers run "Restauration des fichiers…"
+  [[ -d "$tmp/var" ]] && cp -a "$tmp/var/." "$VAR/"
+  for f in pbx.env pbx-config.json activation.txt setup.state; do [[ -f "$tmp/etc/$f" ]] && cp -a "$tmp/etc/$f" "$ETC/$f"; done
+  if [[ -d "$tmp/voicemail" ]]; then rm -rf /var/spool/asterisk/voicemail; cp -a "$tmp/voicemail" /var/spool/asterisk/voicemail; fi
+  if [[ -d "$tmp/recordings" ]]; then install -d -o asterisk -g asterisk -m 2770 /var/spool/asterisk/monitor; cp -a "$tmp/recordings/." /var/spool/asterisk/monitor/callikoe/; fi
+  chown -R asterisk:asterisk /var/spool/asterisk/voicemail /var/spool/asterisk/monitor 2>/dev/null || true
+  rm -rf "$tmp"
+  json fichiers ok "Fichiers restaurés"
+  if [[ -f "$ETC/pbx.env" ]]; then set -a; . "$ETC/pbx.env"; set +a; render_asterisk; fi
+  systemctl start asterisk 2>/dev/null || true
+  # La console redémarre juste après avoir répondu (elle régénère alors le plan de numérotation)
+  systemd-run --on-active=3 --unit="pbxmaison-restart-$$" systemctl restart pbxmaison-console >/dev/null 2>&1 || true
+  json termine ok "Restauration terminée : la console redémarre."
+}
+
+# ----------------------------------------------------------------------------- Mise à jour
+UPD_LOG=/var/log/pbxmaison-update.log
+cmd_update() {
+  local ref="${1:-${REF:-main}}" repo="${REPO:-Yoobabab/PBXMaison-install}"
+  [[ "$ref" =~ ^[A-Za-z0-9._/-]{1,80}$ && "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo '{"ok":false,"error":"Version invalide"}'; exit 1; }
+  if systemctl is-active --quiet pbxmaison-update 2>/dev/null; then echo '{"ok":true,"running":true}'; exit 0; fi
+  : > "$UPD_LOG"; chmod 644 "$UPD_LOG"
+  systemd-run --unit=pbxmaison-update --collect --setenv=PBXM_REF="$ref" --setenv=PBXM_REPO="$repo" /bin/bash -c \
+    "set -o pipefail; curl -fsSL https://raw.githubusercontent.com/${repo}/${ref}/install.sh | bash >> $UPD_LOG 2>&1; echo \"FIN code=\$?\" >> $UPD_LOG" >/dev/null
+  echo '{"ok":true,"running":true}'
+}
+cmd_update_status() {
+  local active=0; systemctl is-active --quiet pbxmaison-update 2>/dev/null && active=1
+  UPD_ACTIVE="$active" node -e '
+    const fs = require("fs"); let log = ""; try { log = fs.readFileSync(process.argv[1], "utf8"); } catch {}
+    const lines = log.replace(/\x1b\[[0-9;]*m/g, "").split("\n").filter(Boolean);
+    const end = lines.findLast((l) => /^FIN code=/.test(l));
+    process.stdout.write(JSON.stringify({ running: process.env.UPD_ACTIVE === "1", done: !!end, ok: end ? end === "FIN code=0" : null, log: lines.slice(-60) }) + "\n");' "$UPD_LOG"
+}
+
 case "${1:-}" in
   apply) shift; cmd_apply "$@" ;;
+  f2b) shift; cmd_f2b "$@" ;;
+  backup) shift; cmd_backup "$@" ;;
+  restore) shift; cmd_restore "$@" ;;
+  update) shift; cmd_update "$@" ;;
+  update-status) cmd_update_status ;;
   dns)    [[ -f "$ETC/pbx.env" ]] || exit 0
           set -a; . "$ETC/pbx.env"; set +a
           is_managed_fqdn "$PBX_FQDN" || { echo "Adresse ${PBX_FQDN} non gérée par Callikoe : rien à faire."; exit 0; }
@@ -269,5 +422,5 @@ case "${1:-}" in
           set -a; . "$ETC/pbx.env"; set +a; render_asterisk ;;
   nginx) set -a; . "$ETC/pbx.env" 2>/dev/null || true; set +a
          if [[ -n "${PBX_FQDN:-}" && -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]]; then nginx_write "$PBX_FQDN" 1; else nginx_write "" 0; fi ;;
-  *) echo "Usage : pbx-configure apply <fichier> | render | dns | nginx" >&2; exit 2 ;;
+  *) echo "Usage : pbx-configure apply <fichier> | render | dns | nginx | f2b … | backup | restore <fichier> | update | update-status" >&2; exit 2 ;;
 esac

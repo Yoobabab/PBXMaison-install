@@ -1,5 +1,6 @@
 // Console web Callikoe — application monopage sans dépendance.
 import { renderCallflow } from "./callflow-ui.js";
+import { renderAdmin } from "./admin-ui.js";
 const $ = (s, r = document) => r.querySelector(s);
 const app = $("#app");
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -51,15 +52,56 @@ async function copyText(text) {
   ta.remove(); return ok;
 }
 
+const NI = {
+  home: '<path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/>',
+  ext: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14c2.3.2 4 1.7 4.5 4.5"/>',
+  phones: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M9 17h6"/>',
+  gw: '<rect x="3" y="8" width="18" height="9" rx="2"/><path d="M7 12.5h.01M11 12.5h.01M8 8V5M16 8V4"/>',
+  cf: '<path d="M5 4v6a4 4 0 0 0 4 4h10"/><path d="m15 10 4 4-4 4"/><circle cx="5" cy="4" r="1.5"/>',
+  out: '<path d="M7 17 17 7M9 7h8v8"/><path d="M4 20h7"/>',
+  trunks: '<path d="M3 12h18M7 7l-4 5 4 5M17 7l4 5-4 5"/>',
+  codes: '<path d="M8 8h.01M12 8h.01M16 8h.01M8 12h.01M12 12h.01M16 12h.01M10 16h4" stroke-width="2.4"/><rect x="3" y="4" width="18" height="16" rx="3"/>',
+  cdr: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  rec: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/>',
+  book: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c.6-1.8 2-2.6 3.5-2.6s2.9.8 3.5 2.6"/>',
+  sec: '<path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/>',
+  backup: '<path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  updates: '<path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/>',
+  alerts: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  licence: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10h6M7 14h4"/><circle cx="17" cy="12" r="2"/>',
+  sys: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  soft: '<path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/>',
+  out2: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+};
+const nicon = (k, s = 19) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NI[k] || ""}</svg>`;
+const NAV = [
+  ["", [["#/", "Tableau de bord", "home"]]],
+  ["Téléphonie", [["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"], ["#/passerelles", "Passerelles et DECT", "gw"],
+    ["#/gestion", "Gestion d'appels", "cf"], ["#/sortants", "Règles sortantes", "out"], ["#/trunks", "Trunks", "trunks"], ["#/codes", "Codes de raccourci", "codes"]]],
+  ["Activité", [["#/journal", "Journal des appels", "cdr"], ["#/enregistrements", "Enregistrements", "rec"], ["#/annuaire", "Annuaire", "book"]]],
+  ["Administration", [["#/securite", "Sécurité", "sec"], ["#/sauvegardes", "Sauvegardes", "backup"], ["#/mises-a-jour", "Mises à jour", "updates"],
+    ["#/alertes", "Alertes", "alerts"], ["#/licence", "Licence", "licence"], ["#/systeme", "Système", "sys"]]],
+];
+const NAV_LABEL = Object.fromEntries(NAV.flatMap(([g, items]) => items.map(([, l, k]) => [k, [g, l]])));
 function setNav(active) {
-  const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"],
-    ["#/gestion", "Gestion d'appels", "cf"], ["#/routes", "Routes", "routes"], ["#/journal", "Journal", "cdr"], ["#/annuaire", "Annuaire", "book"], ["#/systeme", "Système", "sys"]];
-  $("#nav").innerHTML = state?.logged_in ? links.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${l}</a>`).join("") : "";
-  $("#user").innerHTML = state?.logged_in ? `<button id="logout" title="Connecté : ${esc(state.email || "")}">Déconnexion</button>` : "";
+  const on = !!state?.logged_in;
+  document.body.classList.toggle("no-side", !on);
+  document.body.classList.remove("side-open");
+  $("#nav").innerHTML = on ? NAV.map(([g, items]) => `<div class="ng">${g ? `<span class="ngl">${g}</span>` : ""}${items.map(([h, l, k]) =>
+    `<a href="${h}" class="${k === active ? "on" : ""}" ${k === active ? 'aria-current="page"' : ""}>${nicon(k)}<span>${l}</span></a>`).join("")}</div>`).join("") : "";
+  $("#user").innerHTML = on ? `<a class="sf-link" href="/softphone" target="_blank" rel="noopener">${nicon("soft", 17)}<span>Softphone web</span></a>
+    <div class="sf-user"><span class="sf-av">${esc((state.email || "?").charAt(0).toUpperCase())}</span><span class="sf-mail" title="${esc(state.email || "")}">${esc(state.email || "")}</span>
+    <button id="logout" title="Se déconnecter" aria-label="Se déconnecter">${nicon("out2", 17)}</button></div>` : "";
   $("#logout")?.addEventListener("click", async () => { await api("POST", "/api/logout"); state.logged_in = false; location.hash = "#/"; route(); });
+  const [g, l] = NAV_LABEL[active] || ["", ""];
+  $("#crumb").innerHTML = on && l ? `${g ? `<span>${g}</span><b>›</b>` : ""}<strong>${l}</strong>` : "";
   $("#pbx-name").textContent = state?.pbx?.name || "Console PBX";
-  document.title = state?.pbx?.name ? `${state.pbx.name} · Console` : "Console PBX";
+  document.title = state?.pbx?.name ? `${l ? l + " · " : ""}${state.pbx.name}` : "Console Callikoe";
 }
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#burger")) document.body.classList.toggle("side-open");
+  else if (e.target.closest("#sidescrim") || e.target.closest("#nav a")) document.body.classList.remove("side-open");
+});
 
 // ---------------------------------------------------------------- Assistant d'installation
 const wiz = { step: 1, config: null, check: null };
@@ -1072,6 +1114,11 @@ async function renderSystem() {
 // ---------------------------------------------------------------- Gestion d'appels (module callflow-ui.js)
 const cfHelpers = { api, esc, $, app, setNav, formData, showFormError, takeFlash: () => takeFlash(), setFlash: (f) => { flash = f; } };
 
+// Pages d'administration (module admin-ui.js)
+const adminHelpers = { ...cfHelpers, fmtPhone, copyButtons,
+  /** Rappelle fn toutes les ms jusqu'à ce qu'elle renvoie true (arrêté en changeant de page). */
+  poll: (fn, ms) => { clearInterval(timer); const run = async () => { try { if (await fn()) clearInterval(timer); } catch { /* réessaie */ } }; timer = setInterval(run, ms); run(); } };
+
 // ---------------------------------------------------------------- Routage
 async function route() {
   try {
@@ -1090,6 +1137,7 @@ async function route() {
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "routages", m[2] || null);
     else if (h === "#/routes") await renderRoutes();
+    else if ((m = h.match(/^#\/(sortants|passerelles|codes|enregistrements|securite|sauvegardes|mises-a-jour|alertes|licence)(?:\/(.+))?$/))) await renderAdmin(adminHelpers, m[1], m[2] || null);
     else if (h === "#/appels") await renderCalls();  // accessible depuis le tableau de bord et le journal
     else if (h === "#/journal") await renderCdr();
     else if ((m = h.match(/^#\/annuaire(?:\/(\w+))?$/))) await renderContacts(m[1]);

@@ -41,6 +41,7 @@ export function summarize(rows, trunkIds = new Set()) {
       to: { number: direction === "in" ? (first.did || first.dst) : first.dst, ext: answeredBy || (direction === "internal" ? first.dst : "") },
       did: first.did || "", rule: list.find((r) => r.rule)?.rule || "", answered_by: answeredBy, rang,
       external: extCall ? endpointOf(extCall.dstchannel) : "", voicemail: vmBox,
+      recording: list.map((r) => r.userfield || "").find((f) => /\.wav$/.test(f)) || "",
       duration: Math.round((end - new Date(first.calldate).getTime()) / 1000) || Number(first.duration) || 0, talk,
     });
   }
