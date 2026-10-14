@@ -79,6 +79,8 @@ R="$(api PUT /api/extensions/201 '{"mobile":"0612345678","dids":["04 65 00 15 30
 echo "$R" | grep -q '"timeout":15' && pass "Fiche utilisateur 201 : renvois, SDA, mobile enregistrés" || fail "fiche 201 : $R"
 R="$(api PUT /api/extensions/202 '{"status":"away","forwarding":{"away":{"type":"extension","target":"201"}},"options":{"block_external":true}}')"
 echo "$R" | grep -q '"status":"away"' && pass "Utilisateur 202 : statut Absent + appels externes interdits" || fail "fiche 202 : $R"
+R="$(api DELETE /api/extensions/202)"
+echo "$R" | grep -q "Attention : 201" && pass "Suppression de 202 : avertissement « 201 renvoie vers ce poste »" || fail "avertissement suppression : $R"
 R="$(api PUT /api/extensions/201 '{"forwarding":{"busy":{"type":"external","target":"0044 20 1234 5678"}}}')"
 echo "$R" | grep -q "international" && pass "Renvoi vers l'international refusé" || fail "international accepté : $R"
 sleep 2

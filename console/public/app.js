@@ -560,9 +560,9 @@ async function renderUser(id, tab = "general") {
       <label class="check full"><input type="checkbox" name="options.block_external" ${u.options.block_external ? "checked" : ""}> Interdire les appels externes <span class="hint">(appels internes et urgences toujours possibles)</span></label>
       <div class="note full">L'audio passe toujours par le PBX (indispensable derrière une box ou un pare-feu).</div>
       ${save}</form>
-      <div class="pad" style="border-top:1px solid var(--line)"><h2 style="margin-bottom:8px">Supprimer l'utilisateur</h2>
+      <div class="pad" style="border-top:1px solid var(--line)" id="delzone"><h2 style="margin-bottom:8px">Supprimer l'utilisateur</h2>
         <p class="hint">Le poste ${esc(u.id)}, ses identifiants et sa messagerie seront supprimés.</p>
-        <button class="btn danger sm" id="udel">Supprimer ${esc(u.id)}</button></div>`;
+        <button class="btn danger sm" id="udel">Supprimer ${esc(u.id)}…</button></div>`;
   }
 
   app.innerHTML = `${takeFlash()}${head}<div class="panel tabbed">${body}</div>`;
@@ -595,11 +595,26 @@ async function renderUser(id, tab = "general") {
     };
   }
   $("#udel")?.addEventListener("click", async () => {
-    if (!confirm(`Supprimer l'utilisateur ${u.id} (${u.name}) ?`)) return;
-    try {
-      await api("DELETE", `/api/extensions/${u.id}`);
-      flash = { text: `Utilisateur ${u.id} supprimé.` }; location.hash = "#/utilisateurs";
-    } catch (err) { flash = { cls: "bad", text: err.message }; renderUser(u.id, tab); }
+    const imp = await api("GET", `/api/extensions/${u.id}/impact`);
+    const items = [
+      ...imp.forwards.map((f) => `<li><strong>${esc(f.id)} · ${esc(f.name)}</strong> renvoie vers ce poste ${esc(f.rules.join(", "))} → sera remplacé par <strong>${esc(f.replaced_by)}</strong>.</li>`),
+      ...(imp.dids.length ? [`<li>SDA attribuées (${imp.dids.map(fmtPhone).map(esc).join(", ")}) : elles iront à la route entrante générale.</li>`] : []),
+      ...(imp.inbound_alone ? ['<li><strong>C\'est le seul poste de la route entrante :</strong> les appels entrants n\'auront plus de destination.</li>']
+        : imp.inbound_route ? ["<li>Il sera retiré de la route entrante.</li>"] : []),
+    ];
+    $("#delzone").innerHTML = `<div class="warnbox"><h2>${items.length ? "⚠ Attention" : "Confirmer la suppression"}</h2>
+      ${items.length ? `<p>Supprimer <strong>${esc(u.id)} · ${esc(u.name)}</strong> aura ces conséquences :</p><ul>${items.join("")}</ul>`
+        : `<p>Aucun renvoi ni aucune route ne dépend de <strong>${esc(u.id)} · ${esc(u.name)}</strong>.</p>`}
+      <div class="row"><button class="btn ghost sm" id="delno">Annuler</button><button class="btn danger sm" id="delyes">${items.length ? "Supprimer quand même" : `Supprimer ${esc(u.id)}`}</button></div></div>`;
+    $("#delzone").scrollIntoView({ block: "center", behavior: "smooth" });
+    $("#delno").onclick = () => renderUser(u.id, tab);
+    $("#delyes").onclick = async () => {
+      try {
+        await api("DELETE", `/api/extensions/${u.id}?force=1`);
+        flash = { text: `Utilisateur ${u.id} supprimé.${imp.forwards.length ? ` Renvois modifiés : ${imp.forwards.map((f) => f.id).join(", ")}.` : ""}` };
+        location.hash = "#/utilisateurs";
+      } catch (err) { flash = { cls: "bad", text: err.message }; renderUser(u.id, tab); }
+    };
   });
 }
 

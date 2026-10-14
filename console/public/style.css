@@ -165,3 +165,8 @@ legend{font-weight:700;padding:0 6px;font-size:14px}
 .secret input{font-family:var(--mono);font-size:13px;padding:6px 10px}
 .form-msg:empty{display:none}
 .form-msg .err{display:block;padding:10px 14px;background:var(--bad-soft);border-radius:8px}
+.warnbox{border:1px solid var(--warn);background:var(--warn-soft);border-radius:10px;padding:14px 16px}
+.warnbox h2{color:var(--warn);margin-bottom:6px}
+.warnbox ul{margin:8px 0 12px;padding-left:20px}
+.warnbox li{margin:4px 0}
+.warnbox .row{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}

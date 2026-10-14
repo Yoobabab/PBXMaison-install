@@ -301,12 +301,41 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     return extensionSecret(num);
   }
 
-  async function deleteExtension(num) {
+  const RULE_LABELS = { no_answer: "si pas de réponse", busy: "si occupé / non connecté", away: "quand il est Absent", dnd: "en Ne pas déranger" };
+
+  /** Ce que la suppression d'un utilisateur va changer : renvois d'autres utilisateurs, SDA, route entrante. */
+  async function deleteImpact(num) {
     checkExtNumber(num);
     const users = await loadUsers();
-    const refs = users.filter((u) => u.id !== num && Object.values(u.forwarding).some((d) => d?.type === "extension" && d.target === num));
-    if (refs.length) throw new UserError(`Impossible : ${refs.map((u) => `${u.id} (${displayName(u)})`).join(", ")} renvoie vers ce poste. Modifie d'abord ces renvois.`);
+    const self = users.find((u) => u.id === num);
+    if (!self) throw Object.assign(new UserError("Utilisateur introuvable."), { status: 404 });
+    const forwards = [];
+    for (const u of users) {
+      if (u.id === num) continue;
+      const rules = Object.entries(RULE_LABELS).filter(([r]) => u.forwarding[r]?.type === "extension" && u.forwarding[r].target === num);
+      if (rules.length) forwards.push({ id: u.id, name: displayName(u), rules: rules.map(([, l]) => l), replaced_by: u.voicemail.enabled ? "sa messagerie vocale" : "raccrocher" });
+    }
+    const routes = await getRoutes();
+    return { id: num, name: displayName(self), forwards, dids: self.dids, inbound_route: routes.inbound.includes(num),
+      inbound_alone: routes.inbound.length === 1 && routes.inbound[0] === num };
+  }
+
+  async function deleteExtension(num, force = false, by = "") {
+    const impact = await deleteImpact(num);
+    if (impact.forwards.length && !force) {
+      throw Object.assign(new UserError(`Attention : ${impact.forwards.map((f) => `${f.id} (${f.name})`).join(", ")} renvoie vers ce poste.`), { status: 409, impact });
+    }
+    const users = await loadUsers();
     await db.tx(async (c) => {
+      // Renvois vers l'utilisateur supprimé → messagerie de l'utilisateur concerné
+      for (const u of users) {
+        if (u.id === num) continue;
+        let changed = false;
+        for (const r of Object.keys(RULE_LABELS)) {
+          if (u.forwarding[r]?.type === "extension" && u.forwarding[r].target === num) { u.forwarding[r] = { type: "voicemail", target: "" }; changed = true; }
+        }
+        if (changed) await saveUser(c, u, by);
+      }
       for (const t of ["ps_endpoints", "ps_aors", "ps_auths"]) {
         await c.query(`DELETE FROM ${t} WHERE id = $1`, [num]);
       }
@@ -316,6 +345,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const routes = await getRoutes();
     if (routes.inbound.includes(num)) await setRoutes({ ...routes, inbound: routes.inbound.filter((x) => x !== num) });
     else await applyDialplan();
+    return impact;
   }
 
   // ------------------------------------------------------------------ Routes
@@ -417,7 +447,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   return {
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
-    getUser, updateUser, applyDialplan,
+    getUser, updateUser, applyDialplan, deleteImpact,
     getRoutes, setRoutes, listCalls, registrationStatus,
   };
 }

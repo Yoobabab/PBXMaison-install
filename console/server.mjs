@@ -40,7 +40,7 @@ export async function buildApp({ db, ami } = {}) {
   // Erreurs : message en français pour l'utilisateur, détail dans le journal
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof UserError || err.status) {
-      return reply.code(err.status || 400).send({ error: err.message, field: err.field });
+      return reply.code(err.status || 400).send({ error: err.message, field: err.field, impact: err.impact });
     }
     if (err.validation) return reply.code(400).send({ error: "Requête invalide." });
     req.log.error(err);
@@ -176,7 +176,9 @@ export async function buildApp({ db, ami } = {}) {
   app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email));
   app.get("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.extensionSecret(req.params.id));
   app.post("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.resetSecret(req.params.id));
-  app.delete("/api/extensions/:id", { preHandler: requireUser }, async (req) => { await pbx.deleteExtension(req.params.id); return { ok: true }; });
+  app.get("/api/extensions/:id/impact", { preHandler: requireUser }, async (req) => pbx.deleteImpact(req.params.id));
+  app.delete("/api/extensions/:id", { preHandler: requireUser }, async (req) =>
+    ({ ok: true, impact: await pbx.deleteExtension(req.params.id, req.query?.force === "1", currentUser(req).email) }));
 
   app.get("/api/routes", { preHandler: requireUser }, async () => pbx.getRoutes());
   app.put("/api/routes", { preHandler: requireUser }, async (req) => pbx.setRoutes(req.body || {}));
