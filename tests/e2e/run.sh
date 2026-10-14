@@ -115,7 +115,7 @@ sudo /usr/sbin/asterisk -rx 'core show hints' | grep -q "201@users-hints" && pas
 sudo /usr/sbin/asterisk -rx 'dialplan show **202@from-internal' | grep -q "Pickup" && pass "Interception **202" || fail "pickup"
 R="$(api POST /api/extensions '{"number":"203","first_name":"Copie","copy_from":"201"}')"
 echo "$R" | grep -q '"auth_id"' && pass "Utilisateur 203 dupliqué depuis 201 (nouveaux identifiants)" || fail "duplication : $R"
-api GET /api/extensions/203 | grep -q '"type":"blf","value":"202"' && pass "Duplication : touches BLF et réglages copiés" || fail "duplication touches"
+api GET /api/extensions/203 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.exit(JSON.parse(s).user.phone.keys.some((k)=>k.type==="blf"&&k.value==="202")?0:1))' && pass "Duplication : touches BLF et réglages copiés" || fail "duplication touches"
 R="$(api PUT /api/trunks/dstny '{"template":"dstny","number":"0465001530","username":"testuser","dids":"04 65 00 15 30\n04 65 00 15 40 - 04 65 00 15 49"}')"
 api GET /api/trunks | grep -q '"0465001549"' && pass "SDA du trunk : tranche de 10 numéros enregistrée" || fail "SDA trunk : $R"
 TOK="$(api POST /api/extensions/201/app-token | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')"
