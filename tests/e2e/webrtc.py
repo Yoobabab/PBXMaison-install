@@ -1,10 +1,17 @@
-"""Appel WebRTC réel entre deux softphones web (Chromium, micro simulé) à travers Nginx et Asterisk.
-   python3 webrtc.py <base_url> <poste_A> <mdp_A> <poste_B> <mdp_B>"""
-import sys
+"""Appel WebRTC réel entre deux softphones web (Chromium, micro simulé) à travers Nginx et Asterisk,
+   puis message laissé sur la messagerie d'un troisième poste (non connecté).
+   python3 webrtc.py <base_url> <poste_A> <mdp_A> <poste_B> <mdp_B> [poste_messagerie]"""
+import os, sys
 from playwright.sync_api import sync_playwright
 
 base, a_ext, a_pw, b_ext, b_pw = sys.argv[1:6]
+vm_ext = sys.argv[6] if len(sys.argv) > 6 else ""
+SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
+os.makedirs(SHOTS, exist_ok=True)
 def log(m): print(m, flush=True)
+def shot(pg, name):
+    try: pg.screenshot(path=os.path.join(SHOTS, f"{name}.png"))
+    except Exception as e: log(f"(capture {name} impossible : {e})")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"])
@@ -20,12 +27,15 @@ with sync_playwright() as p:
         log(f"✔ Softphone web {ext} enregistré sur le PBX (WebSocket via Nginx)")
         pages[ext] = pg
     a, b = pages[a_ext], pages[b_ext]
-    a.fill("#num", b_ext); a.click("#dial")
+    shot(a, "1-equipe")
+    a.click("#opendial"); a.fill("#num", b_ext); a.click("#dial")
     b.wait_for_selector("#answer", timeout=20000)
     log(f"✔ Appel {a_ext} → {b_ext} : le softphone de {b_ext} sonne")
+    shot(a, "2-appel-sortant"); shot(b, "3-appel-entrant")
     b.click("#answer")
     a.wait_for_selector("#dur", timeout=20000); b.wait_for_selector("#dur", timeout=20000)
     a.wait_for_timeout(4000)
+    shot(a, "4-en-communication")
     state = a.evaluate("""async () => {
       const a = document.querySelector('#remote');
       return { playing: !!a.srcObject && a.srcObject.getAudioTracks().length > 0 };
@@ -35,5 +45,17 @@ with sync_playwright() as p:
         raise SystemExit("✖ pas de flux audio reçu")
     a.click("#hang")
     b.wait_for_selector("#dial", timeout=10000)
+    a.wait_for_timeout(2000)
+    a.goto(f"{base}/softphone#/appels"); a.wait_for_selector(".rows li[data-sel]", timeout=10000)
+    shot(a, "5-historique")
+    log(f"✔ Historique : appel vers {b_ext} enregistré")
+    if vm_ext:
+        a.wait_for_selector("#reg.on", timeout=20000)
+        a.click("#opendial"); a.fill("#num", vm_ext); a.click("#dial")
+        a.wait_for_selector("#dur", timeout=20000)
+        a.wait_for_timeout(7000)
+        a.click("#hang")
+        a.wait_for_timeout(1500)
+        log(f"✔ Message laissé sur la messagerie de {vm_ext}")
     log("✔ Raccroché proprement")
     browser.close()

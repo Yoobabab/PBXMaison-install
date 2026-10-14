@@ -655,6 +655,21 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   }
 
   // ------------------------------------------------------------------ Appels en cours
+  /** Postes en communication ou qui sonnent (pour la présence dans le softphone). */
+  async function lineStates() {
+    let lines;
+    try { lines = await ami.command("core show channels concise"); } catch { return new Map(); }
+    const out = new Map();
+    for (const l of lines) {
+      const f = l.split("!");
+      const m = /^PJSIP\/(\d{3})(?:-web)?-[0-9a-f]+$/.exec(f[0] || "");
+      if (!m) continue;
+      const st = f[4] === "Up" ? "busy" : (f[4] === "Ringing" || f[4] === "Ring") ? "ringing" : "";
+      if (st && out.get(m[1]) !== "busy") out.set(m[1], st);
+    }
+    return out;
+  }
+
   async function listCalls() {
     let lines;
     try { lines = await ami.command("core show channels concise"); } catch { return { available: false, calls: [] }; }
@@ -700,7 +715,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     getUser, updateUser, applyDialplan, deleteImpact,
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
-    getRoutes, setRoutes, listCalls, registrationStatus,
+    getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
   };
 }
 

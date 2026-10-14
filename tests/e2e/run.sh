@@ -141,8 +141,22 @@ curl -sS -c "$UJ" -X POST "$API/api/u/login" -H 'content-type: application/json'
 curl -sS -b "$UJ" "$API/api/u/me" | grep -q '"user":"204-web"' && pass "Espace utilisateur : identifiants WebRTC fournis" || fail "api/u/me"
 api POST /api/extensions/205/impersonate | grep -q '"/softphone"' && pass "Incarnation de 205 depuis la console" || fail "incarnation"
 sudo /usr/sbin/asterisk -rx 'dialplan show 205@users' | grep -q "PJSIP/205&PJSIP/205-web" && pass "Appel vers 205 : sonne le poste et le softphone web" || fail "dialplan web"
-if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Raccroché"; then pass "Appel WebRTC réel entre deux navigateurs"; else
+api POST /api/extensions '{"number":"206","first_name":"Boîte","last_name":"Vocale"}' >/dev/null
+PV="$(api POST /api/extensions/206/web-password | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).password))')"
+if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" 206 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Raccroché"; then pass "Appel WebRTC réel entre deux navigateurs"; else
   sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appel WebRTC"; fi
+# Messagerie vocale dans le softphone : liste, écoute, lu, suppression (console membre du groupe asterisk)
+VJ="$(mktemp)"
+curl -sS -c "$VJ" -X POST "$API/api/u/login" -H 'content-type: application/json' -d "{\"login\":\"206\",\"password\":\"$PV\"}" >/dev/null
+VM="$(curl -sS -b "$VJ" "$API/api/u/voicemail")"
+MID="$(echo "$VM" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s).messages||[];console.log(m[0]?.id||"")})')"
+[[ "$MID" == INBOX/* ]] && pass "Messagerie vocale : message de 204 visible dans le softphone de 206" || { echo "$VM" >> "$OUT"; sudo ls -laR /var/spool/asterisk/voicemail/default 2>&1 | head -20 >> "$OUT"; fail "liste messagerie"; }
+C="$(curl -sS -b "$VJ" -o /tmp/vm.wav -w '%{http_code} %{content_type}' "$API/api/u/voicemail/$MID/audio")"
+[[ "$C" == "200 audio/wav"* && $(stat -c %s /tmp/vm.wav) -gt 10000 ]] && pass "Messagerie vocale : écoute du message dans le navigateur" || fail "écoute messagerie : $C"
+NID="$(curl -sS -b "$VJ" -X POST "$API/api/u/voicemail/$MID/read" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id||""))')"
+[[ "$NID" == Old/* ]] && [[ "$(sudo /usr/sbin/asterisk -rx 'voicemail show users' | awk '$1=="default" && $2=="206"{print $NF}')" == 0 ]] && pass "Messagerie vocale : message marqué comme écouté (voyant du poste à jour)" || { sudo /usr/sbin/asterisk -rx 'voicemail show users' >> "$OUT"; fail "lu : $NID"; }
+curl -sS -b "$VJ" -X DELETE "$API/api/u/voicemail/$NID" | grep -q '"ok":true' && [[ "$(curl -sS -b "$VJ" "$API/api/u/voicemail")" == *'"messages":[]'* ]] && pass "Messagerie vocale : suppression" || fail "suppression message"
+curl -sS -b "$VJ" -X PUT "$API/api/u/settings" -H 'content-type: application/json' -d '{"forwarding":{"away":{"type":"extension","target":"204"}}}' | grep -q '"target":"204"' && sudo /usr/sbin/asterisk -rx 'dialplan show 206@users' | grep -q "204" && pass "Réglages utilisateur : renvoi modifié depuis le softphone" || fail "réglages softphone"
 
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"

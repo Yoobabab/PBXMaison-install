@@ -40,6 +40,13 @@ jobs:
         run: |
           f=tests/e2e/e2e-result.txt
           if [[ -f $f ]]; then msg="$(sed -e 's/%/%25/g' "$f" | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Résultat e2e::${msg}"; fi
+      - name: Captures du softphone
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: softphone-captures
+          path: tests/e2e/shots/
+          if-no-files-found: ignore
       - name: Journaux en cas d'échec
         if: failure() || cancelled()
         shell: bash

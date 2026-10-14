@@ -14,6 +14,7 @@ import { createDb } from "./lib/db.mjs";
 import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
+import * as vm from "./lib/voicemail.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
 
 if (!settings.sessionSecret) { console.error("SESSION_SECRET manquant"); process.exit(1); }
@@ -245,27 +246,88 @@ export async function buildApp({ db, ami } = {}) {
     return { ok: true, ext: row.id };
   });
   app.post("/api/u/logout", async (req, reply) => { reply.clearCookie(UCOOKIE, { path: "/" }); return { ok: true }; });
+  const team = async (self) => {
+    const [list, lines] = await Promise.all([pbx.listExtensions(), pbx.lineStates()]);
+    return list.filter((x) => x.id !== self && !x.disabled).map((x) => ({
+      id: x.id, name: x.name, first_name: x.first_name, last_name: x.last_name, email: x.email,
+      status: x.status, registered: x.registered, line: lines.get(x.id) || "",
+      devices: [...new Set(x.contacts.map((c) => c.device?.kind).filter(Boolean))],
+    }));
+  };
+  const webBy = (s) => (s.imp ? `${s.imp} (incarnation)` : `${s.ext} (softphone)`);
+  const selfView = (u) => ({
+    id: u.id, name: u.name, first_name: u.first_name, last_name: u.last_name, status: u.status, email: u.email,
+    mobile: u.mobile, dids: u.dids, outbound_cid: u.outbound_cid,
+    forwarding: u.forwarding, voicemail: { enabled: u.voicemail.enabled, pin: u.voicemail.pin, skip_pin: u.voicemail.skip_pin },
+    ring_mobile: u.options.ring_mobile,
+  });
   app.get("/api/u/me", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
     const u = await pbx.getUser(s.ext);
     const secret = await pbx.webSecret(s.ext);
     const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
     const https = (req.headers["x-forwarded-proto"] || req.protocol) === "https";
-    const list = await pbx.listExtensions();
     return {
       pbx: { name: pbxEnv().PBX_NAME || "" }, impersonated_by: s.imp || null,
-      user: { id: u.id, name: u.name, status: u.status, email: u.email, voicemail: u.voicemail.enabled },
+      user: selfView(u),
       sip: { ws_url: `${https ? "wss" : "ws"}://${host}/ws`, domain: sipServer().fqdn || host, user: `${u.id}-web`,
         auth_user: secret.auth_id, password: secret.password, display_name: u.name,
         // Micro autorisé par le navigateur : HTTPS, ou accès local (tests)
         secure: https || /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) },
-      contacts: list.filter((x) => x.id !== u.id).map((x) => ({ id: x.id, name: x.name, status: x.status, registered: x.registered })),
+      server: { host: sipServer().host, voicemail: "*97" },
+      contacts: await team(u.id),
     };
   });
+  app.get("/api/u/team", { preHandler: requireWebUser }, async (req) => ({ contacts: await team(webUser(req).ext) }));
   app.put("/api/u/status", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
-    const u = await pbx.updateUser(s.ext, { status: req.body?.status }, s.imp ? `${s.imp} (incarnation)` : `${s.ext} (softphone)`);
+    const u = await pbx.updateUser(s.ext, { status: req.body?.status }, webBy(s));
     return { status: u.status };
+  });
+  // Réglages que l'utilisateur peut changer lui-même : mobile, renvois, code PIN de messagerie
+  app.put("/api/u/settings", { preHandler: requireWebUser }, async (req) => {
+    const s = webUser(req);
+    const b = req.body || {};
+    const input = {};
+    if (b.mobile !== undefined) input.mobile = b.mobile;
+    if (b.forwarding) input.forwarding = b.forwarding;
+    if (b.voicemail?.pin !== undefined) input.voicemail = { pin: b.voicemail.pin };
+    if (b.ring_mobile !== undefined) input.options = { ring_mobile: !!b.ring_mobile };
+    if (b.status !== undefined) input.status = b.status;
+    const u = await pbx.updateUser(s.ext, input, webBy(s));
+    return { user: selfView(u) };
+  });
+  app.get("/api/u/app-token", { preHandler: requireWebUser }, async (req) => ({ active: await pbx.appTokenStatus(webUser(req).ext) }));
+  app.post("/api/u/app-token", { preHandler: requireWebUser }, async (req) => {
+    const s = webUser(req);
+    const t = await pbx.createAppToken(s.ext, webBy(s));
+    const url = appUrl(t.token);
+    return { ...t, url, qr_svg: qrSvg(url) };
+  });
+  app.delete("/api/u/app-token", { preHandler: requireWebUser }, async (req) => { await pbx.revokeAppToken(webUser(req).ext); return { ok: true }; });
+
+  // Messagerie vocale : liste, écoute, lu, suppression
+  const vmRefresh = (ext) => ami.connect().then(() => ami.send({ Action: "VoicemailRefresh", Context: "default", Mailbox: ext })).catch(() => {});
+  app.get("/api/u/voicemail", { preHandler: requireWebUser }, async (req) => {
+    const ext = webUser(req).ext;
+    const u = await pbx.getUser(ext);
+    return { enabled: u.voicemail.enabled, messages: u.voicemail.enabled ? vm.listMessages(ext) : [] };
+  });
+  app.get("/api/u/voicemail/:folder/:num/audio", { preHandler: requireWebUser }, async (req, reply) => {
+    const { file, type } = vm.audioPath(webUser(req).ext, `${req.params.folder}/${req.params.num}`);
+    return reply.type(type).header("cache-control", "private, no-store").send(fs.createReadStream(file));
+  });
+  app.post("/api/u/voicemail/:folder/:num/read", { preHandler: requireWebUser }, async (req) => {
+    const ext = webUser(req).ext;
+    const id = vm.markRead(ext, `${req.params.folder}/${req.params.num}`);
+    await vmRefresh(ext);
+    return { id };
+  });
+  app.delete("/api/u/voicemail/:folder/:num", { preHandler: requireWebUser }, async (req) => {
+    const ext = webUser(req).ext;
+    vm.deleteMessage(ext, `${req.params.folder}/${req.params.num}`);
+    await vmRefresh(ext);
+    return { ok: true };
   });
 
   app.get("/api/phones", { preHandler: requireUser }, async () => ({

@@ -107,6 +107,10 @@ else
 fi
 install -d -o asterisk -g asterisk /etc/asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk
 chown -R asterisk:asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk
+# Messagerie vocale lisible par la console (groupe asterisk) pour l'écoute dans le softphone
+install -d -o asterisk -g asterisk -m 2770 /var/spool/asterisk/voicemail /var/spool/asterisk/voicemail/default
+chmod -R g+rwX /var/spool/asterisk/voicemail
+find /var/spool/asterisk/voicemail -type d -exec chmod g+s {} +
 cat > /etc/systemd/system/asterisk.service <<'EOF'
 [Unit]
 Description=Asterisk (Callikoe)
@@ -118,6 +122,7 @@ ConditionPathExists=/etc/asterisk/asterisk.conf
 Type=simple
 User=asterisk
 Group=asterisk
+UMask=0007
 RuntimeDirectory=asterisk
 RuntimeDirectoryMode=0775
 ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
