@@ -157,7 +157,7 @@ export function validateObject(kind, input, current, ctx) {
     if (input.strategy !== undefined) { if (!GROUP_STRATEGIES[input.strategy]) throw new UserError("Stratégie inconnue.", "strategy"); d.strategy = input.strategy; }
     if (input.members !== undefined) d.members = validMembers(input.members, ctx, "members");
     d.ring_time = int(input.ring_time, 5, 300, d.ring_time, "Durée de sonnerie (secondes)", "ring_time");
-    if (input.cid_prefix !== undefined) d.cid_prefix = clean(input.cid_prefix, 20);
+    if (input.cid_prefix !== undefined) d.cid_prefix = String(input.cid_prefix).replace(/[\r\n"<>,;|\\(){}$]/g, " ").replace(/\s+/g, " ").trim().slice(0, 20);
     if (input.no_answer !== undefined) d.no_answer = validateDest(input.no_answer, ctx, "no_answer");
   } else if (kind === "queue") {
     if (input.strategy !== undefined) { if (!QUEUE_STRATEGIES[input.strategy]) throw new UserError("Stratégie inconnue.", "strategy"); d.strategy = input.strategy; }

@@ -182,7 +182,7 @@ R="$(api POST /api/callflow/rule "{\"name\":\"Standard\",\"dids\":\"04 65 00 15 
 [[ -n "$GID" && -n "$RID" && -n "$QID" && -n "$IID" && "$R" == *'"kind":"rule"'* ]] && pass "Gestion d'appels : groupe, groupe cyclique, file, SVI, messagerie de groupe, horaires et règle créés" || fail "création objets : $R"
 api POST /api/callflow/group '{"name":"X","number":"204"}' | grep -q "déjà utilisé" && pass "Numéro déjà pris par un utilisateur refusé" || fail "unicité numéro"
 sleep 1
-sudo /usr/sbin/asterisk -rx 'dialplan show 600@callflow' | grep -q 'Dial(PJSIP/205&PJSIP/205-web&PJSIP/206&PJSIP/206-web,15' && pass "Asterisk : groupe 600 (sonne tous)" || { sudo /usr/sbin/asterisk -rx 'dialplan show 600@callflow' | head -20 >> "$OUT"; fail "groupe 600"; }
+sudo /usr/sbin/asterisk -rx 'dialplan show 600@callflow' | grep -q 'Dial(PJSIP/205&PJSIP/205-web,15' && sudo /usr/sbin/asterisk -rx 'dialplan show 600@callflow' | grep -q 'CALLERID(name)=\[Acc\]' && pass "Asterisk : groupe 600 (sonne tous, 206 absent exclu, préfixe [Acc])" || { sudo /usr/sbin/asterisk -rx 'dialplan show 600@callflow' | head -20 >> "$OUT"; fail "groupe 600"; }
 sudo /usr/sbin/asterisk -rx 'dialplan show 601@callflow' | grep -q 'GLOBAL(RR_601)' && pass "Asterisk : groupe 601 (1 à 1 en tournant)" || fail "groupe cyclique"
 sudo /usr/sbin/asterisk -rx 'dialplan show ivr-800' | grep -q "Background(/var/lib/pbxmaison/sounds/$PID" && pass "Asterisk : SVI 800 avec annonce et touches" || { sudo /usr/sbin/asterisk -rx 'dialplan show ivr-800' | head -20 >> "$OUT"; fail "SVI"; }
 sudo /usr/sbin/asterisk -rx 'dialplan show 0465001540@did-rules' | grep -q "rule-" && pass "Asterisk : SDA 04 65 00 15 40 → règle entrante" || fail "did-rules"
