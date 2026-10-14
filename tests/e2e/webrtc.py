@@ -53,7 +53,7 @@ with sync_playwright() as p:
         a.wait_for_selector("#reg.on", timeout=20000)
         a.click("#opendial"); a.fill("#num", vm_ext); a.click("#dial")
         a.wait_for_selector("#dur", timeout=20000)
-        a.wait_for_timeout(7000)
+        a.wait_for_timeout(16000)  # annonce de la messagerie (~8 s) puis enregistrement
         a.click("#hang")
         a.wait_for_timeout(1500)
         log(f"✔ Message laissé sur la messagerie de {vm_ext}")

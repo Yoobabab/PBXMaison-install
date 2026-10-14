@@ -150,7 +150,7 @@ VJ="$(mktemp)"
 curl -sS -c "$VJ" -X POST "$API/api/u/login" -H 'content-type: application/json' -d "{\"login\":\"206\",\"password\":\"$PV\"}" >/dev/null
 VM="$(curl -sS -b "$VJ" "$API/api/u/voicemail")"
 MID="$(echo "$VM" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s).messages||[];console.log(m[0]?.id||"")})')"
-[[ "$MID" == INBOX/* ]] && pass "Messagerie vocale : message de 204 visible dans le softphone de 206" || { echo "$VM" >> "$OUT"; sudo ls -laR /var/spool/asterisk/voicemail/default 2>&1 | head -20 >> "$OUT"; fail "liste messagerie"; }
+[[ "$MID" == INBOX/* ]] && pass "Messagerie vocale : message de 204 visible dans le softphone de 206" || { echo "$VM" >> "$OUT"; sudo ls -laR /var/spool/asterisk/voicemail/default 2>&1 | tail -12 >> "$OUT"; sudo grep -iE "voicemail|206" /var/log/asterisk/messages | tail -n 15 | cut -c1-200 >> "$OUT"; fail "liste messagerie"; }
 C="$(curl -sS -b "$VJ" -o /tmp/vm.wav -w '%{http_code} %{content_type}' "$API/api/u/voicemail/$MID/audio")"
 [[ "$C" == "200 audio/wav"* && $(stat -c %s /tmp/vm.wav) -gt 10000 ]] && pass "Messagerie vocale : écoute du message dans le navigateur" || fail "écoute messagerie : $C"
 NID="$(curl -sS -b "$VJ" -X POST "$API/api/u/voicemail/$MID/read" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id||""))')"
