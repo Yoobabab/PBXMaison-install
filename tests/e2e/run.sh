@@ -18,7 +18,7 @@ node make-config.mjs . | tee -a "$OUT"
 T0=$SECONDS
 # shellcheck disable=SC2024  # le journal appartient à l'utilisateur du test, volontairement
 sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_TRUSTED_KEY_FILE="$PWD/test-key.pem" PBXM_NO_FIREWALL=1 \
-  timeout 900 bash ../../install.sh > install.out 2>&1 || { tail -n 40 install.out; fail "install.sh a échoué ou a dépassé 15 min"; }
+  timeout 900 bash ../../install.sh > install.out 2>&1 || { grep -v -E '\.{10}' install.out | tail -n 40 | cut -c1-200 >> "$OUT"; fail "install.sh a échoué ou a dépassé 15 min"; }
 pass "install.sh terminé en $(( SECONDS - T0 )) s"
 grep -q "jeton=" install.out && pass "URL de l'assistant affichée : $(grep -o 'http://[^ ]*jeton=[0-9a-f]*' install.out | sed 's/jeton=.*/jeton=…/')"
 TOKEN="$(sudo cat /var/lib/pbxmaison/setup-token)"

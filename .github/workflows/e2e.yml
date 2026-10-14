@@ -41,11 +41,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo "== install.out"; tail -n 30 tests/e2e/install.out 2>/dev/null
-            echo "== /var/run"; ls -ld /var/run 2>&1
-            echo "== console"; sudo journalctl -u pbxmaison-console -n 25 --no-pager 2>/dev/null
-            echo "== asterisk"; sudo journalctl -u asterisk -n 20 --no-pager 2>/dev/null
-            echo "== messages"; sudo tail -n 20 /var/log/asterisk/messages 2>/dev/null
-          } | grep -v -E '\.{10}' | cut -c1-200 > logs.txt
+            echo "== /var/run"; ls -ld /var/run 2>&1 || true
+            echo "== console"; sudo journalctl -u pbxmaison-console -n 25 --no-pager 2>&1 || true
+            echo "== asterisk"; sudo journalctl -u asterisk -n 20 --no-pager 2>&1 || true
+            echo "== messages"; sudo tail -n 20 /var/log/asterisk/messages 2>&1 || true
+          } | grep -v -E '\.{10}' | cut -c1-200 > logs.txt || true
           msg="$(sed -e 's/%/%25/g' logs.txt | awk '{printf "%s%%0A", $0}')"
           echo "::error title=Journaux::${msg}"
