@@ -158,7 +158,8 @@ NID="$(echo "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",(
 NEWC="$(sudo /usr/sbin/asterisk -rx 'voicemail show users' | awk '$1=="default" && $2=="206"{print $NF}')"
 [[ "$NID" == Old/* && "$NEWC" == 0 ]] && pass "Messagerie vocale : message marqué comme écouté (voyant du poste à jour)" || { echo "réponse : $R / nouveaux : $NEWC" >> "$OUT"; sudo ls -laR /var/spool/asterisk/voicemail/default/206 >> "$OUT" 2>&1; sudo journalctl -u pbxmaison-console -n 15 --no-pager | cut -c1-250 >> "$OUT"; fail "lu"; }
 curl -sS -b "$VJ" -X DELETE "$API/api/u/voicemail/$NID" | grep -q '"ok":true' && [[ "$(curl -sS -b "$VJ" "$API/api/u/voicemail")" == *'"messages":[]'* ]] && pass "Messagerie vocale : suppression" || fail "suppression message"
-curl -sS -b "$VJ" -X PUT "$API/api/u/settings" -H 'content-type: application/json' -d '{"forwarding":{"away":{"type":"extension","target":"204"}}}' | grep -q '"target":"204"' && sudo /usr/sbin/asterisk -rx 'dialplan show 206@users' | grep -q "204" && pass "Réglages utilisateur : renvoi modifié depuis le softphone" || fail "réglages softphone"
+R="$(curl -sS -b "$VJ" -X PUT "$API/api/u/settings" -H 'content-type: application/json' -d '{"status":"away","forwarding":{"away":{"type":"extension","target":"204"}}}')"
+echo "$R" | grep -q '"target":"204"' && sudo /usr/sbin/asterisk -rx 'dialplan show 206@users' | grep -q "Goto(users,204" && pass "Réglages utilisateur : statut et renvoi modifiés depuis le softphone" || { echo "$R" | cut -c1-300 >> "$OUT"; sudo /usr/sbin/asterisk -rx 'dialplan show 206@users' | head -12 >> "$OUT"; fail "réglages softphone"; }
 
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
