@@ -207,6 +207,7 @@ Type=simple
 User=pbxmaison
 Group=pbxmaison
 SupplementaryGroups=asterisk
+UMask=0007
 EnvironmentFile=${ETC}/secrets.env
 Environment=NODE_ENV=production PORT=8080 HOST=127.0.0.1
 WorkingDirectory=${APP}/console

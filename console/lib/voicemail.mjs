@@ -104,7 +104,7 @@ export function markRead(ext, id, spool = VM_SPOOL) {
   const src = boxDir(spool, ext, "INBOX"), dst = boxDir(spool, ext, "Old");
   const files = filesOf(src, num);
   if (!files.length) throw Object.assign(new Error("Message introuvable."), { status: 404 });
-  fs.mkdirSync(dst, { recursive: true, mode: 0o770 });
+  if (!fs.existsSync(dst)) { fs.mkdirSync(dst, { recursive: true }); try { fs.chmodSync(dst, 0o2770); } catch { /* */ } }
   const to = String(nextIndex(dst)).padStart(4, "0");
   for (const f of files) fs.renameSync(path.join(src, f), path.join(dst, f.replace(`msg${num}.`, `msg${to}.`)));
   resequence(src);
