@@ -287,7 +287,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const src = await getUser(String(input.copy_from));
       base = {
         ...defaultUser(num),
-        outbound_cid: src.outbound_cid, status: src.status, forwarding: structuredClone(src.forwarding), options: { ...src.options, disabled: false },
+        outbound_cid: src.outbound_cid, status: src.status, forwarding: structuredClone(src.forwarding), options: { ...src.options, disabled: false, ring_mobile: src.options.ring_mobile && !!String(input.mobile || "").trim() },
         voicemail: { ...src.voicemail, pin: "" },
         phone: { ...structuredClone(src.phone), mac: "", admin_password: "", last_provisioned: undefined,
           keys: src.phone.keys.filter((k) => !(k.type === "blf" && k.value === num)) },
