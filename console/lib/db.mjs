@@ -49,6 +49,24 @@ export function createDb(cfg) {
       ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS phone jsonb NOT NULL DEFAULT '{}';
       ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
       ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS updated_by text NOT NULL DEFAULT '';
+      ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS dids text[] NOT NULL DEFAULT '{}';
+      CREATE TABLE IF NOT EXISTS pbxmaison_app_tokens (
+        token_hash text PRIMARY KEY,
+        extension text NOT NULL,
+        expires_at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        created_by text NOT NULL DEFAULT '',
+        used_at timestamptz
+      );
+      CREATE TABLE IF NOT EXISTS pbxmaison_devices (
+        endpoint text PRIMARY KEY,
+        online boolean NOT NULL DEFAULT false,
+        since timestamptz NOT NULL DEFAULT now(),
+        last_seen timestamptz,
+        user_agent text NOT NULL DEFAULT '',
+        source_ip text NOT NULL DEFAULT '',
+        local_ip text NOT NULL DEFAULT ''
+      );
     `);
   }
 

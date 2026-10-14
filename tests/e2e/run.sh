@@ -100,6 +100,28 @@ sudo grep -q "^INBOUND_TARGET = PJSIP/201$" /var/lib/pbxmaison/extensions_routes
 sudo grep -E "ERROR|WARNING" /var/log/asterisk/messages | grep -iE "pbx_config|extensions|app_voicemail|voicemail\.conf" | tail -5 > ast-err.txt || true
 if [[ -s ast-err.txt ]]; then cat ast-err.txt >> "$OUT"; fail "Erreurs Asterisk au chargement du plan de numérotation"; else pass "Aucune erreur Asterisk au chargement du plan de numérotation"; fi
 
+# 4c. Téléphones : provisioning Yealink, BLF, duplication, SDA du trunk, QR code
+R="$(api PUT /api/extensions/201 '{"phone":{"model":"yealink-t57w","mac":"44:DB:D2:29:FA:7B","settings":{"led":"both","transfer":"blind"},"keys":[{"type":"line"},{"type":"blf","value":"202"}]}}')"
+echo "$R" | grep -q '"mac":"44dbd229fa7b"' && pass "Téléphone Yealink T57W associé au poste 201" || fail "phone 201 : $R"
+PURL="$(api GET /api/phone-options | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).provisioning_url))')"
+PPATH="/${PURL#*://*/}"
+CFG="$(curl -sS "http://127.0.0.1${PPATH}44dbd229fa7b.cfg")"
+echo "$CFG" | grep -q "^account.1.user_name = 201$" && echo "$CFG" | grep -q "^linekey.2.type = 16$" && echo "$CFG" | grep -q "^transfer.dsskey_deal_type = 2$" \
+  && pass "Provisioning : 44dbd229fa7b.cfg servi par Nginx (compte, BLF, transfert aveugle)" || { echo "$CFG" | head -20 >> "$OUT"; fail "fichier de provisioning"; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1${PPATH}000000000000.cfg")" == 404 ]] && pass "Provisioning : MAC inconnue refusée (404)" || fail "MAC inconnue servie"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1/prov/mauvaisjeton/44dbd229fa7b.cfg")" == 404 ]] && pass "Provisioning : mauvais jeton refusé" || fail "jeton non vérifié"
+sleep 2
+sudo /usr/sbin/asterisk -rx 'core show hints' | grep -q "201@users-hints" && pass "BLF : supervision des postes (hints) active" || { sudo /usr/sbin/asterisk -rx 'core show hints' | head >> "$OUT"; fail "hints"; }
+sudo /usr/sbin/asterisk -rx 'dialplan show **202@from-internal' | grep -q "Pickup" && pass "Interception **202" || fail "pickup"
+R="$(api POST /api/extensions '{"number":"203","first_name":"Copie","copy_from":"201"}')"
+echo "$R" | grep -q '"auth_id"' && pass "Utilisateur 203 dupliqué depuis 201 (nouveaux identifiants)" || fail "duplication : $R"
+api GET /api/extensions/203 | grep -q '"type":"blf","value":"202"' && pass "Duplication : touches BLF et réglages copiés" || fail "duplication touches"
+R="$(api PUT /api/trunks/dstny '{"template":"dstny","number":"0465001530","username":"testuser","dids":"04 65 00 15 30\n04 65 00 15 40 - 04 65 00 15 49"}')"
+api GET /api/trunks | grep -q '"0465001549"' && pass "SDA du trunk : tranche de 10 numéros enregistrée" || fail "SDA trunk : $R"
+TOK="$(api POST /api/extensions/201/app-token | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')"
+curl -sS "http://127.0.0.1/app/provision?t=${TOK}&format=json" | grep -q '"extension":"201"' && pass "QR code appli mobile : identifiants servis (valable 48 h)" || fail "app provision"
+api GET /api/phones | grep -q '"phones":\[' && pass "Menu Téléphones : liste disponible" || fail "api phones"
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"

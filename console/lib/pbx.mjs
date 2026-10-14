@@ -7,12 +7,34 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
-import { UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
+import { MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
+  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType } from "./phones.mjs";
+import { nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 
 export const EMERGENCY = ["15", "17", "18", "112", "114", "115", "116000", "119", "191", "196", "197"];
 const FORMATS = ["national", "e164", "e164_plus"];
 
 export { UserError };
+
+/** SDA du trunk : un numéro ou une tranche (0465001530-0465001539) par ligne → liste au format national. */
+export function expandDids(input, cc = "33") {
+  const lines = (Array.isArray(input) ? input : String(input ?? "").split(/[\n,;]+/)).map((x) => String(x).trim()).filter(Boolean);
+  const out = [];
+  for (const line of lines) {
+    const [a, b] = line.split(/\s*(?:-|à|→)\s*(?=[+0-9])/);
+    const first = nationalNumber(a, cc);
+    if (!first) throw new UserError(`SDA invalide : ${line}`, "dids");
+    if (b === undefined) { out.push(first); continue; }
+    const last = nationalNumber(b, cc);
+    if (!last || last.length !== first.length || last.slice(0, -4) !== first.slice(0, -4) || last < first) {
+      throw new UserError(`Tranche invalide : ${line} (ex. 04 65 00 15 30 - 04 65 00 15 39)`, "dids");
+    }
+    const n = Number(last.slice(-4)) - Number(first.slice(-4)) + 1;
+    if (n > 1000) throw new UserError(`Tranche trop grande : ${line} (1000 numéros au maximum).`, "dids");
+    for (let i = 0; i < n; i++) out.push(first.slice(0, -4) + String(Number(first.slice(-4)) + i).padStart(4, "0"));
+  }
+  return [...new Set(out)];
+}
 
 export function loadTemplates(file) {
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -69,7 +91,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         host: r.host, number: r.number, outbound_cid: r.outbound_cid, username: r.username,
         proxy: r.outbound_proxy ? r.outbound_proxy.replace(/^sip:/, "").replace(/;lr$/, "") : "",
         codecs: (r.allow || "").split(","), transport: (r.transport || "").replace("transport-", ""),
-        cid_format: r.cid_format, dial_format: r.dial_format, caller_format: r.caller_format,
+        cid_format: r.cid_format, dial_format: r.dial_format, caller_format: r.caller_format, dids: r.dids || [],
         status: { code: st?.state || "Unknown", label, cls, expires: st?.expires ?? null },
       };
     });
@@ -109,6 +131,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     if (!user || /\s|@/.test(user)) throw new UserError("Identifiant SIP manquant ou invalide.", "username");
     const password = String(input.password || "");
     if (!password && !input.replace) throw new UserError("Mot de passe SIP manquant.", "password");
+    let dids = null;
+    if (input.dids !== undefined) dids = expandDids(input.dids, cc);
 
     const fromUser = t.outbound.from_user === "auth_id" ? user : t.outbound.from_user === "trunk_number" ? trunkNumber : null;
     const contactUser = t.outbound.contact_user === "trunk_number" ? trunkNumber : user;
@@ -116,6 +140,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const transport = `transport-${t.transport}`;
     const expiration = Math.max(60, t.registration.interval);
 
+    if (dids === null && input.replace) dids = (await db.query("SELECT dids FROM pbxmaison_trunks WHERE id = $1", [name])).rows[0]?.dids || [];
     await db.tx(async (c) => {
       let pass = password;
       if (!pass) {
@@ -149,9 +174,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         [name, transport, `${name}-auth`, `sip:${host}:${port}`, `sip:${user}@${host}:${port}`, contactUser, proxyUri, expiration],
       );
       await c.query(
-        `INSERT INTO pbxmaison_trunks (id, template, label, host, number, outbound_cid, dial_format, cid_format, caller_format, did_from, username)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [name, t.id, t.label, host, trunkNumber, outboundCid, dialFormat, cidFormat, callerFormat, t.inbound.did_from, user],
+        `INSERT INTO pbxmaison_trunks (id, template, label, host, number, outbound_cid, dial_format, cid_format, caller_format, did_from, username, dids)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [name, t.id, t.label, host, trunkNumber, outboundCid, dialFormat, cidFormat, callerFormat, t.inbound.did_from, user, dids || []],
       );
     });
     await reload("res_pjsip.so", "res_pjsip_endpoint_identifier_ip.so", "res_pjsip_outbound_registration.so");
@@ -173,9 +198,11 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   }
 
   // ------------------------------------------------------------------ Utilisateurs (postes)
+  const tz = () => env().PBX_TIMEZONE || "Europe/Paris";
+  const withPhone = (row) => ({ ...fromRow(row), phone: phoneFromStored(row.phone, tz()) });
   async function loadUsers() {
     const r = await db.query("SELECT * FROM pbxmaison_extensions ORDER BY id");
-    return r.rows.map(fromRow);
+    return r.rows.map(withPhone);
   }
 
   async function registrations() {
@@ -189,7 +216,13 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const map = new Map();
     for (const row of r.rows) {
       const contacts = (row.contacts || []).filter((c) => !c.expires || Number(c.expires) > now);
-      map.set(row.id, contacts.map((c) => ({ user_agent: c.user_agent || "", ip: c.via || (/@([^:;>]+)/.exec(c.uri || "")?.[1] ?? "") })));
+      map.set(row.id, contacts.map((c) => {
+        // rewrite_contact=yes : l'hôte du contact est l'adresse vue par le PBX ; Via = adresse annoncée par l'appareil
+        const source = /@\[?([^\]:;>]+)\]?(?::(\d+))?/.exec(c.uri || "");
+        const sourceIp = source?.[1] || "";
+        return { user_agent: c.user_agent || "", ip: sourceIp || c.via || "", source_ip: sourceIp, source_port: source?.[2] || "",
+          local_ip: c.via || "", device: identifyDevice(c.user_agent), connection: connectionType(sourceIp, c.via || "", []) };
+      }));
     }
     return map;
   }
@@ -232,9 +265,10 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await c.query(
       `UPDATE pbxmaison_extensions SET name = $2, first_name = $3, last_name = $4, email = $5, mobile = $6,
          outbound_cid = $7, dids = $8, status = $9, forwarding = $10, options = $11, voicemail = $12,
-         updated_at = now(), updated_by = $13 WHERE id = $1`,
+         updated_at = now(), updated_by = $13, phone = COALESCE($14, phone) WHERE id = $1`,
       [u.id, displayName(u), u.first_name, u.last_name, u.email, u.mobile, u.outbound_cid, u.dids, u.status,
-        JSON.stringify(u.forwarding), JSON.stringify(u.options), JSON.stringify(u.voicemail), by || ""]);
+        JSON.stringify(u.forwarding), JSON.stringify(u.options), JSON.stringify(u.voicemail), by || "",
+        u.phone ? JSON.stringify(u.phone) : null]);
     await c.query("UPDATE ps_endpoints SET callerid = $2, set_var = $3 WHERE id = $1",
       [u.id, `"${displayName(u)}" <${u.id}>`, userOpts(u)]);
   }
@@ -247,7 +281,21 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     // Compatibilité : « name » seul (ancienne API) → prénom
     const data = { ...input };
     if (data.first_name === undefined && data.last_name === undefined) data.first_name = input.name || `Poste ${num}`;
-    const u = validateUser(data, defaultUser(num), await validationContext(num));
+    // Duplication : on part de la fiche source (sauf identité, SDA, MAC et mots de passe)
+    let base = { ...defaultUser(num), phone: phoneFromStored(null, tz()) };
+    if (input.copy_from) {
+      const src = await getUser(String(input.copy_from));
+      base = {
+        ...defaultUser(num),
+        outbound_cid: src.outbound_cid, status: src.status, forwarding: structuredClone(src.forwarding), options: { ...src.options, disabled: false },
+        voicemail: { ...src.voicemail, pin: "" },
+        phone: { ...structuredClone(src.phone), mac: "", admin_password: "", last_provisioned: undefined,
+          keys: src.phone.keys.filter((k) => !(k.type === "blf" && k.value === num)) },
+      };
+      for (const r of ["no_answer", "busy", "away", "dnd"]) if (base.forwarding[r]?.type === "extension" && base.forwarding[r].target === num) base.forwarding[r] = { type: "voicemail", target: "" };
+    }
+    const u = validateUser(data, base, await validationContext(num));
+    u.phone = base.phone;
     const password = genPassword();
     const authId = genAuthId();
     await db.tx(async (c) => {
@@ -271,7 +319,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await adoptOrphans();
     const r = await db.query("SELECT * FROM pbxmaison_extensions WHERE id = $1", [num]);
     if (!r.rowCount) throw Object.assign(new UserError("Utilisateur introuvable."), { status: 404 });
-    const u = fromRow(r.rows[0]);
+    const u = withPhone(r.rows[0]);
     const reg = (await registrations()).get(num) || [];
     return { ...u, name: displayName(u), registered: reg.length > 0, contacts: reg, forwards: forwardSummary(u),
       updated_at: r.rows[0].updated_at, updated_by: r.rows[0].updated_by };
@@ -280,6 +328,13 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   async function updateUser(num, input, by) {
     const current = await getUser(num);
     const u = validateUser(input, current, await validationContext(num));
+    if (input.phone) {
+      const users = await loadUsers();
+      const macOwners = new Map(users.filter((x) => x.phone.mac).map((x) => [x.phone.mac, x.id]));
+      try {
+        u.phone = validatePhone(input.phone, current.phone, { selfId: num, macOwners, extensions: new Map(users.map((x) => [x.id, displayName(x)])) });
+      } catch (e) { throw new UserError(e.message, e.field); }
+    }
     await db.tx((c) => saveUser(c, u, by));
     await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id = $1", [num, u.voicemail.enabled ? `${num}@default` : null]);
     await applyDialplan();
@@ -346,6 +401,145 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     if (routes.inbound.includes(num)) await setRoutes({ ...routes, inbound: routes.inbound.filter((x) => x !== num) });
     else await applyDialplan();
     return impact;
+  }
+
+  // ------------------------------------------------------------------ Application mobile (QR code)
+  const hashToken = (t) => crypto.createHash("sha256").update(t).digest("hex");
+  async function createAppToken(num, by) {
+    await getUser(num);
+    const token = crypto.randomBytes(24).toString("base64url");
+    const expires = new Date(Date.now() + 48 * 3600_000);
+    await db.query("DELETE FROM pbxmaison_app_tokens WHERE expires_at < now() OR extension = $1", [num]);
+    await db.query("INSERT INTO pbxmaison_app_tokens (token_hash, extension, expires_at, created_by) VALUES ($1, $2, $3, $4)",
+      [hashToken(token), num, expires, by || ""]);
+    return { token, expires_at: expires.toISOString() };
+  }
+  async function appTokenStatus(num) {
+    const r = await db.query("SELECT expires_at, created_at, used_at FROM pbxmaison_app_tokens WHERE extension = $1 AND expires_at > now()", [num]);
+    return r.rows[0] || null;
+  }
+  async function revokeAppToken(num) { await db.query("DELETE FROM pbxmaison_app_tokens WHERE extension = $1", [num]); }
+  /** Identifiants pour l'appli mobile, si le jeton du QR code est valide. */
+  async function appProvision(token, server) {
+    if (!token || token.length < 20) return null;
+    const r = await db.query("SELECT extension FROM pbxmaison_app_tokens WHERE token_hash = $1 AND expires_at > now()", [hashToken(token)]);
+    if (!r.rowCount) return null;
+    const num = r.rows[0].extension;
+    await db.query("UPDATE pbxmaison_app_tokens SET used_at = now() WHERE token_hash = $1", [hashToken(token)]);
+    const u = await getUser(num);
+    const secret = await extensionSecret(num);
+    return { pbx: env().PBX_NAME || "", extension: num, name: displayName(u), auth_id: secret.auth_id, password: secret.password,
+      host: server.host, fqdn: server.fqdn, ports: { udp: 5060, tcp: 5060, tls: server.tls ? 5061 : null }, voicemail: "*97" };
+  }
+
+  // ------------------------------------------------------------------ Téléphones connectés
+  /** Note les connexions / déconnexions (appelé toutes les 20 s par le serveur). */
+  async function trackDevices() {
+    const reg = await registrations();
+    const prev = new Map((await db.query("SELECT * FROM pbxmaison_devices")).rows.map((r) => [r.endpoint, r]));
+    for (const [id, contacts] of reg) {
+      const c = contacts[0];
+      const p = prev.get(id);
+      if (c) {
+        await db.query(`INSERT INTO pbxmaison_devices (endpoint, online, since, last_seen, user_agent, source_ip, local_ip)
+            VALUES ($1, true, now(), now(), $2, $3, $4)
+          ON CONFLICT (endpoint) DO UPDATE SET since = CASE WHEN pbxmaison_devices.online THEN pbxmaison_devices.since ELSE now() END,
+            online = true, last_seen = now(), user_agent = $2, source_ip = $3, local_ip = $4`,
+        [id, c.user_agent, c.source_ip, c.local_ip]);
+      } else if (p?.online) {
+        await db.query("UPDATE pbxmaison_devices SET online = false, since = now() WHERE endpoint = $1", [id]);
+      }
+    }
+    for (const id of prev.keys()) if (!reg.has(id)) await db.query("DELETE FROM pbxmaison_devices WHERE endpoint = $1", [id]);
+    return reg;
+  }
+
+  async function listPhones() {
+    const reg = await trackDevices();
+    const users = await loadUsers();
+    const devices = new Map((await db.query("SELECT * FROM pbxmaison_devices")).rows.map((r) => [r.endpoint, r]));
+    const models = new Map(MODELS.map((m) => [m.id, m.label]));
+    const out = [];
+    for (const u of users) {
+      const d = devices.get(u.id);
+      const contacts = reg.get(u.id) || [];
+      if (!d && !u.phone.mac && !contacts.length) continue;
+      const c = contacts[0];
+      const ua = c?.user_agent || d?.user_agent || "";
+      const dev = identifyDevice(ua);
+      const sourceIp = c?.source_ip || d?.source_ip || "";
+      const localIp = c?.local_ip || d?.local_ip || "";
+      out.push({
+        user: { id: u.id, name: displayName(u) },
+        online: contacts.length > 0,
+        since: d?.since || null, last_seen: d?.last_seen || null,
+        model: u.phone.model ? models.get(u.phone.model) : dev.label,
+        mac: u.phone.mac || dev.mac || "",
+        device: dev, user_agent: ua, firmware: dev.firmware || "",
+        source_ip: sourceIp, local_ip: localIp,
+        connection: sourceIp ? connectionType(sourceIp, localIp, []) : null,
+        provisioned: u.phone.last_provisioned || null,
+        extra_contacts: Math.max(0, contacts.length - 1),
+      });
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------------ Provisioning des téléphones
+  async function provToken() {
+    let t = await db.getSetting("prov_token", "");
+    if (!t) { t = randomPassword(16); await db.setSetting("prov_token", t); }
+    return t;
+  }
+  /** server : { host, tls } — lien que le téléphone utilise (option DHCP 66 ou saisie dans le téléphone). */
+  async function provisioningUrl(server) {
+    return `${server.tls ? "https" : "http"}://${server.host}/prov/${await provToken()}/`;
+  }
+  const phoneOptions = () => ({
+    models: MODELS, languages: LANGUAGES, date_formats: DATE_FORMATS, time_formats: TIME_FORMATS, timezones: TIMEZONES,
+    backlight: BACKLIGHT, screensaver: SCREENSAVER, transfer: TRANSFER, led: LED, transports: TRANSPORTS, key_types: KEY_TYPES,
+  });
+
+  async function phoneConfig(num, server) {
+    const u = await getUser(num);
+    if (!u.phone.model) throw new UserError("Choisis d'abord le modèle du téléphone.", "phone.model");
+    const secret = await extensionSecret(num);
+    const users = await loadUsers();
+    const names = new Map(users.map((x) => [x.id, displayName(x)]));
+    return { user: u, text: buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url: await provisioningUrl(server) }, names) };
+  }
+
+  /** Fichier demandé par un téléphone : null si inconnu. */
+  async function provisionFile(token, file, server, from) {
+    if (token !== (await db.getSetting("prov_token", ""))) return null;
+    if (/^y0{6}\d{6}\.cfg$/i.test(file)) return { text: "#!version:1.0.0.1\n## PBXMaison : tout est dans <mac>.cfg\n" };
+    const m = /^([0-9a-f]{12})\.cfg$/i.exec(file);
+    if (!m) return null;
+    const mac = m[1].toLowerCase();
+    const r = await db.query("SELECT id FROM pbxmaison_extensions WHERE phone->>'mac' = $1", [mac]);
+    if (!r.rowCount) return null;
+    const id = r.rows[0].id;
+    const { text } = await phoneConfig(id, server);
+    await db.query(`UPDATE pbxmaison_extensions SET phone = jsonb_set(phone, '{last_provisioned}', $2::jsonb) WHERE id = $1`,
+      [id, JSON.stringify({ at: new Date().toISOString(), ip: from.ip, user_agent: String(from.user_agent || "").slice(0, 120) })]);
+    return { text, id };
+  }
+
+  async function notifyPhone(num, action) {
+    checkExtNumber(num);
+    const reg = (await registrations()).get(num) || [];
+    if (!reg.length) throw new UserError("Le téléphone n'est pas connecté : impossible de lui envoyer l'ordre.");
+    const kind = action === "reboot" ? "pbxm-reboot" : "pbxm-resync";
+    try { await ami.command(`pjsip send notify ${kind} endpoint ${num}`); }
+    catch { throw new UserError("Moteur téléphonique injoignable."); }
+    return { ok: true };
+  }
+
+  async function resetPhoneAdmin(num) {
+    const u = await getUser(num);
+    u.phone.admin_password = randomPassword(12);
+    await db.query("UPDATE pbxmaison_extensions SET phone = $2 WHERE id = $1", [num, JSON.stringify(u.phone)]);
+    return { admin_password: u.phone.admin_password };
   }
 
   // ------------------------------------------------------------------ Routes
@@ -448,6 +642,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, deleteImpact,
+    provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, trackDevices, listPhones,
+    createAppToken, appTokenStatus, revokeAppToken, appProvision, loadUsers, registrations,
     getRoutes, setRoutes, listCalls, registrationStatus,
   };
 }

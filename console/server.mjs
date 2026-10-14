@@ -7,6 +7,7 @@ import path from "node:path";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
+import qrcode from "qrcode-generator";
 import { settings, VAR, TEMPLATES_FILE, pbxEnv, installState, setupState, isConfigured, activationCode } from "./lib/config.mjs";
 import { createDb } from "./lib/db.mjs";
 import { Ami } from "./lib/ami.mjs";
@@ -176,6 +177,62 @@ export async function buildApp({ db, ami } = {}) {
   app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email));
   app.get("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.extensionSecret(req.params.id));
   app.post("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.resetSecret(req.params.id));
+  const provFails = new Map(); // échecs par IP (provisioning et appli) : 30 / 10 min
+  // Application mobile : QR code valable 48 h
+  const appUrl = (token) => { const sv = sipServer(); return `${sv.tls ? "https" : "http"}://${sv.host}/app/provision?t=${token}`; };
+  const qrSvg = (text) => { const q = qrcode(0, "M"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); };
+  app.get("/api/extensions/:id/app-token", { preHandler: requireUser }, async (req) => ({ active: await pbx.appTokenStatus(req.params.id) }));
+  app.post("/api/extensions/:id/app-token", { preHandler: requireUser }, async (req) => {
+    const t = await pbx.createAppToken(req.params.id, currentUser(req).email);
+    const url = appUrl(t.token);
+    return { ...t, url, qr_svg: qrSvg(url) };
+  });
+  app.delete("/api/extensions/:id/app-token", { preHandler: requireUser }, async (req) => { await pbx.revokeAppToken(req.params.id); return { ok: true }; });
+  app.get("/app/provision", async (req, reply) => {
+    const wantsJson = req.query?.format === "json" || String(req.headers.accept || "").includes("application/json");
+    if (!wantsJson) {
+      return reply.type("text/html; charset=utf-8").send(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>PBXMaison</title><body style="font:16px system-ui;max-width:420px;margin:12vh auto;padding:0 16px;text-align:center">
+        <h1 style="font-size:20px">Application PBXMaison</h1><p>Ce QR code se scanne depuis l'application mobile PBXMaison pour configurer ton poste automatiquement.</p></body></html>`);
+    }
+    const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
+    const f = provFails.get(ip);
+    if (f && f.count >= 30 && f.until > Date.now()) return reply.code(429).send({ error: "Trop de tentatives." });
+    const out = await pbx.appProvision(String(req.query?.t || ""), sipServer());
+    if (!out) {
+      const fresh = !f || f.until < Date.now();
+      provFails.set(ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 10 * 60_000 });
+      return reply.code(404).send({ error: "QR code invalide ou expiré : demande-en un nouveau à l'administrateur." });
+    }
+    return reply.header("cache-control", "no-store").send(out);
+  });
+
+  app.get("/api/phones", { preHandler: requireUser }, async () => ({
+    phones: await pbx.listPhones(), provisioning_url: await pbx.provisioningUrl(sipServer()) }));
+  app.get("/api/phone-options", { preHandler: requireUser }, async () => ({
+    ...pbx.phoneOptions(), provisioning_url: await pbx.provisioningUrl(sipServer()), timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris" }));
+  app.get("/api/extensions/:id/phone.cfg", { preHandler: requireUser }, async (req, reply) => {
+    const { user, text } = await pbx.phoneConfig(req.params.id, sipServer());
+    reply.header("content-disposition", `attachment; filename="${user.phone.mac || "poste-" + user.id}.cfg"`);
+    return reply.type("text/plain; charset=utf-8").send(text);
+  });
+  app.post("/api/extensions/:id/phone/notify", { preHandler: requireUser }, async (req) => pbx.notifyPhone(req.params.id, req.body?.action));
+  app.post("/api/extensions/:id/phone/admin", { preHandler: requireUser }, async (req) => pbx.resetPhoneAdmin(req.params.id));
+
+  // Provisioning : fichiers demandés par les téléphones (sans session ; jeton secret dans l'URL)
+  app.get("/prov/:token/:file", async (req, reply) => {
+    const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
+    const f = provFails.get(ip);
+    if (f && f.count >= 30 && f.until > Date.now()) return reply.code(429).send("Trop de requêtes");
+    const out = await pbx.provisionFile(req.params.token, req.params.file, sipServer(), { ip, user_agent: req.headers["user-agent"] });
+    if (!out) {
+      const fresh = !f || f.until < Date.now();
+      provFails.set(ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 10 * 60_000 });
+      return reply.code(404).type("text/plain").send("Introuvable");
+    }
+    return reply.type("text/plain; charset=utf-8").header("cache-control", "no-store").send(out.text);
+  });
+
   app.get("/api/extensions/:id/impact", { preHandler: requireUser }, async (req) => pbx.deleteImpact(req.params.id));
   app.delete("/api/extensions/:id", { preHandler: requireUser }, async (req) =>
     ({ ok: true, impact: await pbx.deleteExtension(req.params.id, req.query?.force === "1", currentUser(req).email) }));
@@ -202,5 +259,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
   console.log(`Console PBXMaison sur http://${settings.host}:${settings.port}`);
   // Après une mise à jour : régénère les fichiers lus par Asterisk (nouveau format éventuel)
   if (isConfigured()) app.pbx.applyDialplan().catch((e) => console.error("Plan de numérotation non régénéré :", e.message));
+  // Suivi des connexions des téléphones (« connecté depuis… »)
+  setInterval(() => { if (isConfigured()) app.pbx.trackDevices().catch(() => {}); }, 20_000).unref();
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => app.close().then(() => process.exit(0)));
 }

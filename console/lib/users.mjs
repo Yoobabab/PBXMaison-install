@@ -221,7 +221,7 @@ export function buildUsersDialplan(users) {
       add(destLines(u.forwarding[u.status], u, "busy"));
     } else {
       const target = `PJSIP/${u.id}` + (u.options.ring_mobile && u.mobile ? `&Local/${u.mobile}@user-external/n` : "");
-      add([`Dial(${target},${u.forwarding.timeout},tT)`, 'GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)',
+      add([`Dial(${target},${u.forwarding.timeout},tTb(pickup-mark^s^1))`, 'GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)',
         'GotoIf($["${DIALSTATUS}" = "NOANSWER"]?noanswer)']);
       add(destLines(u.forwarding.busy, u, "busy"));
       add(destLines(u.forwarding.no_answer, u, "unavail"), "noanswer");
@@ -230,6 +230,8 @@ export function buildUsersDialplan(users) {
     L.push(` same => n(loop),Log(WARNING,Boucle de renvois détectée sur le poste ${u.id})`);
     L.push(" same => n(end),Hangup()");
   }
+  L.push("", "; Supervision (BLF) : état des postes", "[users-hints]");
+  for (const u of users) L.push(`exten => ${u.id},hint,PJSIP/${u.id}`);
   L.push("", "; SDA attribuées directement à un utilisateur", "[did-map]");
   for (const u of users) for (const d of u.dids) L.push(`exten => ${d},1,Goto(users,${u.id},1)`);
   L.push("", "; *97 : messagerie de son propre poste", "[vm-access]");

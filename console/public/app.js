@@ -51,7 +51,7 @@ async function copyText(text) {
 }
 
 function setNav(active) {
-  const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/utilisateurs", "Utilisateurs", "ext"],
+  const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"],
     ["#/routes", "Routes", "routes"], ["#/appels", "Appels en cours", "calls"], ["#/systeme", "Système", "sys"]];
   $("#nav").innerHTML = state?.logged_in ? links.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${l}</a>`).join("") : "";
   $("#user").innerHTML = state?.logged_in ? `<span class="hide-sm">${esc(state.email || "")}</span><button id="logout">Déconnexion</button>` : "";
@@ -267,7 +267,23 @@ async function renderDashboard() {
           <li>${d.extensions.total ? "✔ " : ""}<a href="#/utilisateurs">Créer les postes</a> et les saisir dans les téléphones</li>
           <li><a href="#/routes">Choisir qui sonne</a> sur les appels entrants et le trunk de sortie</li>
         </ol></div></div>
-    </div>`;
+    </div>
+    <div class="panel" style="margin-top:18px"><div class="ph"><h2>Appels en cours</h2><a href="#/appels" class="s">Plein écran</a></div><div id="dcalls"><div class="empty"><span class="spin"></span></div></div></div>`;
+  const drawCalls = async () => {
+    if ((location.hash || "#/") !== "#/" || !$("#dcalls")) return clearInterval(timer);
+    let c; try { c = await api("GET", "/api/calls"); } catch { return; }
+    $("#dcalls").innerHTML = callsTable(c);
+  };
+  clearInterval(timer); await drawCalls(); timer = setInterval(drawCalls, 3000);
+}
+
+function callsTable(d) {
+  if (!d.available) return `<div class="empty">Moteur téléphonique injoignable.</div>`;
+  if (!d.calls.length) return `<div class="empty">Aucun appel en cours.</div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Sens</th><th>De</th><th>Vers</th><th class="hide-sm">Trunk</th><th>État</th><th>Durée</th></tr></thead>
+    <tbody>${d.calls.map((c) => `<tr><td>${esc(c.direction)}</td><td class="mono">${esc(c.from)}</td><td class="mono">${esc(c.to)}</td>
+      <td class="hide-sm">${esc(c.trunk || "—")}</td><td><span class="pill ${c.state === "En communication" ? "ok" : "wait"}">${esc(c.state)}</span></td>
+      <td class="mono">${fmtDur(c.duration)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 // ---------------------------------------------------------------- Trunks
@@ -281,7 +297,7 @@ async function renderTrunks() {
       <tbody>${trunks.map((t) => `<tr>
         <td><strong>${esc(t.id)}</strong></td>
         <td>${esc(t.operator)}<div class="s">${esc(t.codecs.join(", "))}</div></td>
-        <td>${esc(fmtPhone(t.number.startsWith("33") ? "+" + t.number : t.number))}<div class="s">présenté : ${esc(t.outbound_cid)}</div></td>
+        <td>${esc(fmtPhone(t.number.startsWith("33") ? "+" + t.number : t.number))}<div class="s">présenté : ${esc(t.outbound_cid)}${t.dids.length ? ` · ${t.dids.length} SDA` : ""}</div></td>
         <td class="hide-sm mono">${esc(t.host)}<div class="s">${esc(t.transport.toUpperCase())} · ${esc(t.username)}</div></td>
         <td><span class="pill ${t.status.cls}">${esc(t.status.label)}</span></td>
         <td style="text-align:right;white-space:nowrap"><a class="btn ghost sm" href="#/trunks/${esc(t.id)}">Modifier</a>
@@ -303,7 +319,8 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
   const existing = id ? trunks.find((t) => t.id === id) : null;
   if (id && !existing) { app.innerHTML = `<div class="panel empty">Trunk introuvable. <a href="#/trunks">Retour</a></div>`; return; }
   const v = draft || (existing ? { name: existing.id, template: existing.template, number: existing.number, username: existing.username,
-    host: existing.host, proxy: existing.proxy, cid_format: existing.cid_format, dial_format: existing.dial_format, caller_format: existing.caller_format } : { template: "" });
+    host: existing.host, proxy: existing.proxy, cid_format: existing.cid_format, dial_format: existing.dial_format, caller_format: existing.caller_format,
+    dids: compactDids(existing.dids).join("\n") } : { template: "" });
   const field = (name, label, input, hint, cls = "") => `<label class="${cls} ${errorField === name ? "has-err" : ""}">${label}${input}
     ${errorField === name ? `<span class="err">${esc(errorMsg)}</span>` : hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
   const opts = (list, cur) => list.map(([val, lab]) => `<option value="${esc(val)}" ${String(val) === String(cur ?? "") ? "selected" : ""}>${esc(lab)}</option>`).join("");
@@ -321,6 +338,7 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
       ${field("password", "Mot de passe SIP", `<input name="password" type="password" autocomplete="new-password" placeholder="${existing ? "inchangé" : ""}">`, "")}
       ${field("host", "Serveur (registrar)", `<input name="host" value="${esc(v.host || "")}" autocapitalize="off" placeholder="sip.operateur.fr">`, "<span id='hosthint'></span>")}
       ${field("proxy", "Proxy sortant", `<input name="proxy" value="${esc(v.proxy ?? "")}" autocapitalize="off" placeholder="aucun">`, "<span id='proxyhint'>Facultatif : serveur ou serveur:port.</span>")}
+      ${field("dids", "SDA de ce trunk", `<textarea name="dids" rows="4" placeholder="04 65 00 15 30&#10;04 65 00 15 40 - 04 65 00 15 49">${esc(v.dids || "")}</textarea>`, "Un numéro ou une tranche par ligne (ex. 04 65 00 15 40 - 04 65 00 15 49). Ils sont ensuite proposés dans les fiches utilisateurs et les règles entrantes.", "full")}
       <details ${v.cid_format || v.dial_format || v.caller_format ? "open" : ""}><summary>Formats des numéros (avancé)</summary><div class="inner">
         ${field("cid_format", "Numéro présenté", fmt("cid_format", v.cid_format), "Envoyé à l'opérateur.")}
         ${field("dial_format", "Numéros composés", fmt("dial_format", v.dial_format), "Envoyés à l'opérateur.")}
@@ -364,6 +382,74 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
   form.template.addEventListener("change", () => applyTemplate(true));
   if (v.template) applyTemplate(!existing && !draft);
 
+}
+
+/** Regroupe les SDA consécutives en tranches lisibles. */
+function compactDids(list = []) {
+  const out = []; let start = null, prev = null;
+  const flush = () => { if (start) out.push(start === prev ? fmtPhone(start) : `${fmtPhone(start)} - ${fmtPhone(prev)}`); };
+  for (const d of [...list].sort()) {
+    if (prev && d.length === prev.length && d.slice(0, -4) === prev.slice(0, -4) && Number(d.slice(-4)) === Number(prev.slice(-4)) + 1) { prev = d; continue; }
+    flush(); start = d; prev = d;
+  }
+  flush(); return out;
+}
+
+// ---------------------------------------------------------------- Icônes d'appareils
+const DEV_ICONS = {
+  phone: '<path d="M4 4h16v9H4z M7 16h10v4H7z M9 13v3 M15 13v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+  pc: '<path d="M3 4h18v12H3z M8 20h8 M12 16v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+  mobile: '<path d="M7 2h10v20H7z M11 18h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+  web: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18 M12 3c3 3.5 3 14.5 0 18 M12 3c-3 3.5-3 14.5 0 18" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  unknown: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.5V14 M12 17h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+};
+const KIND_LABELS = { phone: "Téléphone de bureau", pc: "Softphone sur PC", mobile: "Appli mobile", web: "Softphone web", unknown: "Appareil inconnu" };
+const deviceIcon = (kind = "unknown", extra = "") => `<span class="dev ${kind}" title="${esc(KIND_LABELS[kind] || "")}${extra ? " · " + esc(extra) : ""}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">${DEV_ICONS[kind] || DEV_ICONS.unknown}</svg></span>`;
+const ago = (iso) => {
+  if (!iso) return "—";
+  const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return "à l'instant";
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
+  return `${Math.floor(s / 86400)} j`;
+};
+
+// ---------------------------------------------------------------- Téléphones
+async function renderPhones() {
+  setNav("phones");
+  const d = await api("GET", "/api/phones");
+  const filter = sessionStorage.getItem("pbxm_phones_f") || "all";
+  const on = d.phones.filter((p) => p.online).length;
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Téléphones</h1><p class="sub" style="margin:0">Tous les appareils : téléphones de bureau, softphones et applis.</p></div></div>
+    <div class="cards"><div class="card"><div class="k">Connectés</div><div class="v">${on}</div></div>
+      <div class="card"><div class="k">Déconnectés</div><div class="v">${d.phones.length - on}</div></div>
+      <div class="card"><div class="k">Lien de provisioning</div><div class="s mono" style="word-break:break-all;margin-top:6px">${esc(d.provisioning_url)}</div>
+        <button class="copy" style="margin-top:6px" data-copy="${esc(d.provisioning_url)}">Copier</button></div></div>
+    <div class="panel"><div class="filters"><div class="seg" id="pf">${[["all", "Tous"], ["on", "Connectés"], ["off", "Déconnectés"]].map(([k, l]) => `<label class="${filter === k ? "on" : ""}"><input type="radio" name="pf" value="${k}" ${filter === k ? "checked" : ""}>${l}</label>`).join("")}</div></div>
+    ${d.phones.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>État</th><th>Appareil</th><th class="hide-sm">MAC</th><th>Utilisateur</th><th>Depuis</th><th class="hide-sm">IP publique / locale</th><th class="hide-sm">Connexion</th></tr></thead>
+      <tbody id="prows"></tbody></table></div>`
+      : `<div class="empty">Aucun appareil pour l'instant. Renseigne le modèle et l'adresse MAC dans la fiche d'un utilisateur (onglet Téléphone IP), ou connecte un softphone.</div>`}</div>`;
+  copyButtons();
+  const draw = () => {
+    const f = app.querySelector("#pf input:checked")?.value || "all";
+    sessionStorage.setItem("pbxm_phones_f", f);
+    app.querySelectorAll("#pf label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
+    const rows = $("#prows"); if (!rows) return;
+    rows.innerHTML = d.phones.filter((p) => f === "all" || (f === "on") === p.online).map((p) => `<tr class="click" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
+      <td>${p.online ? '<span class="pill ok">Connecté</span>' : '<span class="pill off">Déconnecté</span>'}</td>
+      <td><span class="devcell">${deviceIcon(p.device.kind)}<span>${esc(p.model || "—")}${p.firmware ? `<div class="s">firmware ${esc(p.firmware)}</div>` : !p.model && p.user_agent ? `<div class="s">${esc(p.user_agent)}</div>` : ""}</span></span></td>
+      <td class="hide-sm mono">${esc(fmtMac(p.mac)) || "—"}</td>
+      <td><a href="#/utilisateurs/${esc(p.user.id)}">${esc(p.user.id)} · ${esc(p.user.name)}</a></td>
+      <td>${p.since ? `${p.online ? "connecté depuis" : "déconnecté depuis"} <strong>${esc(ago(p.since))}</strong><div class="s">${esc(fmtDateTime(p.since))}</div>` : p.provisioned ? `<span class="s">jamais connecté · provisionné le ${esc(fmtDateTime(p.provisioned.at))}</span>` : '<span class="s">jamais connecté</span>'}</td>
+      <td class="hide-sm mono">${esc(p.source_ip || "—")}${p.local_ip && p.local_ip !== p.source_ip ? `<div class="s">local ${esc(p.local_ip)}</div>` : ""}</td>
+      <td class="hide-sm">${p.connection ? esc(p.connection.label) : "—"}</td></tr>`).join("") || '<tr><td colspan="7" class="empty">Aucun appareil dans cette catégorie.</td></tr>';
+    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
+  };
+  app.querySelectorAll("#pf input").forEach((i) => i.addEventListener("change", draw));
+  draw();
+  clearInterval(timer);
+  timer = setInterval(() => location.hash === "#/telephones" && renderPhones(), 20000);
 }
 
 // ---------------------------------------------------------------- Utilisateurs
@@ -428,7 +514,7 @@ async function renderUsers() {
       <td><strong>${esc(x.id)}</strong></td>
       <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
       <td>${statusPill(x)}</td>
-      <td class="hide-sm">${x.registered ? `<span class="pill ok">Connecté</span>${x.contacts.map((c) => `<div class="s">${esc(c.user_agent || "")} · <span class="mono">${esc(c.ip)}</span></div>`).join("")}` : '<span class="pill off">Non connecté</span>'}</td>
+      <td class="hide-sm">${x.registered ? `<span class="devs">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}<span class="pill ok">Connecté</span></span>` : '<span class="pill off">Non connecté</span>'}</td>
       <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td></tr>`).join("");
     $("#unone").hidden = list.length > 0;
     rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
@@ -443,11 +529,13 @@ async function renderUsers() {
   }, 15000);
 }
 
-async function renderUserNew() {
+async function renderUserNew(from) {
   setNav("ext");
   clearInterval(timer);
   const d = await api("GET", "/api/extensions");
-  app.innerHTML = `<h1>Ajouter un utilisateur</h1><p class="sub">Le poste est créé avec ses identifiants SIP ; renvois et messagerie se règlent ensuite dans sa fiche.</p>
+  const src = from ? d.extensions.find((x) => x.id === from) : null;
+  app.innerHTML = `<h1>${src ? `Dupliquer ${esc(src.id)} · ${esc(src.name)}` : "Ajouter un utilisateur"}</h1>
+    <p class="sub">${src ? "Copiés : renvois, statut, options, messagerie (nouveau code), numéro présenté, réglages du téléphone et touches BLF. Nouveaux identifiants SIP générés. Non copiés : SDA et adresse MAC." : "Le poste est créé avec ses identifiants SIP ; renvois et messagerie se règlent ensuite dans sa fiche."}</p>
     <div class="panel"><form method="post" class="grid" id="nf" novalidate><div class="form-msg full"></div>
       <label>Numéro de poste<input name="number" value="${esc(d.next)}" inputmode="numeric" maxlength="3" required><span class="hint">3 chiffres, de 100 à 999.</span></label>
       <span class="hide-sm"></span>
@@ -455,7 +543,8 @@ async function renderUserNew() {
       <label>Nom<input name="last_name" maxlength="40" autocomplete="off"></label>
       <label>E-mail<input name="email" type="email" maxlength="120" autocomplete="off"></label>
       <label>Mobile<input name="mobile" inputmode="tel" placeholder="06 12 34 56 78" autocomplete="off"><span class="hint">Pour les renvois et la sonnerie simultanée.</span></label>
-      <div class="actions"><a class="btn ghost" href="#/utilisateurs">Annuler</a><button class="btn">Créer l'utilisateur</button></div>
+      ${src ? `<input type="hidden" name="copy_from" value="${esc(src.id)}">` : ""}
+      <div class="actions"><a class="btn ghost" href="${src ? `#/utilisateurs/${esc(src.id)}` : "#/utilisateurs"}">Annuler</a><button class="btn">${src ? "Créer la copie" : "Créer l'utilisateur"}</button></div>
     </form></div>`;
   $("#nf").onsubmit = async (e) => {
     e.preventDefault();
@@ -468,7 +557,12 @@ async function renderUserNew() {
   };
 }
 
-const USER_TABS = [["general", "Général"], ["renvois", "Renvois d'appels"], ["telephone", "Téléphone IP"], ["messagerie", "Messagerie vocale"], ["options", "Options"]];
+const USER_TABS = [["general", "Général"], ["renvois", "Renvois d'appels"], ["telephone", "Téléphone IP"], ["touches", "Touches BLF"], ["messagerie", "Messagerie vocale"], ["options", "Options"]];
+let phoneOpts = null;
+const fmtMac = (m) => (m || "").toUpperCase().replace(/(..)(?=.)/g, "$1:");
+const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—";
+const optList = (obj, cur, labelOf = (v) => Array.isArray(v) ? v[0] : v) =>
+  Object.entries(obj).map(([k, v]) => `<option value="${esc(k)}" ${String(k) === String(cur) ? "selected" : ""}>${esc(labelOf(v))}</option>`).join("");
 
 function destField(name, label, dest, users, selfId) {
   const others = users.filter((x) => x.id !== selfId);
@@ -490,13 +584,15 @@ async function renderUser(id, tab = "general") {
   setNav("ext");
   clearInterval(timer);
   const [{ user: u, server }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
+  if ((tab === "telephone" || tab === "touches") && !phoneOpts) phoneOpts = await api("GET", "/api/phone-options");
   const users = list.extensions;
   const fw = u.forwarding;
   const tabs = `<nav class="tabs">${USER_TABS.map(([k, l]) => `<a href="#/utilisateurs/${esc(u.id)}${k === "general" ? "" : "/" + k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
   const head = `<a class="back" href="#/utilisateurs">← Utilisateurs</a>
     <div class="bar"><div class="grow"><h1>${esc(u.id)} · ${esc(u.name)}</h1>
       <p class="sub" style="margin:0">${statusPill(u)} ${u.registered ? '<span class="pill ok">Téléphone connecté</span>' : '<span class="pill off">Téléphone non connecté</span>'}
-      ${u.updated_by ? `<span class="s">· modifié le ${esc(new Date(u.updated_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }))} par ${esc(u.updated_by)}</span>` : ""}</p></div></div>
+      ${u.updated_by ? `<span class="s">· modifié le ${esc(new Date(u.updated_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }))} par ${esc(u.updated_by)}</span>` : ""}</p></div>
+      <a class="btn ghost" href="#/utilisateurs/nouveau?depuis=${esc(u.id)}">Dupliquer</a></div>
     ${u.forwards.length ? `<div class="note fwsum"><strong>En ce moment :</strong> ${u.forwards.map((f) => esc(f.text)).join(" · ")}</div>` : ""}${tabs}`;
   const save = `<div class="actions"><button class="btn">Enregistrer</button></div>`;
   let body = "";
@@ -509,8 +605,9 @@ async function renderUser(id, tab = "general") {
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
       <label>Mobile<input name="mobile" inputmode="tel" value="${esc(fmtPhone(u.mobile) === "—" ? "" : fmtPhone(u.mobile))}" placeholder="06 12 34 56 78"></label>
       <label>Numéro présenté (appels sortants)<input name="outbound_cid" inputmode="tel" value="${esc(u.outbound_cid ? fmtPhone(u.outbound_cid) : "")}" placeholder="Celui du trunk"><span class="hint">Vide = numéro du trunk. Doit être un numéro de ta ligne, sinon l'opérateur peut refuser l'appel.</span></label>
-      <label>SDA attribuées<textarea name="dids" rows="3" placeholder="04 12 34 56 78">${esc(u.dids.map(fmtPhone).join("\n"))}</textarea><span class="hint">Un numéro par ligne. Les appels vers ces numéros sonnent directement chez cet utilisateur.</span></label>
-      ${save}</form>`;
+      <label>SDA attribuées<textarea name="dids" rows="3" placeholder="04 12 34 56 78">${esc(u.dids.map(fmtPhone).join("\n"))}</textarea><span class="hint">Un numéro par ligne. Les appels vers ces numéros sonnent directement chez cet utilisateur.</span><span class="hint" id="freedids"></span></label>
+      ${save}</form>
+      <div class="pad appbox" id="appqr" style="border-top:1px solid var(--line)"></div>`;
   } else if (tab === "renvois") {
     body = `<form method="post" id="uf" novalidate class="pad stack"><div class="form-msg"></div>
       <div><span class="dl">Statut actuel</span><div class="seg">${Object.entries(STATUS_LABELS).map(([k, l]) => `<label class="${u.status === k ? "on" : ""}"><input type="radio" name="status" value="${k}" ${u.status === k ? "checked" : ""}>${l}</label>`).join("")}</div>
@@ -530,7 +627,38 @@ async function renderUser(id, tab = "general") {
       <div class="actions" style="padding-top:16px"><button class="btn">Enregistrer</button></div></form>`;
   } else if (tab === "telephone") {
     const host = server.host || server.fqdn;
-    body = `<div class="pad" style="padding-bottom:0"><p class="hint" style="margin:0">À saisir dans le téléphone ou le softphone (compte SIP).</p></div>
+    const ph = u.phone, st = ph.settings, o = phoneOpts;
+    const lp = ph.last_provisioned;
+    const localIp = u.contacts[0]?.local_ip;
+    body = `<form method="post" id="uf" novalidate>
+      <div class="grid nogap-top"><div class="form-msg full"></div>
+        <h3 class="full sec">Téléphone et provisioning automatique</h3>
+        <label>Modèle<select name="phone.model"><option value="">— Saisie manuelle / softphone —</option>${o.models.map((m) => `<option value="${m.id}" ${ph.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
+        <label>Adresse MAC<input name="phone.mac" value="${esc(fmtMac(ph.mac))}" placeholder="44:DB:D2:29:FA:7B" autocomplete="off"><span class="hint">Sur l'étiquette sous le téléphone.</span></label>
+        ${ph.mac ? `<div class="full provbox">
+          <div><span class="dl">Lien de provisioning</span><span class="mono">${esc(o.provisioning_url)}</span> <button class="copy" type="button" data-copy="${esc(o.provisioning_url)}">Copier</button>
+            <div class="hint">À saisir dans le téléphone (page web › Paramètres › Auto Provision › Server URL) ou en option DHCP 66. Le téléphone télécharge ensuite <span class="mono">${esc(ph.mac)}.cfg</span>.</div></div>
+          <div class="row"><a class="btn ghost sm" href="/api/extensions/${esc(u.id)}/phone.cfg" download>Télécharger le .cfg</a>
+            <button type="button" class="btn ghost sm" data-notify="resync" ${u.registered ? "" : "disabled"}>Reprovisionner</button>
+            <button type="button" class="btn ghost sm" data-notify="reboot" ${u.registered ? "" : "disabled"}>Redémarrer</button></div>
+          <div class="hint">Dernier provisioning : ${lp ? `${esc(fmtDateTime(lp.at))} depuis ${esc(lp.ip)}` : "jamais"}</div>
+          <div><span class="dl">Page web du téléphone</span>${localIp ? `<a href="http://${esc(localIp)}" target="_blank" rel="noopener" class="mono">http://${esc(localIp)}</a> · ` : ""}utilisateur <span class="mono">admin</span> · mot de passe
+            <span class="secret"><input type="password" readonly value="${esc(ph.admin_password)}" id="adminpw"></span> <button class="copy" type="button" data-copy="${esc(ph.admin_password)}">Copier</button>
+            <button type="button" class="btn link" id="adminreset">Réinitialiser</button>
+            <div class="hint">Appliqué au prochain provisioning.</div></div></div>` : ""}
+        <h3 class="full sec">Réglages du téléphone</h3>
+        <label>Langue<select name="phone.settings.language">${optList(o.languages, st.language)}</select></label>
+        <label>Fuseau horaire<select name="phone.settings.timezone">${optList(o.timezones, st.timezone)}</select></label>
+        <label>Format de la date<select name="phone.settings.date_format">${optList(o.date_formats, st.date_format)}</select></label>
+        <label>Format de l'heure<select name="phone.settings.time_format">${optList(o.time_formats, st.time_format)}</select></label>
+        <label>Délai d'extinction du rétroéclairage<select name="phone.settings.backlight">${optList(o.backlight, st.backlight)}</select></label>
+        <label>Délai de l'économiseur d'écran<select name="phone.settings.screensaver">${optList(o.screensaver, st.screensaver)}</select></label>
+        <label>Touche de transfert (BLF / numérotation rapide)<select name="phone.settings.transfer">${optList(o.transfer, st.transfer)}</select></label>
+        <label>Voyant d'alimentation (LED) clignote pour<select name="phone.settings.led">${optList(o.led, st.led)}</select></label>
+        <label>Transport SIP<select name="phone.settings.transport">${optList(o.transports, st.transport)}</select>${!server.tls ? '<span class="hint">TLS disponible une fois le certificat obtenu.</span>' : ""}</label>
+        <label class="check" style="align-self:end"><input type="checkbox" name="phone.settings.lldp" ${st.lldp ? "checked" : ""}> LLDP activé (détection du VLAN voix)</label>
+        ${save}</div></form>
+      <h3 class="sec pad" style="border-top:1px solid var(--line);margin:0">Identifiants SIP (saisie manuelle ou softphone)</h3>
       <dl class="creds">
         <div><dt>Serveur / domaine</dt><dd><span class="mono">${esc(host)}</span> <button class="copy" data-copy="${esc(host)}">Copier</button>
           ${!server.dns_ok ? `<div class="s">Le FQDN ${esc(server.fqdn)} ne pointe pas encore vers ce serveur : utilise l'IP en attendant.</div>` : ""}</dd></div>
@@ -541,9 +669,18 @@ async function renderUser(id, tab = "general") {
         <div><dt>Appareil connecté</dt><dd>${u.contacts.length ? u.contacts.map((c) => `${esc(c.user_agent || "—")} · <span class="mono">${esc(c.ip)}</span>`).join("<br>") : '<span class="s">Aucun pour l\'instant</span>'}</dd></div>
       </dl>
       <div class="pad" style="border-top:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <button class="btn ghost sm" id="regen">Générer un nouveau mot de passe</button>
-        <span class="hint">Le téléphone devra être reconfiguré avec le nouveau mot de passe.</span></div>
-      <div class="pad" style="border-top:1px solid var(--line)"><p class="hint" style="margin:0">Provisioning automatique des téléphones (Yealink, Fanvil…) par adresse MAC : prévu dans une prochaine version.</p></div>`;
+        <button class="btn ghost sm" id="regen">Générer un nouveau mot de passe SIP</button>
+        <span class="hint">Avec le provisioning, le téléphone le reprend tout seul (bouton Reprovisionner).</span></div>`;
+  } else if (tab === "touches") {
+    const ph = u.phone, o = phoneOpts;
+    const model = o.models.find((m) => m.id === ph.model);
+    body = `<form method="post" id="kf" novalidate class="pad stack"><div class="form-msg"></div>
+      <p class="hint" style="margin:0">${model ? `${esc(model.label)} : ${model.keys} touches programmables (sur plusieurs pages).` : "Choisis le modèle dans « Téléphone IP » pour connaître le nombre de touches."}
+        Une touche <strong>BLF</strong> s'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.</p>
+      <div class="keys" id="keys"></div>
+      <div class="row"><button type="button" class="btn ghost sm" id="addkey">+ Ajouter une touche</button>
+        <button type="button" class="btn ghost sm" id="addall">+ BLF pour tous les utilisateurs</button></div>
+      <div class="actions" style="padding-top:16px"><button class="btn">Enregistrer</button></div></form>`;
   } else if (tab === "messagerie") {
     const vm = u.voicemail;
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
@@ -582,7 +719,25 @@ async function renderUser(id, tab = "general") {
       renderUser(u.id, tab);
     } catch (err) { showFormError(form, err); if (btn) btn.disabled = false; }
   };
+  if (tab === "touches") wireKeys(u, users);
+  if (tab === "general") {
+    wireAppQr(u);
+    api("GET", "/api/trunks").then((trunks) => {
+      const used = new Set(users.flatMap((x) => x.dids));
+      const free = trunks.flatMap((t) => t.dids).filter((x) => !used.has(x));
+      if (free.length && $("#freedids")) $("#freedids").textContent = `Libres sur les trunks : ${compactDids(free).slice(0, 6).join(", ")}${free.length > 6 ? "…" : ""}`;
+    }).catch(() => {});
+  }
   if (tab === "telephone") {
+    app.querySelectorAll("[data-notify]").forEach((b) => b.onclick = async () => {
+      if (b.dataset.notify === "reboot" && !confirm("Redémarrer le téléphone ? Un appel en cours serait coupé.")) return;
+      try { await api("POST", `/api/extensions/${u.id}/phone/notify`, { action: b.dataset.notify }); b.textContent = "Envoyé ✓"; }
+      catch (err) { flash = { cls: "bad", text: err.message }; renderUser(u.id, tab); }
+    });
+    $("#adminreset")?.addEventListener("click", async () => {
+      if (!confirm("Générer un nouveau mot de passe pour la page web du téléphone ?")) return;
+      await api("POST", `/api/extensions/${u.id}/phone/admin`); flash = { text: "Nouveau mot de passe généré : il sera appliqué au prochain provisioning." }; renderUser(u.id, tab);
+    });
     const showSecret = (s) => {
       $("#authid").innerHTML = `<span class="mono">${esc(s.auth_id)}</span> <button class="copy" data-copy="${esc(s.auth_id)}">Copier</button>`;
       $("#pw").innerHTML = `<span class="secret"><input type="password" readonly value="${esc(s.password)}" class="mono"></span> <button class="copy" data-copy="${esc(s.password)}">Copier</button>`;
@@ -616,6 +771,71 @@ async function renderUser(id, tab = "general") {
       } catch (err) { flash = { cls: "bad", text: err.message }; renderUser(u.id, tab); }
     };
   });
+}
+
+async function wireAppQr(u) {
+  const box = $("#appqr"); if (!box) return;
+  const idle = (st) => {
+    box.innerHTML = `<h3 class="sec" style="margin:0 0 8px">Application mobile</h3>
+      <p class="hint" style="margin:0 0 12px">Un QR code à scanner dans l'application PBXMaison pour configurer le poste ${esc(u.id)} sans rien saisir. Valable 2 jours.</p>
+      ${st ? `<p style="margin:0 0 12px">Un QR code est actif jusqu'au <strong>${esc(fmtDateTime(st.expires_at))}</strong>${st.used_at ? ` · scanné le ${esc(fmtDateTime(st.used_at))}` : " · pas encore scanné"}.</p>` : ""}
+      <div class="row"><button type="button" class="btn ghost sm" id="qrgen">${st ? "Générer un nouveau QR code" : "Générer le QR code"}</button>
+      ${st ? '<button type="button" class="btn ghost sm" id="qrrev">Révoquer</button>' : ""}</div>`;
+    $("#qrgen").onclick = async () => show(await api("POST", `/api/extensions/${u.id}/app-token`));
+    $("#qrrev")?.addEventListener("click", async () => { await api("DELETE", `/api/extensions/${u.id}/app-token`); idle(null); });
+  };
+  const show = (t) => {
+    box.innerHTML = `<h3 class="sec" style="margin:0 0 8px">Application mobile</h3>
+      <div class="qr"><div class="qrimg">${t.qr_svg}</div><div>
+        <p style="margin-top:0">Scanne ce QR code avec l'application PBXMaison.<br>Valable jusqu'au <strong>${esc(fmtDateTime(t.expires_at))}</strong>.</p>
+        <p class="hint">Il donne accès aux identifiants du poste ${esc(u.id)} : ne l'envoie qu'à son utilisateur. Un nouveau QR code annule le précédent.</p>
+        <div class="row"><button type="button" class="btn ghost sm" id="qrrev">Révoquer</button><button type="button" class="btn ghost sm" id="qrprint">Imprimer</button></div></div></div>`;
+    $("#qrrev").onclick = async () => { await api("DELETE", `/api/extensions/${u.id}/app-token`); idle(null); };
+    $("#qrprint").onclick = () => { const w = window.open("", "_blank"); w.document.write(`<title>QR ${esc(u.id)}</title><body style="font:16px system-ui;text-align:center;padding:40px"><h2>${esc(u.id)} · ${esc(u.name)}</h2><div style="width:280px;margin:auto">${t.qr_svg}</div><p>Valable jusqu'au ${esc(fmtDateTime(t.expires_at))}</p></body>`); w.document.close(); w.print(); };
+  };
+  try { idle((await api("GET", `/api/extensions/${u.id}/app-token`)).active); } catch { box.remove(); }
+}
+
+function wireKeys(u, users) {
+  const o = phoneOpts;
+  let keys = u.phone.keys.map((k) => ({ ...k }));
+  const others = users.filter((x) => x.id !== u.id);
+  const box = $("#keys");
+  const draw = () => {
+    box.innerHTML = keys.length ? keys.map((k, i) => `<div class="keyrow" data-i="${i}">
+      <span class="kn">${i + 1}</span>
+      <select data-f="type">${Object.entries(o.key_types).map(([t, l]) => `<option value="${t}" ${k.type === t ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+      ${k.type === "blf" ? `<select data-f="value"><option value="">— Utilisateur —</option>${others.map((x) => `<option value="${esc(x.id)}" ${k.value === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select>`
+        : k.type === "speed" ? `<input data-f="value" value="${esc(k.value)}" placeholder="Numéro" inputmode="tel">` : '<span class="kv"></span>'}
+      ${k.type === "none" ? '<span class="kv"></span>' : `<input data-f="label" value="${esc(k.label)}" placeholder="${k.type === "line" ? "Libellé (facultatif)" : "Libellé"}" maxlength="24">`}
+      <span class="kb"><button type="button" class="btn ghost sm" data-mv="-1" ${i === 0 ? "disabled" : ""} title="Monter">↑</button><button type="button" class="btn ghost sm" data-mv="1" ${i === keys.length - 1 ? "disabled" : ""} title="Descendre">↓</button><button type="button" class="btn ghost sm" data-rm title="Supprimer">✕</button></span>
+    </div>`).join("") : '<p class="hint">Aucune touche.</p>';
+    box.querySelectorAll(".keyrow").forEach((row) => {
+      const i = Number(row.dataset.i);
+      row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+        keys[i][el.dataset.f] = el.value;
+        if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = ""; draw(); }
+        if (el.dataset.f === "value" && keys[i].type === "blf") { keys[i].label = others.find((x) => x.id === el.value)?.name || ""; draw(); }
+      }));
+      row.querySelector("[data-rm]").onclick = () => { keys.splice(i, 1); draw(); };
+      row.querySelectorAll("[data-mv]").forEach((b) => b.onclick = () => { const j = i + Number(b.dataset.mv); [keys[i], keys[j]] = [keys[j], keys[i]]; draw(); });
+    });
+  };
+  $("#addkey").onclick = () => { keys.push({ type: "blf", value: "", label: "" }); draw(); };
+  $("#addall").onclick = () => {
+    const have = new Set(keys.filter((k) => k.type === "blf").map((k) => k.value));
+    for (const x of others) if (!have.has(x.id)) keys.push({ type: "blf", value: x.id, label: x.name });
+    draw();
+  };
+  draw();
+  $("#kf").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api("PUT", `/api/extensions/${u.id}`, { phone: { keys } });
+      flash = { text: "Touches enregistrées. Le téléphone les reçoit au prochain provisioning (bouton Reprovisionner dans Téléphone IP)." };
+      renderUser(u.id, "touches");
+    } catch (err) { showFormError(e.target, err); }
+  };
 }
 
 // ---------------------------------------------------------------- Routes
@@ -658,12 +878,7 @@ async function renderCalls() {
     let d;
     try { d = await api("GET", "/api/calls"); } catch { return; }
     app.innerHTML = `<div class="bar"><div class="grow"><h1>Appels en cours</h1><p class="sub" style="margin:0">Actualisation toutes les 2 secondes.</p></div></div>
-      <div class="panel">${!d.available ? `<div class="empty">Moteur téléphonique injoignable.</div>`
-        : d.calls.length ? `<div class="table-wrap"><table><thead><tr><th>Sens</th><th>De</th><th>Vers</th><th>Trunk</th><th>État</th><th>Durée</th></tr></thead>
-        <tbody>${d.calls.map((c) => `<tr><td>${esc(c.direction)}</td><td class="mono">${esc(c.from)}</td><td class="mono">${esc(c.to)}</td>
-          <td>${esc(c.trunk || "—")}</td><td><span class="pill ${c.state === "En communication" ? "ok" : "wait"}">${esc(c.state)}</span></td>
-          <td class="mono">${fmtDur(c.duration)}</td></tr>`).join("")}</tbody></table></div>`
-        : `<div class="empty">Aucun appel en cours.</div>`}</div>`;
+      <div class="panel">${callsTable(d)}</div>`;
   };
   clearInterval(timer); await draw(); timer = setInterval(draw, 2000);
 }
@@ -714,7 +929,8 @@ async function route() {
     else if (h === "#/trunks/nouveau") await renderTrunkForm(null);
     else if ((m = h.match(/^#\/trunks\/([\w-]+)$/))) await renderTrunkForm(m[1]);
     else if (h === "#/postes" || h === "#/utilisateurs") await renderUsers();
-    else if (h === "#/utilisateurs/nouveau") await renderUserNew();
+    else if (h === "#/telephones") await renderPhones();
+    else if ((m = h.match(/^#\/utilisateurs\/nouveau(?:\?depuis=(\d{3}))?$/))) await renderUserNew(m[1]);
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if (h === "#/routes") await renderRoutes();
     else if (h === "#/appels") await renderCalls();
