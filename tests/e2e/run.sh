@@ -90,7 +90,8 @@ sudo /usr/sbin/asterisk -rx 'dialplan show 202@users' | grep -q "Goto(users,201,
 sudo /usr/sbin/asterisk -rx 'dialplan show 0465001530@did-map' | grep -q "users,201" && pass "Asterisk : SDA 04 65 00 15 30 → 201" || fail "did-map"
 VM="$(sudo /usr/sbin/asterisk -rx 'voicemail show users')"
 echo "$VM" | grep -q "201" && pass "Messagerie vocale : boîtes créées ($(echo "$VM" | grep -c '^default'))" || { echo "$VM" | head >> "$OUT"; fail "voicemail"; }
-sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 202' | grep -q "USER_OPTS=,1" && pass "Asterisk : 202 marqué « appels externes interdits »" || fail "set_var 202"
+EP2="$(sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 202')"
+echo "$EP2" | grep -q "USER_OPTS=,1" && pass "Asterisk : 202 marqué « appels externes interdits »" || { echo "$EP2" | grep -iE "set_var|callerid|mailbox" >> "$OUT"; sudo -u postgres psql -At asterisk -c "SELECT id, set_var FROM ps_endpoints WHERE id IN ('201','202')" >> "$OUT"; fail "set_var 202"; }
 sudo /usr/sbin/asterisk -rx 'dialplan show *97@from-internal' | grep -q "vm-access" && pass "*97 : accès à sa messagerie" || fail "*97"
 sudo grep -q "^INBOUND_TARGET = PJSIP/201$" /var/lib/pbxmaison/extensions_routes.conf && pass "Route entrante : 202 (absent) retiré de la sonnerie" || { sudo cat /var/lib/pbxmaison/extensions_routes.conf >> "$OUT"; fail "INBOUND_TARGET"; }
 sudo grep -E "ERROR|WARNING" /var/log/asterisk/messages | grep -iE "pbx_config|extensions|app_voicemail|voicemail\.conf" | tail -5 > ast-err.txt || true
