@@ -1,0 +1,58 @@
+# Compile Asterisk pour chaque système pris en charge et publie les archives
+# dans la Release « latest » (téléchargée par install.sh).
+name: Asterisk précompilé
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - packaging/build-asterisk.sh
+      - .github/workflows/build-asterisk.yml
+  schedule:
+    - cron: "17 3 * * 1"   # chaque lundi : reprend les correctifs de la branche 22
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: debian12
+            image: debian:12
+          - target: ubuntu2404
+            image: ubuntu:24.04
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - name: Préparer
+        run: apt-get update -q && apt-get install -y -q git ca-certificates >/dev/null
+      - uses: actions/checkout@v4
+      - name: Compiler Asterisk
+        run: bash packaging/build-asterisk.sh ${{ matrix.target }} out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asterisk-${{ matrix.target }}
+          path: out/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publier dans la Release « latest »
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -lh dist
+          gh release view latest >/dev/null 2>&1 || \
+            gh release create latest --title "Paquets d'installation" \
+              --notes "Archives utilisées par install.sh. Mises à jour automatiquement."
+          gh release upload latest dist/* --clobber
