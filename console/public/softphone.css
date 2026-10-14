@@ -1,4 +1,5 @@
 /* Softphone web Callikoe — complète style.css */
+[hidden]{display:none!important}
 :root[data-theme="light"]{
   --bg:#f6f6f8;--panel:#fff;--ink:#1b1d24;--muted:#626977;--line:#e6e7ec;
   --accent:#d8141c;--accent-hover:#b50f16;--accent-soft:#fdecec;
