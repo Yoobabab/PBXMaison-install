@@ -274,7 +274,7 @@ api POST /api/backups/run '{}' >/dev/null
 for _ in $(seq 1 30); do sleep 2; api GET /api/backups | grep -q '"running":false' && break; done
 BK="$(api GET /api/backups)"
 FILE="$(echo "$BK" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(j.last&&j.last.ok?j.last.file:"")})')"
-[[ -n "$FILE" ]] && sudo tar -xzOf "/var/lib/pbxmaison/backups/$FILE" ./database.sql | grep -q "pbxmaison_settings" && pass "Sauvegarde : archive créée avec la base de données ($FILE)" || { echo "$BK" | cut -c1-600 >> "$OUT"; fail "sauvegarde"; }
+[[ -n "$FILE" ]] && sudo tar -xzOf "/var/lib/pbxmaison/backups/$FILE" ./database.sql | grep "pbxmaison_settings" >/dev/null && pass "Sauvegarde : archive créée avec la base de données ($FILE)" || { echo "$BK" | grep -o '"last":{[^}]*}' >> "$OUT"; sudo ls -la /var/lib/pbxmaison/backups >> "$OUT" 2>&1; fail "sauvegarde"; }
 api GET /api/license | grep -q '"key":"' && pass "Licence : informations lisibles" || fail "licence"
 api GET /api/updates/status | grep -q '"running":' && pass "Mises à jour : état lisible (pbx-configure)" || fail "état mise à jour"
 api POST /api/alerts/check '{}' | grep -q '"sending_enabled":false' && pass "Alertes : surveillance active (envoi des e-mails en préparation)" || fail "alertes"
