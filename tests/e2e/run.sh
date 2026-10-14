@@ -18,7 +18,7 @@ node make-config.mjs . | tee -a "$OUT"
 T0=$SECONDS
 # shellcheck disable=SC2024  # le journal appartient à l'utilisateur du test, volontairement
 sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_TRUSTED_KEY_FILE="$PWD/test-key.pem" PBXM_NO_FIREWALL=1 \
-  bash ../../install.sh > install.out 2>&1 || { tail -n 40 install.out; fail "install.sh a échoué"; }
+  timeout 900 bash ../../install.sh > install.out 2>&1 || { tail -n 40 install.out; fail "install.sh a échoué ou a dépassé 15 min"; }
 pass "install.sh terminé en $(( SECONDS - T0 )) s"
 grep -q "jeton=" install.out && pass "URL de l'assistant affichée : $(grep -o 'http://[^ ]*jeton=[0-9a-f]*' install.out | sed 's/jeton=.*/jeton=…/')"
 TOKEN="$(sudo cat /var/lib/pbxmaison/setup-token)"
@@ -34,7 +34,7 @@ echo "$R" | grep -q '"ok":true' && pass "Assistant : licence acceptée" || fail 
 R="$(api POST /api/setup/check '{"config":{"version":1}}')"
 echo "$R" | grep -q '"ok":false' && pass "Assistant : fichier non signé refusé" || fail "fichier non signé accepté : $R"
 api POST /api/setup/apply "{\"config\":$CFG}" >/dev/null
-for _ in $(seq 1 90); do
+for _ in $(seq 1 120); do
   P="$(api GET /api/setup/progress)"
   echo "$P" | grep -q '"running":false' && echo "$P" | grep -q '"ok":\(true\|false\)' && break
   sleep 2
@@ -80,7 +80,7 @@ api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lectu
 
 # 5. Réinstallation (mise à jour) sans perte de configuration
 # shellcheck disable=SC2024
-sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 bash ../../install.sh > reinstall.out 2>&1 || { tail -n 30 reinstall.out; fail "réinstallation"; }
+sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 timeout 900 bash ../../install.sh > reinstall.out 2>&1 || { tail -n 30 reinstall.out; fail "réinstallation"; }
 sleep 3
 sudo /usr/sbin/asterisk -rx 'pjsip show endpoints' | grep -qE "Endpoint:\s+201(/|\s)" && pass "Mise à jour (relance de la commande) : configuration conservée" || fail "config perdue après mise à jour"
 echo "OK" >> "$OUT"

@@ -56,6 +56,9 @@ make -s install DESTDIR="$STAGE" 2>&1 | grep -v -E '\.{10}' | tail -n 20 || true
 test -x "$STAGE/usr/sbin/asterisk" || { echo "Échec de make install"; exit 1; }
 # Pas de fichiers de configuration d'exemple : PBXMaison écrit les siens
 rm -rf "$STAGE/etc/asterisk"
+# /var/run est un lien vers /run sur le système cible : ne jamais le livrer
+# (le dossier d'exécution est créé par systemd via RuntimeDirectory)
+rm -rf "$STAGE/var/run" "$STAGE/run"
 # Outils de création du schéma de base (alembic) et modèles de config utiles
 install -d "$STAGE/usr/share/asterisk"
 cp -a contrib/ast-db-manage "$STAGE/usr/share/asterisk/ast-db-manage"
@@ -71,6 +74,9 @@ find "$STAGE/usr/sbin" "$STAGE/usr/lib" -type f \( -name '*.so*' -o -perm -u+x \
   | cut -d: -f1 | sort -u | grep -v -E '^(libc6|libgcc-s1|libstdc\+\+6)$' > "$OUT/asterisk-${TARGET}-amd64.deps"
 echo "== Dépendances : $(tr '\n' ' ' < "$OUT/asterisk-${TARGET}-amd64.deps")"
 
-tar -C "$STAGE" -czf "$OUT/asterisk-${TARGET}-amd64.tar.gz" .
+# Archive sans entrée « . » (sinon l'extraction modifierait les droits de /)
+# shellcheck disable=SC2046
+tar -C "$STAGE" -czf "$OUT/asterisk-${TARGET}-amd64.tar.gz" $(cd "$STAGE" && ls -A)
+tar -tzf "$OUT/asterisk-${TARGET}-amd64.tar.gz" | grep -E '^(\./)?(var/)?run(/|$)' && { echo "var/run présent dans l'archive"; exit 1; } || true
 echo "$VERSION" > "$OUT/asterisk-${TARGET}-amd64.version"
 ls -lh "$OUT"

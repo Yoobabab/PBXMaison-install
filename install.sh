@@ -95,7 +95,10 @@ else
   curl -fsSL "${RELEASE_URL}/asterisk-${TARGET}-amd64.tar.gz" -o "$TMP/asterisk.tar.gz"
   # shellcheck disable=SC2046
   apt_install $(cat "$TMP/deps")
-  tar -xzf "$TMP/asterisk.tar.gz" -C / --no-same-owner
+  # --keep-directory-symlink : ne jamais remplacer les liens système (/var/run → /run, /lib → /usr/lib…)
+  tar -xzf "$TMP/asterisk.tar.gz" -C / --no-same-owner --keep-directory-symlink --no-overwrite-dir \
+    --exclude='./var/run' --exclude='var/run' --exclude='./run' --exclude='run'
+  [[ -L /var/run ]] || die "Le lien /var/run a été modifié : installation interrompue par sécurité."
   ldconfig
   ok "Asterisk ${WANT} installé (sons en français inclus)"
 fi
