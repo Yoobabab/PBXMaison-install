@@ -10,6 +10,7 @@
 #  pour que la console affiche la progression.
 # =============================================================================
 set -Eeuo pipefail
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin"   # Node.js du système, pas une autre version installée ailleurs
 
 APP=/opt/pbxmaison
 ETC=/etc/pbxmaison
@@ -91,7 +92,8 @@ EOF
   } > /etc/nginx/sites-available/pbxmaison
   ln -sf /etc/nginx/sites-available/pbxmaison /etc/nginx/sites-enabled/pbxmaison
   rm -f /etc/nginx/sites-enabled/default
-  nginx -t -q && systemctl reload nginx
+  nginx -t -q
+  if systemctl is-active --quiet nginx; then systemctl reload nginx; else systemctl enable --now nginx >/dev/null 2>&1; fi
 }
 
 cmd_apply() {

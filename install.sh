@@ -60,14 +60,17 @@ step "Paquets système"
 # =============================================================================
 apt-get update -q >/dev/null
 apt_install ca-certificates curl gnupg dnsutils iproute2 sudo tar openssl
-if ! command -v node >/dev/null || [[ "$(node -p 'process.versions.node.split(".")[0]')" -lt $NODE_MAJOR ]]; then
+# Node.js du système (/usr/bin/node) : c'est lui qu'utilisent la console et pbx-configure
+if [[ ! -x /usr/bin/node ]] || [[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" -lt $NODE_MAJOR ]]; then
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
   apt-get update -q >/dev/null
 fi
 apt_install nodejs postgresql unixodbc odbc-postgresql alembic python3-alembic python3-psycopg2 nginx certbot fail2ban
-ok "Node.js $(node -v), PostgreSQL, Nginx, Certbot, fail2ban"
+[[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" -ge $NODE_MAJOR ]] || die "Node.js ${NODE_MAJOR} n'a pas pu être installé ($(/usr/bin/node -v))."
+systemctl enable --now nginx >/dev/null 2>&1 || true
+ok "Node.js $(/usr/bin/node -v), PostgreSQL, Nginx, Certbot, fail2ban"
 
 # =============================================================================
 step "Téléchargement de PBXMaison"
@@ -180,7 +183,7 @@ step "Console web"
 install -d -o pbxmaison -g asterisk -m 2750 "$VAR"
 install -d -o pbxmaison -g pbxmaison -m 0700 "$VAR/staging"
 [[ -f "$VAR/extensions_routes.conf" ]] || install -o pbxmaison -g asterisk -m 0640 /dev/null "$VAR/extensions_routes.conf"
-(cd "$APP/console" && npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null)
+(cd "$APP/console" && PATH="/usr/bin:$PATH" npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null 2>&1)
 if [[ -n "${PBXM_TRUSTED_KEY_FILE:-}" ]]; then install -m 0644 "$PBXM_TRUSTED_KEY_FILE" "$ETC/trusted-key.pem"; fi
 cat > /etc/sudoers.d/pbxmaison <<EOF
 # La console web peut appliquer la configuration système, et rien d'autre
