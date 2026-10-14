@@ -240,6 +240,45 @@ sleep 2
 grep -q "Bonjour 205" sse.txt && pass "Chat : reçu en temps réel par 205 (à travers Nginx)" || { head -c 400 sse.txt >> "$OUT"; fail "chat temps réel"; }
 curl -sS -b "$J5" "$API/api/u/chats" | grep -q '"unread":1' && pass "Chat : message non lu compté" || fail "chat non lu"
 
+# Règles sortantes, sécurité, codes raccourcis, enregistrement (plan de numérotation généré)
+R="$(api POST /api/outbound '{"name":"Mobiles","prefixes":"06,07","lengths":"10","routes":[{"trunk":"dstny","cid_mode":"custom","cid":"04 65 00 15 31"},{"trunk":"unyc","cid_mode":"hidden"}]}')"
+echo "$R" | grep -q '"summary":"numéros commençant par 06, 07, de 10 chiffres"' && pass "Règle sortante créée (2 routes, numéro présenté)" || fail "règle sortante : $R"
+sleep 1
+D="$(sudo /usr/sbin/asterisk -rx 'dialplan show out-rules')"
+echo "$D" | grep -q "PJSIP/\${D}@unyc" && echo "$D" | grep -q "CHANUNAVAIL" && pass "Règle sortante : route de secours dans le plan de numérotation" || { echo "$D" | head -30 >> "$OUT"; fail "out-rules"; }
+R="$(api PUT /api/security '{"intl":["32","41"],"in_block":[{"number":"0899*"},{"number":"0612000000","label":"Démarcheur"}],"out_block":["0144556677"],"max_user_calls":3}')"
+echo "$R" | grep -q '"intl":\["32","41"\]' && pass "Sécurité : pays autorisés et numéros bloqués enregistrés" || fail "sécurité : $R"
+sleep 1
+sudo /usr/sbin/asterisk -rx 'dialplan show intl-allowed' | grep -q "_0041\." && sudo /usr/sbin/asterisk -rx 'dialplan show blocked-in' | grep -q "_0899\." && pass "Sécurité : contextes de blocage chargés dans Asterisk" || fail "contextes sécurité"
+sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep -q 'SEC_MAX_USER_CALLS=3' && pass "Sécurité : limite d'appels par utilisateur appliquée" || { sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep SEC_ >> "$OUT"; fail "globals sécurité"; }
+F="$(api GET /api/security)"
+if echo "$F" | grep -q '"f2b":{"ok":true'; then
+  api POST /api/security/ban '{"ip":"203.0.113.250"}' | grep -q '"203.0.113.250"' && pass "Sécurité : adresse IP bloquée à la main (fail2ban)" || fail "ban ip"
+  api POST /api/security/unban '{"ip":"203.0.113.250"}' | grep -vq '"203.0.113.250"' && pass "Sécurité : adresse IP débloquée" || fail "unban ip"
+else echo "  (fail2ban indisponible sur cette machine de test : $(echo "$F" | grep -o '"f2b":{[^}]*}'))" | tee -a "$OUT"; fi
+sudo /usr/sbin/asterisk -rx 'dialplan show *0@shortcodes' | grep -q "Park(default)" && sudo /usr/sbin/asterisk -rx 'dialplan show **201@from-internal' | grep -q "Pickup" && pass "Codes raccourcis : parcage *0 et interception **201" || fail "codes raccourcis"
+sudo /usr/sbin/asterisk -rx 'parking show default' | grep -q "701-709" && pass "Parcage : places 701 à 709" || { sudo /usr/sbin/asterisk -rx 'parking show' >> "$OUT"; fail "parcage"; }
+sudo /usr/sbin/asterisk -rx 'database put callikoe_status 204 away' >/dev/null
+sleep 7
+api GET /api/extensions/204 | grep -q '"status":"away"' && pass "Code *31 : statut « absent » appliqué par la console" || fail "statut par code"
+api PUT /api/extensions/204 '{"status":"available"}' >/dev/null
+sudo /usr/sbin/asterisk -rx 'dialplan show s@rec-start' | grep -q "MixMonitor" && sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep -q "REC_ENABLED=1" && pass "Enregistrement des appels externes actif par défaut" || fail "enregistrement"
+api GET /api/recordings | grep -q '"recordings":\[' && pass "Enregistrements : liste lisible" || fail "liste enregistrements"
+
+# Passerelle Grandstream HT802 : provisioning par adresse MAC
+api POST /api/gateways '{"model":"gs-ht802","name":"Fax","mac":"00:0B:82:AA:BB:CC","ports":[{"port":1,"user":"206"}]}' | grep -q '"model_label":"Grandstream HT802"' && pass "Passerelle HT802 créée (port 1 → 206)" || fail "passerelle"
+curl -sS "http://127.0.0.1${PPATH}cfg000b82aabbcc.xml" | grep -q "<P35>206</P35>" && pass "Passerelle : fichier de provisioning Grandstream servi" || fail "provisioning HT802"
+
+# Sauvegarde locale (base + fichiers), licence, mises à jour, alertes
+api POST /api/backups/run '{}' >/dev/null
+for _ in $(seq 1 30); do sleep 2; api GET /api/backups | grep -q '"running":false' && break; done
+BK="$(api GET /api/backups)"
+FILE="$(echo "$BK" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(j.last&&j.last.ok?j.last.file:"")})')"
+[[ -n "$FILE" ]] && sudo tar -xzOf "/var/lib/pbxmaison/backups/$FILE" ./database.sql | grep -q "pbxmaison_settings" && pass "Sauvegarde : archive créée avec la base de données ($FILE)" || { echo "$BK" | cut -c1-600 >> "$OUT"; fail "sauvegarde"; }
+api GET /api/license | grep -q '"key":"' && pass "Licence : informations lisibles" || fail "licence"
+api GET /api/updates/status | grep -q '"running":' && pass "Mises à jour : état lisible (pbx-configure)" || fail "état mise à jour"
+api POST /api/alerts/check '{}' | grep -q '"sending_enabled":false' && pass "Alertes : surveillance active (envoi des e-mails en préparation)" || fail "alertes"
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"
