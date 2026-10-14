@@ -66,7 +66,7 @@ if ! command -v node >/dev/null || [[ "$(node -p 'process.versions.node.split(".
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
   apt-get update -q >/dev/null
 fi
-apt_install nodejs postgresql unixodbc odbc-postgresql python3-alembic python3-psycopg2 nginx certbot fail2ban
+apt_install nodejs postgresql unixodbc odbc-postgresql alembic python3-alembic python3-psycopg2 nginx certbot fail2ban
 ok "Node.js $(node -v), PostgreSQL, Nginx, Certbot, fail2ban"
 
 # =============================================================================
