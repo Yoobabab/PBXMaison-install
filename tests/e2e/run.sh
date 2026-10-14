@@ -85,7 +85,7 @@ R="$(api PUT /api/extensions/201 '{"forwarding":{"busy":{"type":"external","targ
 echo "$R" | grep -q "international" && pass "Renvoi vers l'international refusé" || fail "international accepté : $R"
 sleep 2
 D="$(sudo /usr/sbin/asterisk -rx 'dialplan show 201@users')"
-echo "$D" | grep -q "PJSIP/201&Local/0612345678@user-external/n,15" && pass "Asterisk : 201 sonne poste + mobile 15 s" || { echo "$D" | head -20 >> "$OUT"; fail "dialplan 201"; }
+echo "$D" | grep -q "PJSIP/201&PJSIP/201-web&Local/0612345678@user-external/n,15" && pass "Asterisk : 201 sonne poste + softphone web + mobile 15 s" || { echo "$D" | head -20 >> "$OUT"; fail "dialplan 201"; }
 echo "$D" | grep -q "user-external,0612345678" && pass "Asterisk : non-réponse de 201 → 06 12 34 56 78" || fail "renvoi non-réponse 201"
 echo "$D" | grep -q "Goto(users,202,1)" && pass "Asterisk : occupé/non connecté → poste 202" || fail "renvoi occupé 201"
 sudo /usr/sbin/asterisk -rx 'dialplan show 202@users' | grep -q "Goto(users,201,1)" && pass "Asterisk : 202 absent → 201" || fail "202 absent"
@@ -96,7 +96,7 @@ echo "$VM" | grep -q "201" && pass "Messagerie vocale : boîtes créées ($(echo
 [[ "$(sudo -u postgres psql -At asterisk -c "SELECT set_var FROM ps_endpoints WHERE id = '202'")" == "USER_OPTS=,1" ]] \
   && pass "Asterisk : 202 marqué « appels externes interdits »" || fail "set_var 202"
 sudo /usr/sbin/asterisk -rx 'dialplan show *97@from-internal' | grep -q "vm-access" && pass "*97 : accès à sa messagerie" || fail "*97"
-sudo grep -q "^INBOUND_TARGET = PJSIP/201$" /var/lib/pbxmaison/extensions_routes.conf && pass "Route entrante : 202 (absent) retiré de la sonnerie" || { sudo cat /var/lib/pbxmaison/extensions_routes.conf >> "$OUT"; fail "INBOUND_TARGET"; }
+sudo grep -q "^INBOUND_TARGET = PJSIP/201&PJSIP/201-web$" /var/lib/pbxmaison/extensions_routes.conf && pass "Route entrante : 202 (absent) retiré de la sonnerie" || { sudo cat /var/lib/pbxmaison/extensions_routes.conf >> "$OUT"; fail "INBOUND_TARGET"; }
 sudo grep -E "ERROR|WARNING" /var/log/asterisk/messages | grep -iE "pbx_config|extensions|app_voicemail|voicemail\.conf" | tail -5 > ast-err.txt || true
 if [[ -s ast-err.txt ]]; then cat ast-err.txt >> "$OUT"; fail "Erreurs Asterisk au chargement du plan de numérotation"; else pass "Aucune erreur Asterisk au chargement du plan de numérotation"; fi
 
@@ -126,6 +126,23 @@ api GET /api/phones | grep -q '"phones":\[' && pass "Menu Téléphones : liste d
 
 systemctl is-enabled --quiet pbxmaison-dns.timer && pass "Mise à jour automatique de l'adresse (timer) active" || fail "timer DNS"
 sudo /opt/pbxmaison/pbx/bin/pbx-configure dns | grep -q "non gérée" && pass "Adresse personnalisée : pas d'appel au service DNS Callikoe" || fail "pbx-configure dns"
+
+# 4d. Softphone web (lot 2) : WebSocket, endpoints WebRTC, espace utilisateur, incarnation, appel réel entre navigateurs
+sudo /usr/sbin/asterisk -rx 'pjsip show transports' | grep -q "transport-wss" && pass "Transport WebSocket (WebRTC) actif" || fail "transport wss"
+sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 201-web' | grep -qiE "webrtc\s*:\s*(true|yes)" && pass "Endpoint WebRTC 201-web créé automatiquement" || { sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 201-web' | head -5 >> "$OUT"; fail "endpoint 201-web"; }
+C="$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Protocol: sip' http://127.0.0.1/ws)"
+[[ "$C" == 101 ]] && pass "Nginx → Asterisk : WebSocket SIP ouvert (/ws)" || fail "WebSocket /ws : HTTP $C"
+api POST /api/extensions '{"number":"204","first_name":"Web","last_name":"Un"}' >/dev/null
+api POST /api/extensions '{"number":"205","first_name":"Web","last_name":"Deux"}' >/dev/null
+PA="$(api POST /api/extensions/204/web-password | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).password))')"
+PB="$(api POST /api/extensions/205/web-password | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).password))')"
+UJ="$(mktemp)"
+curl -sS -c "$UJ" -X POST "$API/api/u/login" -H 'content-type: application/json' -d "{\"login\":\"204\",\"password\":\"$PA\"}" | grep -q '"ok":true' && pass "Espace utilisateur : connexion du poste 204" || fail "login utilisateur"
+curl -sS -b "$UJ" "$API/api/u/me" | grep -q '"user":"204-web"' && pass "Espace utilisateur : identifiants WebRTC fournis" || fail "api/u/me"
+api POST /api/extensions/205/impersonate | grep -q '"/softphone"' && pass "Incarnation de 205 depuis la console" || fail "incarnation"
+sudo /usr/sbin/asterisk -rx 'dialplan show 205@users' | grep -q "PJSIP/205&PJSIP/205-web" && pass "Appel vers 205 : sonne le poste et le softphone web" || fail "dialplan web"
+if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Raccroché"; then pass "Appel WebRTC réel entre deux navigateurs"; else
+  sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appel WebRTC"; fi
 
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"

@@ -25,6 +25,10 @@ jobs:
         run: |
           sudo systemctl stop mysql 2>/dev/null || true
           sudo ss -ltnp | grep -E ':(80|443|5060|5432|8080) ' || true
+      - name: Navigateur de test (softphone WebRTC)
+        run: |
+          python3 -m pip install --quiet --break-system-packages playwright==1.47.0
+          python3 -m playwright install --with-deps chromium >/dev/null
       - name: Installation + assistant + console
         timeout-minutes: 30
         env:

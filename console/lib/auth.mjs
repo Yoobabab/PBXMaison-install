@@ -42,6 +42,21 @@ export function readSession(token, secret) {
   } catch { return null; }
 }
 
+/** Jeton signé générique (espace utilisateur / softphone) : { ...data, exp }. */
+export function createToken(data, secret, hours = 12) {
+  const payload = Buffer.from(JSON.stringify({ ...data, exp: Date.now() + hours * 3600_000 })).toString("base64url");
+  return `${payload}.${crypto.createHmac("sha256", `u:${secret}`).update(payload).digest("base64url")}`;
+}
+export function readToken(token, secret) {
+  if (!token || !secret) return null;
+  const [payload, mac] = String(token).split(".");
+  if (!payload || !mac) return null;
+  const expected = crypto.createHmac("sha256", `u:${secret}`).update(payload).digest();
+  const given = Buffer.from(mac, "base64url");
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
+  try { const d = JSON.parse(Buffer.from(payload, "base64url").toString()); return d.exp > Date.now() ? d : null; } catch { return null; }
+}
+
 /** Comparaison à temps constant de deux chaînes (jeton d'installation). */
 export function safeEqual(a, b) {
   const x = Buffer.from(String(a ?? "")), y = Buffer.from(String(b ?? ""));

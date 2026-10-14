@@ -49,6 +49,7 @@ export function createDb(cfg) {
       ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS phone jsonb NOT NULL DEFAULT '{}';
       ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
       ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS updated_by text NOT NULL DEFAULT '';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS web_password_hash text NOT NULL DEFAULT '';
       ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS dids text[] NOT NULL DEFAULT '{}';
       CREATE TABLE IF NOT EXISTS pbxmaison_app_tokens (
         token_hash text PRIMARY KEY,

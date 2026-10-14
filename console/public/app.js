@@ -416,6 +416,18 @@ const ago = (iso) => {
   return `${Math.floor(s / 86400)} j`;
 };
 
+/** Bouton « Incarner » : ouvre le softphone web connecté en tant que l'utilisateur. */
+function wireImpersonate(root) {
+  root.querySelectorAll("[data-imp]").forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    const w = window.open("about:blank", "_blank"); // ouvert tout de suite pour ne pas être bloqué
+    try {
+      const r = await api("POST", `/api/extensions/${b.dataset.imp}/impersonate`);
+      if (w) w.location = r.url; else location.href = r.url;
+    } catch (err) { w?.close(); alert(err.message); }
+  });
+}
+
 /** Boutons « Reprovisionner » / « Redémarrer » (data-resync / data-reboot = poste). */
 function wireResync(root) {
   root.querySelectorAll("[data-resync],[data-reboot]").forEach((b) => b.onclick = async (e) => {
@@ -538,7 +550,9 @@ async function renderUsers() {
       <td>${statusPill(x)}</td>
       <td class="hide-sm">${x.registered ? `<span class="devs">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}<span class="pill ok">Connecté</span></span>` : '<span class="pill off">Non connecté</span>'}</td>
       <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td>
-      <td class="acts">${x.registered ? `<button class="btn ghost sm" data-resync="${esc(x.id)}" title="Renvoyer la configuration au téléphone">Reprovisionner</button>` : ""}</td></tr>`).join("");
+      <td class="acts"><button class="btn ghost sm" data-imp="${esc(x.id)}" title="Ouvrir le softphone web de cet utilisateur">Incarner</button>
+        ${x.registered ? `<button class="btn ghost sm" data-resync="${esc(x.id)}" title="Renvoyer la configuration au téléphone">Reprovisionner</button>` : ""}</td></tr>`).join("");
+    wireImpersonate(rows);
     wireResync(rows);
     $("#unone").hidden = list.length > 0;
     rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
@@ -631,6 +645,15 @@ async function renderUser(id, tab = "general") {
       <label>Numéro présenté (appels sortants)<input name="outbound_cid" inputmode="tel" value="${esc(u.outbound_cid ? fmtPhone(u.outbound_cid) : "")}" placeholder="Celui du trunk"><span class="hint">Vide = numéro du trunk. Doit être un numéro de ta ligne, sinon l'opérateur peut refuser l'appel.</span></label>
       <label>SDA attribuées<textarea name="dids" rows="3" placeholder="04 12 34 56 78">${esc(u.dids.map(fmtPhone).join("\n"))}</textarea><span class="hint">Un numéro par ligne. Les appels vers ces numéros sonnent directement chez cet utilisateur.</span><span class="hint" id="freedids"></span></label>
       ${save}</form>
+      <div class="pad appbox" style="border-top:1px solid var(--line)">
+        <h3 class="sec" style="margin:0 0 8px">Espace utilisateur et softphone web</h3>
+        <p class="hint" style="margin:0 0 12px">L'utilisateur se connecte sur <a href="/softphone" target="_blank" rel="noopener">${esc(location.origin)}/softphone</a>
+          avec son numéro de poste <strong>${esc(u.id)}</strong>${u.email ? ` ou son e-mail <strong>${esc(u.email)}</strong>` : ""} pour appeler depuis son navigateur.</p>
+        <p style="margin:0 0 12px">${u.has_web_password ? '<span class="pill ok">Mot de passe défini</span>' : '<span class="pill off">Pas encore de mot de passe</span>'}</p>
+        <div id="webpw"></div>
+        <div class="row"><button type="button" class="btn ghost sm" id="genweb">${u.has_web_password ? "Générer un nouveau mot de passe" : "Générer le mot de passe"}</button>
+          <button type="button" class="btn ghost sm" data-imp="${esc(u.id)}">Incarner (ouvrir son softphone)</button></div>
+      </div>
       <div class="pad appbox" id="appqr" style="border-top:1px solid var(--line)"></div>`;
   } else if (tab === "renvois") {
     body = `<form method="post" id="uf" novalidate class="pad stack"><div class="form-msg"></div>
@@ -746,6 +769,14 @@ async function renderUser(id, tab = "general") {
   if (tab === "touches") wireKeys(u, users);
   if (tab === "general") {
     wireAppQr(u);
+    wireImpersonate(app);
+    $("#genweb").onclick = async () => {
+      if (u.has_web_password && !confirm("Générer un nouveau mot de passe ? L'ancien ne fonctionnera plus.")) return;
+      const r = await api("POST", `/api/extensions/${u.id}/web-password`);
+      $("#webpw").innerHTML = `<div class="note" style="margin-bottom:12px">Mot de passe de l'espace utilisateur : <span class="mono" style="font-size:15px;font-weight:600">${esc(r.password)}</span>
+        <button class="copy" data-copy="${esc(r.password)}">Copier</button><br><span class="hint">Note-le maintenant : il ne sera plus affiché. À transmettre à ${esc(u.name)}.</span></div>`;
+      copyButtons($("#webpw"));
+    };
     api("GET", "/api/trunks").then((trunks) => {
       const used = new Set(users.flatMap((x) => x.dids));
       const free = trunks.flatMap((t) => t.dids).filter((x) => !used.has(x));

@@ -3,6 +3,7 @@
  * Écoute en local (127.0.0.1:8080) derrière Nginx, sous l'utilisateur système « pbxmaison ».
  */
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
@@ -11,7 +12,7 @@ import qrcode from "qrcode-generator";
 import { settings, VAR, TEMPLATES_FILE, pbxEnv, installState, setupState, isConfigured, activationCode } from "./lib/config.mjs";
 import { createDb } from "./lib/db.mjs";
 import { Ami } from "./lib/ami.mjs";
-import { hashPassword, verifyPassword, passwordProblem, createSession, readSession } from "./lib/auth.mjs";
+import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
 
@@ -205,6 +206,66 @@ export async function buildApp({ db, ami } = {}) {
       return reply.code(404).send({ error: "QR code invalide ou expiré : demande-en un nouveau à l'administrateur." });
     }
     return reply.header("cache-control", "no-store").send(out);
+  });
+
+  // ---------------------------------------------------------------- Espace utilisateur / softphone web
+  const UCOOKIE = "callikoe_user";
+  const webUser = (req) => readToken(req.cookies[UCOOKIE], settings.sessionSecret);
+  const requireWebUser = async (req, reply) => {
+    if (!webUser(req)) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
+  };
+  const randomWebPassword = () => crypto.randomBytes(9).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 10) + String(crypto.randomInt(10, 99));
+  app.get("/softphone", async (req, reply) => reply.sendFile("softphone.html"));
+
+  app.post("/api/extensions/:id/web-password", { preHandler: requireUser }, async (req) => {
+    const password = randomWebPassword();
+    await pbx.setWebPassword(req.params.id, hashPassword(password));
+    return { password };
+  });
+  app.post("/api/extensions/:id/impersonate", { preHandler: requireUser }, async (req, reply) => {
+    const u = await pbx.getUser(req.params.id);
+    req.log.info({ admin: currentUser(req).email, ext: u.id }, "incarnation");
+    reply.setCookie(UCOOKIE, createToken({ ext: u.id, imp: currentUser(req).email }, settings.sessionSecret, 2), cookieOpts(req));
+    return { url: "/softphone" };
+  });
+
+  const uFailures = new Map();
+  app.post("/api/u/login", async (req, reply) => {
+    const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
+    const f = uFailures.get(ip);
+    if (f && f.count >= 8 && f.until > Date.now()) return reply.code(429).send({ error: "Trop de tentatives : réessaie dans 15 minutes." });
+    const row = await pbx.findWebUser(req.body?.login);
+    if (!row || !row.web_password_hash || !verifyPassword(req.body?.password, row.web_password_hash)) {
+      const fresh = !f || f.until < Date.now();
+      uFailures.set(ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 15 * 60_000 });
+      return reply.code(401).send({ error: "Identifiant ou mot de passe incorrect." });
+    }
+    uFailures.delete(ip);
+    reply.setCookie(UCOOKIE, createToken({ ext: row.id }, settings.sessionSecret, 12), cookieOpts(req));
+    return { ok: true, ext: row.id };
+  });
+  app.post("/api/u/logout", async (req, reply) => { reply.clearCookie(UCOOKIE, { path: "/" }); return { ok: true }; });
+  app.get("/api/u/me", { preHandler: requireWebUser }, async (req) => {
+    const s = webUser(req);
+    const u = await pbx.getUser(s.ext);
+    const secret = await pbx.webSecret(s.ext);
+    const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+    const https = (req.headers["x-forwarded-proto"] || req.protocol) === "https";
+    const list = await pbx.listExtensions();
+    return {
+      pbx: { name: pbxEnv().PBX_NAME || "" }, impersonated_by: s.imp || null,
+      user: { id: u.id, name: u.name, status: u.status, email: u.email, voicemail: u.voicemail.enabled },
+      sip: { ws_url: `${https ? "wss" : "ws"}://${host}/ws`, domain: sipServer().fqdn || host, user: `${u.id}-web`,
+        auth_user: secret.auth_id, password: secret.password, display_name: u.name,
+        // Micro autorisé par le navigateur : HTTPS, ou accès local (tests)
+        secure: https || /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) },
+      contacts: list.filter((x) => x.id !== u.id).map((x) => ({ id: x.id, name: x.name, status: x.status, registered: x.registered })),
+    };
+  });
+  app.put("/api/u/status", { preHandler: requireWebUser }, async (req) => {
+    const s = webUser(req);
+    const u = await pbx.updateUser(s.ext, { status: req.body?.status }, s.imp ? `${s.imp} (incarnation)` : `${s.ext} (softphone)`);
+    return { status: u.status };
   });
 
   app.get("/api/phones", { preHandler: requireUser }, async () => ({

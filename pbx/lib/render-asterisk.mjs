@@ -25,6 +25,8 @@ const values = {
   LANGUAGE: env.PBX_LANGUAGE || "fr",
   MAX_CALLS: need("PBX_MAX_CALLS"),
   COUNTRY_CODE: need("PBX_COUNTRY_CODE"),
+  // Machine derrière une box : le navigateur doit recevoir l'IP publique comme candidat ICE
+  ICE_MAP: env.LOCAL_IP && env.LOCAL_IP !== env.PUBLIC_IP ? `\n[ice_host_candidates]\n${env.LOCAL_IP} => ${env.PUBLIC_IP}\ninclude_local_address = yes` : "",
 };
 
 for (const f of fs.readdirSync(src).filter((f) => f.endsWith(".conf")).sort()) {

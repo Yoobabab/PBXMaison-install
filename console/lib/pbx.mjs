@@ -216,13 +216,16 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const map = new Map();
     for (const row of r.rows) {
       const contacts = (row.contacts || []).filter((c) => !c.expires || Number(c.expires) > now);
-      map.set(row.id, contacts.map((c) => {
+      const key = row.id.replace(/-web$/, "");
+      const list = map.get(key) || [];
+      map.set(key, list.concat(contacts.map((c) => {
         // rewrite_contact=yes : l'hôte du contact est l'adresse vue par le PBX ; Via = adresse annoncée par l'appareil
         const source = /@\[?([^\]:;>]+)\]?(?::(\d+))?/.exec(c.uri || "");
         const sourceIp = source?.[1] || "";
         return { user_agent: c.user_agent || "", ip: sourceIp || c.via || "", source_ip: sourceIp, source_port: source?.[2] || "",
-          local_ip: c.via || "", device: identifyDevice(c.user_agent), connection: connectionType(sourceIp, c.via || "", []) };
-      }));
+          local_ip: c.via || "", device: row.id.endsWith("-web") ? { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" } : identifyDevice(c.user_agent),
+          connection: connectionType(sourceIp, c.via || "", []) };
+      })));
     }
     return map;
   }
@@ -231,7 +234,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   async function adoptOrphans() {
     await db.query(`INSERT INTO pbxmaison_extensions (id, name)
       SELECT e.id, COALESCE(substring(e.callerid from '"([^"]*)"'), 'Poste ' || e.id)
-      FROM ps_endpoints e WHERE e.context = 'from-internal'
+      FROM ps_endpoints e WHERE e.context = 'from-internal' AND e.id ~ '^[1-9][0-9]{2}$'
         AND NOT EXISTS (SELECT 1 FROM pbxmaison_extensions x WHERE x.id = e.id)`);
   }
 
@@ -269,8 +272,48 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       [u.id, displayName(u), u.first_name, u.last_name, u.email, u.mobile, u.outbound_cid, u.dids, u.status,
         JSON.stringify(u.forwarding), JSON.stringify(u.options), JSON.stringify(u.voicemail), by || "",
         u.phone ? JSON.stringify(u.phone) : null]);
-    await c.query("UPDATE ps_endpoints SET callerid = $2, set_var = $3 WHERE id = $1",
+    await c.query("UPDATE ps_endpoints SET callerid = $2, set_var = $3 WHERE id IN ($1::text, $1::text || '-web')",
       [u.id, `"${displayName(u)}" <${u.id}>`, userOpts(u)]);
+  }
+
+  // Endpoint WebRTC du softphone web : <poste>-web (mêmes renvois, même messagerie, même numéro présenté)
+  async function createWebEndpoint(c, u) {
+    const id = `${u.id}-web`;
+    const exists = await c.query("SELECT 1 FROM ps_endpoints WHERE id = $1", [id]);
+    if (exists.rowCount) return;
+    await c.query("DELETE FROM ps_auths WHERE id = $1", [id]);
+    await c.query("DELETE FROM ps_aors WHERE id = $1", [id]);
+    await c.query("INSERT INTO ps_auths (id, auth_type, username, password) VALUES ($1, 'userpass', $1, $2)", [id, genPassword()]);
+    await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency) VALUES ($1, 5, 'yes', 0)", [id]);
+    await c.query(
+      `INSERT INTO ps_endpoints (id, aors, auth, context, disallow, allow, callerid, direct_media, webrtc, dtls_auto_generate_cert,
+         dtmf_mode, language, mailboxes, set_var)
+       VALUES ($1, $1, $1, 'from-internal', 'all', 'g722,alaw,ulaw', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5)`,
+      [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
+  }
+  async function ensureWebEndpoints() {
+    const missing = await db.query(`SELECT x.* FROM pbxmaison_extensions x
+      WHERE EXISTS (SELECT 1 FROM ps_endpoints e WHERE e.id = x.id)
+        AND NOT EXISTS (SELECT 1 FROM ps_endpoints w WHERE w.id = x.id || '-web')`);
+    for (const row of missing.rows) await db.tx((c) => createWebEndpoint(c, withPhone(row)));
+  }
+  /** Espace utilisateur : identifiant = numéro de poste ou e-mail. */
+  async function findWebUser(login) {
+    const l = String(login || "").trim().toLowerCase();
+    if (!l) return null;
+    const r = await db.query("SELECT id, web_password_hash FROM pbxmaison_extensions WHERE id = $1 OR (email <> '' AND lower(email) = $1)", [l]);
+    return r.rows.length === 1 ? r.rows[0] : null;
+  }
+  async function setWebPassword(num, hash) {
+    checkExtNumber(num);
+    const r = await db.query("UPDATE pbxmaison_extensions SET web_password_hash = $2 WHERE id = $1", [num, hash]);
+    if (!r.rowCount) throw Object.assign(new UserError("Utilisateur introuvable."), { status: 404 });
+  }
+  async function webSecret(num) {
+    checkExtNumber(num);
+    const r = await db.query("SELECT username, password FROM ps_auths WHERE id = $1", [`${num}-web`]);
+    if (!r.rowCount) throw Object.assign(new UserError("Softphone web non disponible pour ce poste."), { status: 404 });
+    return { auth_id: r.rows[0].username, password: r.rows[0].password };
   }
 
   async function createExtension(input, by) {
@@ -309,6 +352,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       );
       await c.query("INSERT INTO pbxmaison_extensions (id, name) VALUES ($1, $2)", [num, displayName(u)]);
       await saveUser(c, u, by);
+      await createWebEndpoint(c, u);
     });
     await applyDialplan();
     return { id: num, name: displayName(u), auth_id: authId, password };
@@ -322,6 +366,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const u = withPhone(r.rows[0]);
     const reg = (await registrations()).get(num) || [];
     return { ...u, name: displayName(u), registered: reg.length > 0, contacts: reg, forwards: forwardSummary(u),
+      has_web_password: !!r.rows[0].web_password_hash,
       updated_at: r.rows[0].updated_at, updated_by: r.rows[0].updated_by };
   }
 
@@ -336,7 +381,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       } catch (e) { throw new UserError(e.message, e.field); }
     }
     await db.tx((c) => saveUser(c, u, by));
-    await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id = $1", [num, u.voicemail.enabled ? `${num}@default` : null]);
+    await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id IN ($1::text, $1::text || '-web')", [num, u.voicemail.enabled ? `${num}@default` : null]);
     await applyDialplan();
     return getUser(num);
   }
@@ -392,9 +437,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         if (changed) await saveUser(c, u, by);
       }
       for (const t of ["ps_endpoints", "ps_aors", "ps_auths"]) {
-        await c.query(`DELETE FROM ${t} WHERE id = $1`, [num]);
+        await c.query(`DELETE FROM ${t} WHERE id IN ($1::text, $1::text || '-web')`, [num]);
       }
-      await c.query("DELETE FROM ps_contacts WHERE endpoint = $1", [num]);
+      await c.query("DELETE FROM ps_contacts WHERE endpoint IN ($1::text, $1::text || '-web')", [num]);
       await c.query("DELETE FROM pbxmaison_extensions WHERE id = $1", [num]);
     });
     const routes = await getRoutes();
@@ -583,6 +628,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
 
   /** Réécrit les fichiers lus par Asterisk (routes, utilisateurs, messagerie) puis recharge. */
   async function applyDialplan() {
+    await ensureWebEndpoints();
     const routes = await getRoutes();
     const users = await loadUsers();
     let cid = "", fmt = "national", cidFmt = "national";
@@ -594,7 +640,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const ringing = routes.inbound.filter((n) => byId.has(n) ? ringsForGroups(byId.get(n)) : true);
     writeAtomic(routesFile, [
       `; Routes — écrit par la console web (${new Date().toISOString()}). Ne pas modifier à la main.`,
-      `INBOUND_TARGET = ${ringing.map((n) => `PJSIP/${n}`).join("&")}`,
+      `INBOUND_TARGET = ${ringing.map((n) => `PJSIP/${n}&PJSIP/${n}-web`).join("&")}`,
       `OUTBOUND_TRUNK = ${routes.outbound_trunk}`,
       `OUTBOUND_CID = ${cid}`,
       `OUTBOUND_FORMAT = ${fmt}`,
@@ -653,7 +699,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, deleteImpact,
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
-    createAppToken, appTokenStatus, revokeAppToken, appProvision, loadUsers, registrations,
+    createAppToken, appTokenStatus, revokeAppToken, appProvision, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     getRoutes, setRoutes, listCalls, registrationStatus,
   };
 }
