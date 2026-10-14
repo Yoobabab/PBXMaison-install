@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  PBXMaison — installation en une commande (Debian 12 ou Ubuntu 24.04, 64 bits)
+#
+#    curl -fsSL https://raw.githubusercontent.com/Yoobabab/PBXMaison-install/main/install.sh | sudo bash
+#
+#  Installe le moteur téléphonique (Asterisk 22 précompilé), la base, la console web,
+#  le pare-feu et fail2ban, puis affiche l'adresse de l'assistant web.
+#  La configuration du PBX (licence, certificat, mot de passe) se fait dans l'assistant.
+#
+#  Relancer la même commande met à jour le PBX sans perdre sa configuration.
+# =============================================================================
+set -Eeuo pipefail
+
+REPO="${PBXM_REPO:-Yoobabab/PBXMaison-install}"
+REF="${PBXM_REF:-main}"
+RELEASE_URL="https://github.com/${REPO}/releases/download/latest"
+APP=/opt/pbxmaison
+ETC=/etc/pbxmaison
+VAR=/var/lib/pbxmaison
+LOG=/var/log/pbxmaison-install.log
+NODE_MAJOR=22
+
+if [[ -t 1 ]]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; C=$'\e[36m'; N=$'\e[0m'; else B='' G='' Y='' R='' C='' N=''; fi
+STEP=0; STEPS=9; WARNINGS=()
+step() { STEP=$((STEP + 1)); echo; echo "${B}[$STEP/$STEPS] $*${N}"; }
+ok()   { echo "  ${G}✔${N} $*"; }
+warn() { echo "  ${Y}⚠${N} $*"; WARNINGS+=("$*"); }
+die()  { echo; echo "${R}✖ $*${N}" >&2; echo "  Journal : $LOG" >&2; exit 1; }
+trap 'die "Erreur ligne $LINENO : $BASH_COMMAND"' ERR
+
+[[ $EUID -eq 0 ]] || die "Lance la commande avec sudo (… | sudo bash)."
+mkdir -p "$(dirname "$LOG")"
+exec > >(tee -a "$LOG") 2>&1
+echo "${B}PBXMaison — installation${N} ($(date '+%F %T'))"
+export DEBIAN_FRONTEND=noninteractive
+apt_install() { apt-get install -y -q --no-install-recommends "$@" >/dev/null; }
+START=$SECONDS
+
+# =============================================================================
+step "Vérification de la machine"
+# =============================================================================
+. /etc/os-release
+case "${ID}:${VERSION_ID}" in
+  debian:12) TARGET=debian12 ;;
+  ubuntu:24.04) TARGET=ubuntu2404 ;;
+  *) die "Système non pris en charge : ${PRETTY_NAME}. Choisis Debian 12 ou Ubuntu 24.04 (64 bits) pour le VPS." ;;
+esac
+[[ "$(dpkg --print-architecture)" == amd64 ]] || die "Processeur non pris en charge ($(dpkg --print-architecture)) : un VPS x86 64 bits (amd64) est nécessaire."
+[[ -d /run/systemd/system ]] || die "systemd n'est pas actif sur cette machine."
+IS_WSL=0; grep -qiE 'microsoft|wsl' /proc/sys/kernel/osrelease 2>/dev/null && IS_WSL=1
+MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+DISK_GB=$(df -Pm / | awk 'NR==2 {print int($4/1024)}')
+(( DISK_GB >= 3 )) || die "Espace disque insuffisant : ${DISK_GB} Go libres, 3 Go nécessaires."
+(( MEM_MB >= 900 )) || warn "Mémoire faible (${MEM_MB} Mo) : 1 Go minimum conseillé."
+ok "${PRETTY_NAME} · ${MEM_MB} Mo de RAM · ${DISK_GB} Go libres$( ((IS_WSL)) && echo ' · WSL (Windows)')"
+
+# =============================================================================
+step "Paquets système"
+# =============================================================================
+apt-get update -q >/dev/null
+apt_install ca-certificates curl gnupg dnsutils iproute2 sudo tar openssl
+if ! command -v node >/dev/null || [[ "$(node -p 'process.versions.node.split(".")[0]')" -lt $NODE_MAJOR ]]; then
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+  apt-get update -q >/dev/null
+fi
+apt_install nodejs postgresql unixodbc odbc-postgresql python3-alembic python3-psycopg2 nginx certbot fail2ban
+ok "Node.js $(node -v), PostgreSQL, Nginx, Certbot, fail2ban"
+
+# =============================================================================
+step "Téléchargement de PBXMaison"
+# =============================================================================
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+curl -fsSL "https://github.com/${REPO}/archive/${REF}.tar.gz" -o "$TMP/app.tar.gz"
+mkdir -p "$TMP/app" && tar -xzf "$TMP/app.tar.gz" -C "$TMP/app" --strip-components=1
+# On remplace le code mais pas les données (/etc/pbxmaison, /var/lib/pbxmaison)
+rm -rf "$APP.new" && mv "$TMP/app" "$APP.new"
+if [[ -d "$APP/console/node_modules" ]]; then mv "$APP/console/node_modules" "$APP.new/console/node_modules"; fi
+rm -rf "$APP.old" && { [[ -d "$APP" ]] && mv "$APP" "$APP.old" || true; } && mv "$APP.new" "$APP" && rm -rf "$APP.old"
+chmod 755 "$APP/pbx/bin/pbx-configure"
+ok "Code installé dans $APP (${REF})"
+
+# =============================================================================
+step "Moteur téléphonique (Asterisk précompilé)"
+# =============================================================================
+id asterisk >/dev/null 2>&1 || useradd --system --home-dir /var/lib/asterisk --no-create-home --shell /usr/sbin/nologin asterisk
+WANT="$(curl -fsSL "${RELEASE_URL}/asterisk-${TARGET}-amd64.version")" || die "Archive Asterisk introuvable pour ${TARGET} (${RELEASE_URL})."
+HAVE="$(cat /usr/share/asterisk/VERSION 2>/dev/null || true)"
+if [[ "$HAVE" == "$WANT" ]]; then
+  ok "Asterisk ${HAVE} déjà installé"
+else
+  curl -fsSL "${RELEASE_URL}/asterisk-${TARGET}-amd64.deps" -o "$TMP/deps"
+  curl -fsSL "${RELEASE_URL}/asterisk-${TARGET}-amd64.tar.gz" -o "$TMP/asterisk.tar.gz"
+  # shellcheck disable=SC2046
+  apt_install $(cat "$TMP/deps")
+  tar -xzf "$TMP/asterisk.tar.gz" -C / --no-same-owner
+  ldconfig
+  ok "Asterisk ${WANT} installé (sons en français inclus)"
+fi
+install -d -o asterisk -g asterisk /etc/asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk
+chown -R asterisk:asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk
+cat > /etc/systemd/system/asterisk.service <<'EOF'
+[Unit]
+Description=Asterisk (PBXMaison)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+ConditionPathExists=/etc/asterisk/asterisk.conf
+
+[Service]
+Type=simple
+User=asterisk
+Group=asterisk
+RuntimeDirectory=asterisk
+RuntimeDirectoryMode=0775
+ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
+ExecReload=/usr/sbin/asterisk -rx "core reload"
+ExecStop=/usr/sbin/asterisk -rx "core stop gracefully"
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# =============================================================================
+step "Base de données"
+# =============================================================================
+install -d -m 0750 "$ETC"
+id pbxmaison >/dev/null 2>&1 || useradd --system --home-dir "$VAR" --no-create-home --shell /usr/sbin/nologin pbxmaison
+chgrp pbxmaison "$ETC"
+if [[ ! -f "$ETC/secrets.env" ]]; then
+  umask 077
+  cat > "$ETC/secrets.env" <<EOF
+DB_PASSWORD='$(openssl rand -hex 24)'
+AMI_SECRET='$(openssl rand -hex 24)'
+ARI_PASSWORD='$(openssl rand -hex 24)'
+SESSION_SECRET='$(openssl rand -hex 32)'
+EOF
+  umask 022
+fi
+chown root:pbxmaison "$ETC/secrets.env"; chmod 640 "$ETC/secrets.env"
+set -a; . "$ETC/secrets.env"; set +a
+systemctl enable --now postgresql >/dev/null 2>&1
+sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<SQL >/dev/null
+DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'asterisk') THEN
+    CREATE ROLE asterisk LOGIN PASSWORD '${DB_PASSWORD}';
+  ELSE
+    ALTER ROLE asterisk WITH LOGIN PASSWORD '${DB_PASSWORD}';
+  END IF;
+END \$\$;
+SQL
+[[ "$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='asterisk'")" == 1 ]] || sudo -u postgres createdb -O asterisk asterisk
+cat > /etc/odbc.ini <<EOF
+[asterisk]
+Description=PBXMaison
+Driver=PostgreSQL Unicode
+Database=asterisk
+Servername=127.0.0.1
+Port=5432
+UserName=asterisk
+Password=${DB_PASSWORD}
+EOF
+chmod 640 /etc/odbc.ini; chgrp asterisk /etc/odbc.ini
+rm -rf "$TMP/dbm" && cp -a /usr/share/asterisk/ast-db-manage "$TMP/dbm"
+sed "s#^sqlalchemy.url = .*#sqlalchemy.url = postgresql://asterisk:${DB_PASSWORD}@127.0.0.1/asterisk#" "$TMP/dbm/config.ini.sample" > "$TMP/dbm/config.ini"
+(cd "$TMP/dbm" && alembic -c config.ini upgrade head >/dev/null)
+ok "Base « asterisk » à jour"
+
+# =============================================================================
+step "Console web"
+# =============================================================================
+install -d -o pbxmaison -g asterisk -m 2750 "$VAR"
+install -d -o pbxmaison -g pbxmaison -m 0700 "$VAR/staging"
+[[ -f "$VAR/extensions_routes.conf" ]] || install -o pbxmaison -g asterisk -m 0640 /dev/null "$VAR/extensions_routes.conf"
+(cd "$APP/console" && npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null)
+if [[ -n "${PBXM_TRUSTED_KEY_FILE:-}" ]]; then install -m 0644 "$PBXM_TRUSTED_KEY_FILE" "$ETC/trusted-key.pem"; fi
+cat > /etc/sudoers.d/pbxmaison <<EOF
+# La console web peut appliquer la configuration système, et rien d'autre
+pbxmaison ALL=(root) NOPASSWD: ${APP}/pbx/bin/pbx-configure
+EOF
+chmod 440 /etc/sudoers.d/pbxmaison
+visudo -cq -f /etc/sudoers.d/pbxmaison
+cat > /etc/systemd/system/pbxmaison-console.service <<EOF
+[Unit]
+Description=PBXMaison — console web
+After=network-online.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=pbxmaison
+Group=pbxmaison
+SupplementaryGroups=asterisk
+EnvironmentFile=${ETC}/secrets.env
+Environment=NODE_ENV=production PORT=8080 HOST=127.0.0.1
+WorkingDirectory=${APP}/console
+ExecStart=/usr/bin/node ${APP}/console/server.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable pbxmaison-console >/dev/null 2>&1
+systemctl restart pbxmaison-console
+ok "Console démarrée"
+
+# =============================================================================
+step "Réseau et accès web"
+# =============================================================================
+is_ipv4() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
+PUBLIC_IP="${PBXM_PUBLIC_IP:-}"
+if [[ -z "$PUBLIC_IP" ]]; then
+  for url in https://api.ipify.org https://ifconfig.me/ip https://ipv4.icanhazip.com; do
+    PUBLIC_IP="$(curl -4 -fsS --max-time 6 "$url" 2>/dev/null | tr -d '[:space:]')" || true
+    is_ipv4 "$PUBLIC_IP" && break; PUBLIC_IP=""
+  done
+fi
+is_ipv4 "$PUBLIC_IP" || die "IP publique introuvable (relance avec PBXM_PUBLIC_IP=<ip> devant bash)."
+LOCAL_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
+BEHIND_NAT=0; [[ "$LOCAL_IP" != "$PUBLIC_IP" ]] && BEHIND_NAT=1
+cat > "$ETC/install.state" <<EOF
+PUBLIC_IP='${PUBLIC_IP}'
+LOCAL_IP='${LOCAL_IP}'
+BEHIND_NAT='${BEHIND_NAT}'
+IS_WSL='${IS_WSL}'
+OS_NAME='${PRETTY_NAME}'
+INSTALLED_AT='$(date -Is)'
+EOF
+chmod 644 "$ETC/install.state"
+"$APP/pbx/bin/pbx-configure" nginx
+systemctl enable nginx >/dev/null 2>&1
+ok "IP publique ${PUBLIC_IP}$( ((BEHIND_NAT)) && echo " (machine derrière un routeur, IP locale ${LOCAL_IP})")"
+((BEHIND_NAT)) && warn "Derrière une box : rediriger vers ${LOCAL_IP} UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80/443, et désactiver le SIP ALG."
+
+# =============================================================================
+step "Sécurité : pare-feu et fail2ban"
+# =============================================================================
+if ((IS_WSL)); then
+  ok "Sous WSL : pare-feu de Windows"
+elif [[ "${PBXM_NO_FIREWALL:-0}" == 1 ]]; then
+  warn "Pare-feu non configuré (PBXM_NO_FIREWALL=1)"
+elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+  ufw allow 5060/udp >/dev/null; ufw allow 5060:5061/tcp >/dev/null; ufw allow 10000:20000/udp >/dev/null
+  ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+  ok "Règles ajoutées au pare-feu ufw existant"
+else
+  apt_install nftables
+  SSH_PORTS="$(sshd -T 2>/dev/null | awk '$1=="port" {print $2}' | paste -sd, -)"; SSH_PORTS="${SSH_PORTS:-22}"
+  cat > /etc/nftables.conf <<EOF
+#!/usr/sbin/nft -f
+# PBXMaison — pare-feu
+flush ruleset
+table inet pbxmaison {
+  chain input {
+    type filter hook input priority 0; policy drop;
+    ct state established,related accept
+    ct state invalid drop
+    iif lo accept
+    ip protocol icmp accept
+    ip6 nexthdr ipv6-icmp accept
+    tcp dport { ${SSH_PORTS} } accept comment "SSH"
+    tcp dport { 80, 443 } accept comment "Console web"
+    udp dport 5060 accept comment "SIP UDP"
+    tcp dport { 5060, 5061 } accept comment "SIP TCP/TLS"
+    udp dport 10000-20000 accept comment "Audio RTP"
+  }
+  chain forward { type filter hook forward priority 0; policy drop; }
+  chain output { type filter hook output priority 0; policy accept; }
+}
+EOF
+  nft -c -f /etc/nftables.conf && systemctl enable nftables >/dev/null 2>&1 && nft -f /etc/nftables.conf
+  ok "Pare-feu actif (SSH port ${SSH_PORTS}, SIP, audio, web ; le reste est bloqué)"
+fi
+cat > /etc/fail2ban/jail.d/pbxmaison.conf <<'EOF'
+[asterisk]
+enabled  = true
+backend  = auto
+filter   = asterisk
+logpath  = /var/log/asterisk/security
+           /var/log/asterisk/messages
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+banaction = %(banaction_allports)s
+ignoreip = 127.0.0.1/8 ::1
+EOF
+touch /var/log/asterisk/security /var/log/asterisk/messages
+chown asterisk:asterisk /var/log/asterisk/security /var/log/asterisk/messages
+systemctl restart fail2ban || warn "fail2ban n'a pas redémarré (journalctl -u fail2ban)"
+ok "fail2ban : 5 échecs en 10 min → IP bannie 1 h"
+
+# =============================================================================
+step "Assistant de configuration"
+# =============================================================================
+if [[ -f "$ETC/pbx.env" ]]; then
+  systemctl restart asterisk 2>/dev/null || true
+  set -a; . "$ETC/pbx.env"; set +a
+  URL="https://${PBX_FQDN}"; [[ -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]] || URL="http://${PUBLIC_IP}"
+  ok "PBX déjà configuré (${PBX_NAME}) : mise à jour terminée"
+else
+  [[ -s "$VAR/setup-token" ]] || { openssl rand -hex 12 > "$VAR/setup-token"; }
+  chown pbxmaison:pbxmaison "$VAR/setup-token"; chmod 600 "$VAR/setup-token"
+  URL="http://${PUBLIC_IP}/?jeton=$(cat "$VAR/setup-token")"
+  ok "Assistant prêt"
+fi
+for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:8080/api/health && break; sleep 1; done
+curl -fsS -o /dev/null http://127.0.0.1:8080/api/health || warn "La console ne répond pas encore (journalctl -u pbxmaison-console)"
+
+echo
+echo "${G}${B}✔ Installation terminée en $(( (SECONDS - START) / 60 )) min $(( (SECONDS - START) % 60 )) s${N}"
+if ((${#WARNINGS[@]})); then echo; for w in "${WARNINGS[@]}"; do echo "  ${Y}⚠${N} $w"; done; fi
+echo
+echo "  ${B}Ouvre cette adresse dans ton navigateur :${N}"
+echo
+echo "      ${C}${B}${URL}${N}"
+echo
+((BEHIND_NAT)) && [[ ! -f "$ETC/pbx.env" ]] && echo "  (depuis le réseau local : http://${LOCAL_IP}/?jeton=$(cat "$VAR/setup-token"))" && echo
+exit 0

@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  pbx-configure — opérations système lancées par la console web (via sudo).
+#  La console tourne sans droits root ; seules les actions ci-dessous lui sont permises.
+#
+#    pbx-configure apply <fichier>   applique un pbx-config.json déposé dans l'assistant
+#    pbx-configure nginx             réécrit la config web (après obtention du certificat)
+#
+#  Sortie : une ligne JSON par étape {"step":…, "status":"ok|warn|error|run", "message":…}
+#  pour que la console affiche la progression.
+# =============================================================================
+set -Eeuo pipefail
+
+APP=/opt/pbxmaison
+ETC=/etc/pbxmaison
+VAR=/var/lib/pbxmaison
+STAGING="$VAR/staging"
+TRUSTED_KEY="$APP/pbx/portal-public-key.pem"
+[[ -f "$ETC/trusted-key.pem" ]] && TRUSTED_KEY="$ETC/trusted-key.pem"
+
+json() { # json <étape> <statut> <message>
+  node -e 'process.stdout.write(JSON.stringify({step:process.argv[1],status:process.argv[2],message:process.argv[3]})+"\n")' "$1" "$2" "$3"
+}
+fail() { json "$1" error "$2"; exit 1; }
+trap 'json erreur error "Erreur inattendue ligne $LINENO : $BASH_COMMAND (voir journalctl -u pbxmaison-console)"' ERR
+
+[[ $EUID -eq 0 ]] || { echo "pbx-configure doit être lancé en root" >&2; exit 2; }
+set -a; . "$ETC/secrets.env"; . "$ETC/install.state"; set +a
+
+nginx_write() {
+  local fqdn="${1:-}" tls="${2:-0}"
+  install -d /var/www/letsencrypt
+  {
+    cat <<'EOF'
+# PBXMaison — généré par pbx-configure
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+EOF
+    if [[ "$tls" == 1 ]]; then
+      cat <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    server_tokens off;
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location / { return 301 https://${fqdn}\$request_uri; }
+}
+server {
+    # nginx 1.22 (Debian 12) et 1.24 (Ubuntu 24.04) : syntaxe « listen … http2 »
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
+    server_name ${fqdn};
+    server_tokens off;
+    ssl_certificate /etc/letsencrypt/live/${fqdn}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${fqdn}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 2m;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+    }
+}
+EOF
+    else
+      cat <<'EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    server_tokens off;
+    client_max_body_size 2m;
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+EOF
+    fi
+  } > /etc/nginx/sites-available/pbxmaison
+  ln -sf /etc/nginx/sites-available/pbxmaison /etc/nginx/sites-enabled/pbxmaison
+  rm -f /etc/nginx/sites-enabled/default
+  nginx -t -q && systemctl reload nginx
+}
+
+cmd_apply() {
+  local src="${1:-}"
+  [[ -n "$src" ]] || fail verification "Fichier manquant."
+  src="$(readlink -f "$src")"
+  [[ "$src" == "$STAGING/"* && -f "$src" ]] || fail verification "Fichier refusé (emplacement non autorisé)."
+
+  # 1. Vérification de la licence
+  json verification run "Vérification de la signature et de la licence…"
+  local out
+  if ! out="$(node "$APP/pbx/lib/verify-config.mjs" "$src" "$TRUSTED_KEY" --env "$ETC/pbx.env.new" 2>&1)"; then
+    fail verification "$(printf '%s' "$out" | sed 's/^ *//' | tr '\n' ' ')"
+  fi
+  if [[ -f "$ETC/pbx.env" ]]; then
+    local old_id new_id
+    old_id="$(. "$ETC/pbx.env"; echo "$PBX_ID")"; new_id="$(. "$ETC/pbx.env.new"; echo "$PBX_ID")"
+    [[ "$old_id" == "$new_id" ]] || { rm -f "$ETC/pbx.env.new"; fail verification "Ce serveur est déjà configuré pour un autre PBX."; }
+  fi
+  mv "$ETC/pbx.env.new" "$ETC/pbx.env"; chmod 644 "$ETC/pbx.env"
+  install -m 0644 "$src" "$ETC/pbx-config.json"
+  set -a; . "$ETC/pbx.env"; set +a
+  json verification ok "Licence ${PBX_LICENSE_KEY} valide · ${PBX_MAX_CALLS} appels simultanés · ${PBX_FQDN}"
+
+  # 2. Configuration d'Asterisk
+  json asterisk run "Configuration du moteur téléphonique…"
+  install -d -o asterisk -g asterisk -m 0750 /etc/asterisk /etc/asterisk/keys
+  node "$APP/pbx/lib/render-asterisk.mjs" "$APP/pbx/asterisk" /etc/asterisk
+  local ind=us
+  case "$PBX_COUNTRY" in FR|MC|LU) ind=fr ;; BE) ind=be ;; CH) ind=ch ;; esac
+  sed "s/^country=.*/country=${ind}/" /usr/share/asterisk/indications.conf.sample > /etc/asterisk/indications.conf
+  cp /usr/share/asterisk/musiconhold.conf.sample /etc/asterisk/musiconhold.conf
+  chown -R asterisk:asterisk /etc/asterisk
+  json asterisk ok "Configuration écrite (IP publique ${PUBLIC_IP}, langue ${PBX_LANGUAGE})"
+
+  # 3. Fuseau horaire
+  if [[ "${IS_WSL:-0}" != 1 ]]; then timedatectl set-timezone "$PBX_TIMEZONE" 2>/dev/null || true; fi
+
+  # 4. DNS et certificat
+  local dns_ip dns_ok=0 tls=0
+  dns_ip="$(dig +short A "$PBX_FQDN" 2>/dev/null | grep -E '^[0-9.]+$' | tail -n1 || true)"
+  if [[ "$dns_ip" == "$PUBLIC_IP" ]]; then
+    dns_ok=1
+    json certificat run "Demande du certificat HTTPS pour ${PBX_FQDN}…"
+    nginx_write "" 0
+    if certbot certonly --webroot -w /var/www/letsencrypt -d "$PBX_FQDN" -m "$PBX_ADMIN_EMAIL" --agree-tos -n -q; then
+      install -d /etc/letsencrypt/renewal-hooks/deploy
+      cat > /etc/letsencrypt/renewal-hooks/deploy/pbxmaison <<EOF
+#!/bin/sh
+install -o asterisk -g asterisk -m 0640 /etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem /etc/asterisk/keys/fullchain.pem
+install -o asterisk -g asterisk -m 0600 /etc/letsencrypt/live/${PBX_FQDN}/privkey.pem /etc/asterisk/keys/privkey.pem
+/usr/sbin/asterisk -rx "module reload res_pjsip.so" >/dev/null 2>&1 || true
+systemctl reload nginx
+EOF
+      chmod 755 /etc/letsencrypt/renewal-hooks/deploy/pbxmaison
+      install -o asterisk -g asterisk -m 0640 "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" /etc/asterisk/keys/fullchain.pem
+      install -o asterisk -g asterisk -m 0600 "/etc/letsencrypt/live/${PBX_FQDN}/privkey.pem" /etc/asterisk/keys/privkey.pem
+      cat > /etc/asterisk/pjsip_tls.conf <<EOF
+[transport-tls]
+type = transport
+protocol = tls
+bind = 0.0.0.0:5061
+cert_file = /etc/asterisk/keys/fullchain.pem
+priv_key_file = /etc/asterisk/keys/privkey.pem
+method = tlsv1_2
+external_media_address = ${PUBLIC_IP}
+external_signaling_address = ${PUBLIC_IP}
+EOF
+      chown asterisk:asterisk /etc/asterisk/pjsip_tls.conf
+      tls=1
+      json certificat ok "Certificat obtenu : https://${PBX_FQDN} et SIP TLS (5061)"
+    else
+      json certificat warn "Certificat refusé par Let's Encrypt : le port 80 doit être joignable depuis Internet. Relance l'assistant une fois corrigé."
+    fi
+  elif [[ -z "$dns_ip" ]]; then
+    json certificat warn "${PBX_FQDN} ne pointe nulle part : crée un enregistrement DNS A vers ${PUBLIC_IP}, puis relance l'assistant pour obtenir le certificat."
+  else
+    json certificat warn "${PBX_FQDN} pointe vers ${dns_ip} au lieu de ${PUBLIC_IP} : corrige le DNS, puis relance l'assistant pour obtenir le certificat."
+  fi
+  nginx_write "$PBX_FQDN" "$tls"
+
+  # 5. Démarrage d'Asterisk
+  json demarrage run "Démarrage du moteur téléphonique…"
+  systemctl enable asterisk >/dev/null 2>&1
+  systemctl restart asterisk
+  for _ in $(seq 1 30); do /usr/sbin/asterisk -rx "core show version" >/dev/null 2>&1 && break; sleep 1; done
+  /usr/sbin/asterisk -rx "core show version" >/dev/null 2>&1 || fail demarrage "Asterisk ne démarre pas (journalctl -u asterisk)."
+  local transports
+  transports="$(/usr/sbin/asterisk -rx "pjsip show transports" | awk '/^Transport:/ {print $2}' | paste -sd' ' -)"
+  json demarrage ok "Moteur démarré · transports : ${transports:-aucun}"
+
+  # 6. Code d'installation pour le portail
+  local machine
+  machine="$(printf '%s:%s' "$(cat /etc/machine-id 2>/dev/null || hostname)" "$PBX_ID" | sha256sum | cut -c1-16)"
+  ACT_PBX_ID="$PBX_ID" ACT_LICENSE_KEY="$PBX_LICENSE_KEY" ACT_FQDN="$PBX_FQDN" \
+  ACT_PUBLIC_IP="$PUBLIC_IP" ACT_LOCAL_IP="${LOCAL_IP:-}" ACT_BEHIND_NAT="${BEHIND_NAT:-0}" ACT_DNS_OK="$dns_ok" \
+  ACT_TLS="$tls" ACT_WSL="${IS_WSL:-0}" ACT_OS="${OS_NAME:-}" ACT_ASTERISK="$(/usr/sbin/asterisk -V 2>/dev/null)" \
+  ACT_MACHINE="$machine" node "$APP/pbx/lib/activation.mjs" encode-env > "$ETC/activation.txt"
+  chmod 644 "$ETC/activation.txt"
+  cat > "$ETC/setup.state" <<EOF
+DNS_OK=$dns_ok
+TLS=$tls
+CONFIGURED_AT='$(date -Is)'
+EOF
+  chmod 644 "$ETC/setup.state"
+  rm -f "$src"
+  json termine ok "$(cat "$ETC/activation.txt")"
+}
+
+case "${1:-}" in
+  apply) shift; cmd_apply "$@" ;;
+  nginx) set -a; . "$ETC/pbx.env" 2>/dev/null || true; set +a
+         if [[ -n "${PBX_FQDN:-}" && -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]]; then nginx_write "$PBX_FQDN" 1; else nginx_write "" 0; fi ;;
+  *) echo "Usage : pbx-configure apply <fichier> | nginx" >&2; exit 2 ;;
+esac

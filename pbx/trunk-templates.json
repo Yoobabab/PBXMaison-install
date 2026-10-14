@@ -1,0 +1,181 @@
+{
+  "version": 2,
+  "templates": [
+    {
+      "id": "dstny",
+      "label": "Dstny (OpenIP)",
+      "source": "3cx",
+      "verified": true,
+      "notes": "Importé du modèle 3CX « Dstny » (version 150004). Documentation : https://www.3cx.fr/docs/trunks-sip/dstny/ Les SDA sont attendues au format E.164. Le serveur (voip01/02/03…) dépend du compte : il peut être modifié à la création du trunk.",
+      "registrar": {
+        "host": "voip03.myopenip.fr",
+        "port": 5060
+      },
+      "proxy": null,
+      "transport": "udp",
+      "registration": {
+        "enabled": true,
+        "interval": 60
+      },
+      "auth_username_default": "custom",
+      "codecs": [
+        "alaw",
+        "g729",
+        "ulaw"
+      ],
+      "outbound": {
+        "from_user": "caller_id",
+        "contact_user": "auth_id",
+        "pai": true,
+        "cid_format": "national",
+        "dial_format": "national"
+      },
+      "inbound": {
+        "did_from": "to",
+        "caller_format": "national"
+      },
+      "number_format": "e164"
+    },
+    {
+      "id": "netw",
+      "label": "NETW (Networth)",
+      "source": "builtin",
+      "verified": false,
+      "notes": "D’après la configuration 3CX existante : identifiant SIP = numéro du trunk au format 33XXXXXXXXX, port 5060. À confirmer avec l’export du modèle 3CX.",
+      "registrar": {
+        "host": "sip.netw.fr",
+        "port": 5060
+      },
+      "proxy": null,
+      "transport": "udp",
+      "registration": {
+        "enabled": true,
+        "interval": 300
+      },
+      "auth_username_default": "trunk_number",
+      "codecs": [
+        "alaw",
+        "ulaw"
+      ],
+      "outbound": {
+        "from_user": "caller_id",
+        "contact_user": "auth_id",
+        "pai": true,
+        "cid_format": "e164",
+        "dial_format": "national"
+      },
+      "inbound": {
+        "did_from": "request_uri",
+        "caller_format": "national"
+      },
+      "number_format": "e164"
+    },
+    {
+      "id": "sewan",
+      "label": "Sewan",
+      "source": "3cx",
+      "verified": true,
+      "notes": "Importé du modèle 3CX « Sewan » (version 150003). Documentation : https://www.3cx.com/docs/manual/sip-trunks/ Les SDA sont attendues au format E.164. À renseigner à la création du trunk — serveur : Check 3CX Sewan Configuration Guide ; proxy : Check 3CX Sewan Configuration Guide.",
+      "registrar": {
+        "host": "",
+        "port": 5070
+      },
+      "proxy": null,
+      "transport": "tcp",
+      "registration": {
+        "enabled": true,
+        "interval": 600
+      },
+      "auth_username_default": "custom",
+      "codecs": [
+        "alaw",
+        "ulaw",
+        "g722",
+        "g729"
+      ],
+      "outbound": {
+        "from_user": "caller_id",
+        "contact_user": "auth_id",
+        "pai": false,
+        "cid_format": "national",
+        "dial_format": "national"
+      },
+      "inbound": {
+        "did_from": "to",
+        "caller_format": "national"
+      },
+      "number_format": "e164"
+    },
+    {
+      "id": "unyc",
+      "label": "Unyc (Serveurcom)",
+      "source": "3cx",
+      "verified": true,
+      "notes": "Importé du modèle 3CX « unyc » (version 150002). Documentation : https://www.3cx.fr/docs/manuel/trunks-sip Les SDA sont attendues au format E.164. À renseigner à la création du trunk — serveur : Enter Registrar provided to you by Unyc. Exemple de serveur vu sur un trunk existant : pbx.eqinoxe.com.",
+      "registrar": {
+        "host": "",
+        "port": 5060
+      },
+      "proxy": {
+        "host": "3cx.eqinoxe.com",
+        "port": 5060
+      },
+      "transport": "udp",
+      "registration": {
+        "enabled": true,
+        "interval": 3600
+      },
+      "auth_username_default": "custom",
+      "codecs": [
+        "alaw",
+        "g729"
+      ],
+      "outbound": {
+        "from_user": "caller_id",
+        "contact_user": "auth_id",
+        "pai": true,
+        "cid_format": "national",
+        "dial_format": "national"
+      },
+      "inbound": {
+        "did_from": "to",
+        "caller_format": "national"
+      },
+      "number_format": "e164"
+    },
+    {
+      "id": "generique",
+      "label": "Opérateur générique",
+      "source": "builtin",
+      "verified": false,
+      "notes": "Tous les paramètres sont à renseigner à la création du trunk.",
+      "registrar": {
+        "host": "",
+        "port": 5060
+      },
+      "proxy": null,
+      "transport": "udp",
+      "registration": {
+        "enabled": true,
+        "interval": 300
+      },
+      "auth_username_default": "custom",
+      "codecs": [
+        "alaw",
+        "ulaw"
+      ],
+      "outbound": {
+        "from_user": "caller_id",
+        "contact_user": "auth_id",
+        "pai": true,
+        "cid_format": "national",
+        "dial_format": "national"
+      },
+      "inbound": {
+        "did_from": "request_uri",
+        "caller_format": "national"
+      },
+      "number_format": "national"
+    }
+  ]
+}

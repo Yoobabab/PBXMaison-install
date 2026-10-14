@@ -1,0 +1,49 @@
+# Installe PBXMaison sur une machine vierge Ubuntu 24.04 (comme un VPS) et teste
+# l'assistant, la console et Asterisk de bout en bout.
+name: Test d'installation complet
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - packaging/**
+      - .github/workflows/build-asterisk.yml
+  workflow_run:
+    workflows: ["Asterisk précompilé"]
+    types: [completed]
+
+jobs:
+  e2e:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retirer les services du runner qui gêneraient (Postgres/Nginx préinstallés absents, ports 80/5432 libres)
+        run: |
+          sudo systemctl stop mysql 2>/dev/null || true
+          sudo ss -ltnp | grep -E ':(80|443|5060|5432|8080) ' || true
+      - name: Installation + assistant + console
+        env:
+          PBXM_REF: ${{ github.sha }}
+        run: bash tests/e2e/run.sh
+      - name: Résultat (lisible via l'API)
+        if: always()
+        shell: bash
+        run: |
+          f=tests/e2e/e2e-result.txt
+          if [[ -f $f ]]; then msg="$(sed -e 's/%/%25/g' "$f" | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Résultat e2e::${msg}"; fi
+      - name: Journaux en cas d'échec
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "== install.out"; tail -n 25 tests/e2e/install.out 2>/dev/null
+            echo "== console"; sudo journalctl -u pbxmaison-console -n 25 --no-pager 2>/dev/null
+            echo "== asterisk"; sudo journalctl -u asterisk -n 20 --no-pager 2>/dev/null
+            echo "== messages"; sudo tail -n 20 /var/log/asterisk/messages 2>/dev/null
+          } | grep -v -E '\.{10}' | cut -c1-200 > logs.txt
+          msg="$(sed -e 's/%/%25/g' logs.txt | awk '{printf "%s%%0A", $0}')"
+          echo "::error title=Journaux::${msg}"
