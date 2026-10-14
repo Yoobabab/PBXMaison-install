@@ -5,7 +5,8 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 const FORMAT_LABELS = { national: "National (0412345678)", e164: "E.164 sans + (33412345678)", e164_plus: "E.164 avec + (+33412345678)", keep: "Inchangé" };
-const fmtPhone = (n) => /^\+33\d{9}$/.test(n || "") ? ("0" + n.slice(3)).replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "—");
+const fmtPhone = (n) => /^\+33\d{9}$/.test(n || "") ? ("0" + n.slice(3)).replace(/(\d{2})(?=\d)/g, "$1 ")
+  : /^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "—");
 
 // ---------------------------------------------------------------- API
 const url = new URL(location.href);
@@ -50,7 +51,7 @@ async function copyText(text) {
 }
 
 function setNav(active) {
-  const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/postes", "Postes", "ext"],
+  const links = [["#/", "Tableau de bord", "home"], ["#/trunks", "Trunks", "trunks"], ["#/utilisateurs", "Utilisateurs", "ext"],
     ["#/routes", "Routes", "routes"], ["#/appels", "Appels en cours", "calls"], ["#/systeme", "Système", "sys"]];
   $("#nav").innerHTML = state?.logged_in ? links.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${l}</a>`).join("") : "";
   $("#user").innerHTML = state?.logged_in ? `<span class="hide-sm">${esc(state.email || "")}</span><button id="logout">Déconnexion</button>` : "";
@@ -246,7 +247,7 @@ async function renderDashboard() {
     <div class="cards">
       <a class="card" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
         <div class="s">${d.trunks.total === 0 ? "Aucun trunk : ajoute ton opérateur" : d.trunks.registered === d.trunks.total ? "Tous opérationnels" : "Au moins un trunk en défaut"}</div></a>
-      <a class="card" href="#/postes"><div class="k">Postes connectés</div><div class="v">${d.extensions.registered}<small> / ${d.extensions.total}</small></div>
+      <a class="card" href="#/utilisateurs"><div class="k">Postes connectés</div><div class="v">${d.extensions.registered}<small> / ${d.extensions.total}</small></div>
         <div class="s">${d.extensions.total === 0 ? "Aucun poste créé" : "téléphones enregistrés"}</div></a>
       <a class="card" href="#/appels"><div class="k">Appels en cours</div><div class="v">${d.calls.available ? d.calls.active : "—"}<small> / ${d.pbx.max_calls}</small></div>
         <div class="s">${d.calls.available ? "limite de la licence" : "moteur injoignable"}</div></a>
@@ -263,7 +264,7 @@ async function renderDashboard() {
       <div class="panel"><div class="ph"><h2>Pour démarrer</h2></div><div class="pad">
         <ol style="margin:0;padding-left:20px;line-height:2">
           <li>${d.trunks.total ? "✔ " : ""}<a href="#/trunks/nouveau">Ajouter le trunk de l'opérateur</a></li>
-          <li>${d.extensions.total ? "✔ " : ""}<a href="#/postes">Créer les postes</a> et les saisir dans les téléphones</li>
+          <li>${d.extensions.total ? "✔ " : ""}<a href="#/utilisateurs">Créer les postes</a> et les saisir dans les téléphones</li>
           <li><a href="#/routes">Choisir qui sonne</a> sur les appels entrants et le trunk de sortie</li>
         </ol></div></div>
     </div>`;
@@ -365,60 +366,241 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
 
 }
 
-// ---------------------------------------------------------------- Postes
-function credentialsPanel(server, ext) {
-  return `<div class="panel" id="cred"><div class="ph"><h2>Identifiants du poste ${esc(ext.id)}</h2><button class="btn ghost sm" id="credclose">Fermer</button></div>
-    <dl>
-      <div><dt>Serveur</dt><dd class="mono">${esc(server.fqdn)} <button class="copy" data-copy="${esc(server.fqdn)}">Copier</button></dd></div>
-      <div><dt>Port</dt><dd>5060 (UDP ou TCP)${server.tls ? " · 5061 en TLS" : ""}</dd></div>
-      <div><dt>Utilisateur</dt><dd class="mono">${esc(ext.id)}</dd></div>
-      <div><dt>Identifiant d'auth.</dt><dd class="mono">${esc(ext.id)}</dd></div>
-      <div><dt>Mot de passe</dt><dd class="mono">${esc(ext.password)} <button class="copy" data-copy="${esc(ext.password)}">Copier</button></dd></div>
-    </dl></div>`;
+// ---------------------------------------------------------------- Utilisateurs
+const STATUS_LABELS = { available: "Disponible", away: "Absent", dnd: "Ne pas déranger" };
+const STATUS_CLS = { available: "ok", away: "wait", dnd: "bad" };
+const DEST_LABELS = { voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe", hangup: "Raccrocher" };
+const statusPill = (u) => u.disabled || u.options?.disabled ? '<span class="pill off">Désactivé</span>'
+  : `<span class="pill ${STATUS_CLS[u.status]}">${STATUS_LABELS[u.status]}</span>`;
+
+/** Lit un formulaire en objet imbriqué : name="forwarding.busy.type" → {forwarding:{busy:{type}}}. Cases à cocher : true/false. */
+function formData(form) {
+  const out = {};
+  const put = (path, v) => { const k = path.split("."); let o = out; k.slice(0, -1).forEach((x) => (o = o[x] ??= {})); o[k.at(-1)] = v; };
+  for (const el of form.elements) {
+    if (!el.name || el.disabled) continue;
+    if (el.type === "checkbox") put(el.name, el.checked);
+    else if (el.type === "radio") { if (el.checked) put(el.name, el.value); }
+    else put(el.name, el.value);
+  }
+  return out;
 }
 
-async function renderExtensions(showCred) {
+/** Affiche l'erreur du serveur sous le champ concerné (sans recharger : la saisie est conservée). */
+function showFormError(form, err) {
+  form.querySelectorAll(".has-err").forEach((l) => l.classList.remove("has-err"));
+  form.querySelectorAll(".err.live").forEach((x) => x.remove());
+  let label = err.field && [...form.querySelectorAll("[name]")].find((el) => el.name === err.field || el.name.startsWith(err.field + "."))?.closest("label, .dest");
+  const box = document.createElement("span");
+  box.className = "err live"; box.textContent = err.message;
+  if (label) { label.classList.add("has-err"); label.append(box); label.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  else { const top = form.querySelector(".form-msg") || form; top.prepend(box); box.scrollIntoView({ block: "center" }); }
+}
+
+async function renderUsers() {
   setNav("ext");
   const d = await api("GET", "/api/extensions");
-  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Postes</h1><p class="sub" style="margin:0">Téléphones, softphones et postes DECT.</p></div></div>
-    <div class="stack">
-    ${showCred ? credentialsPanel(d.server, showCred) : ""}
-    <div class="panel"><div class="ph"><h2>Nouveau poste</h2></div>
-      <form method="post" class="grid" id="ef" novalidate>
-        <label>Numéro<input name="number" value="${esc(d.next)}" inputmode="numeric" maxlength="3"><span class="hint">3 chiffres, de 100 à 999.</span></label>
-        <label>Nom affiché<input name="name" placeholder="ex. Accueil" maxlength="40"></label>
-        <div class="actions"><button class="btn">Créer le poste</button></div>
-      </form></div>
-    <div class="panel">${d.extensions.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>Poste</th><th>Nom</th><th>État</th><th class="hide-sm">Appareil</th><th></th></tr></thead>
-      <tbody>${d.extensions.map((x) => `<tr>
-        <td><strong>${esc(x.id)}</strong></td><td>${esc(x.name)}</td>
-        <td>${x.registered ? '<span class="pill ok">Connecté</span>' : '<span class="pill off">Non connecté</span>'}</td>
-        <td class="hide-sm">${x.contacts.map((c) => `${esc(c.user_agent || "—")}<div class="s mono">${esc(c.ip)}</div>`).join("") || '<span class="s">—</span>'}</td>
-        <td style="text-align:right;white-space:nowrap"><button class="btn ghost sm" data-cred="${esc(x.id)}">Identifiants</button>
-          <button class="btn ghost sm" data-del="${esc(x.id)}">Supprimer</button></td></tr>`).join("")}</tbody></table></div>`
-      : `<div class="empty">Aucun poste pour l'instant.</div>`}</div></div>`;
-  copyButtons();
-  $("#credclose")?.addEventListener("click", () => renderExtensions());
-  $("#ef").onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const r = await api("POST", "/api/extensions", Object.fromEntries(new FormData(e.target)));
-      flash = { text: `Poste ${r.id} « ${r.name} » créé. Saisis ces identifiants dans le téléphone.` };
-      renderExtensions(r);
-    } catch (err) { flash = { cls: "bad", text: err.message }; renderExtensions(); }
+  const q = sessionStorage.getItem("pbxm_users_q") || "";
+  const onlyFw = sessionStorage.getItem("pbxm_users_fw") === "1";
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Utilisateurs</h1><p class="sub" style="margin:0">Un utilisateur = un poste (téléphone, softphone, DECT), ses renvois et sa messagerie.</p></div>
+    <a class="btn" href="#/utilisateurs/nouveau">+ Ajouter un utilisateur</a></div>
+    <div class="panel">
+      <div class="filters"><input id="uq" type="search" placeholder="Rechercher : nom, poste, SDA, numéro de renvoi…" value="${esc(q)}">
+        <label class="check"><input type="checkbox" id="ufw" ${onlyFw ? "checked" : ""}> Seulement ceux avec un renvoi actif</label></div>
+      ${d.extensions.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Poste</th><th>Nom</th><th>Statut</th><th class="hide-sm">Téléphone</th><th>Renvois</th></tr></thead>
+      <tbody id="urows"></tbody></table></div><div id="unone" class="empty" hidden>Aucun utilisateur ne correspond.</div>`
+      : `<div class="empty"><p>Aucun utilisateur pour l'instant.</p><a class="btn" href="#/utilisateurs/nouveau">Créer le premier utilisateur</a></div>`}</div>`;
+  const rows = $("#urows");
+  if (!rows) return;
+  const draw = () => {
+    const words = $("#uq").value.toLowerCase().replace(/\s+/g, " ").trim();
+    const digits = words.replace(/[^\d]/g, "");
+    const fw = $("#ufw").checked;
+    sessionStorage.setItem("pbxm_users_q", $("#uq").value); sessionStorage.setItem("pbxm_users_fw", fw ? "1" : "0");
+    const list = d.extensions.filter((x) => {
+      if (fw && !x.forwards.length) return false;
+      if (!words) return true;
+      const hay = [x.id, x.name, x.email, x.mobile, ...x.dids, ...x.forwards.map((f) => f.text)].join(" ").toLowerCase();
+      return hay.includes(words) || (digits.length >= 3 && hay.replace(/[^\d]/g, " ").replace(/(\d) (?=\d)/g, "$1").includes(digits));
+    });
+    rows.innerHTML = list.map((x) => `<tr class="click" data-href="#/utilisateurs/${esc(x.id)}">
+      <td><strong>${esc(x.id)}</strong></td>
+      <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
+      <td>${statusPill(x)}</td>
+      <td class="hide-sm">${x.registered ? `<span class="pill ok">Connecté</span>${x.contacts.map((c) => `<div class="s">${esc(c.user_agent || "")} · <span class="mono">${esc(c.ip)}</span></div>`).join("")}` : '<span class="pill off">Non connecté</span>'}</td>
+      <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td></tr>`).join("");
+    $("#unone").hidden = list.length > 0;
+    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
   };
-  app.querySelectorAll("[data-cred]").forEach((b) => b.onclick = async () => renderExtensions(await api("GET", `/api/extensions/${b.dataset.cred}/secret`)));
-  app.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
-    if (!confirm(`Supprimer le poste ${b.dataset.del} ?`)) return;
-    await api("DELETE", `/api/extensions/${b.dataset.del}`);
-    flash = { text: `Poste ${b.dataset.del} supprimé.` }; renderExtensions();
-  });
+  $("#uq").addEventListener("input", draw);
+  $("#ufw").addEventListener("change", draw);
+  draw();
   clearInterval(timer);
   timer = setInterval(async () => {
-    if (location.hash !== "#/postes" || $("#cred") || document.activeElement?.closest("#ef")) return;
-    renderExtensions();
-  }, 10000);
+    if (location.hash !== "#/utilisateurs" || document.activeElement === $("#uq")) return;
+    renderUsers();
+  }, 15000);
+}
+
+async function renderUserNew() {
+  setNav("ext");
+  clearInterval(timer);
+  const d = await api("GET", "/api/extensions");
+  app.innerHTML = `<h1>Ajouter un utilisateur</h1><p class="sub">Le poste est créé avec ses identifiants SIP ; renvois et messagerie se règlent ensuite dans sa fiche.</p>
+    <div class="panel"><form method="post" class="grid" id="nf" novalidate><div class="form-msg full"></div>
+      <label>Numéro de poste<input name="number" value="${esc(d.next)}" inputmode="numeric" maxlength="3" required><span class="hint">3 chiffres, de 100 à 999.</span></label>
+      <span class="hide-sm"></span>
+      <label>Prénom<input name="first_name" maxlength="40" autocomplete="off"></label>
+      <label>Nom<input name="last_name" maxlength="40" autocomplete="off"></label>
+      <label>E-mail<input name="email" type="email" maxlength="120" autocomplete="off"></label>
+      <label>Mobile<input name="mobile" inputmode="tel" placeholder="06 12 34 56 78" autocomplete="off"><span class="hint">Pour les renvois et la sonnerie simultanée.</span></label>
+      <div class="actions"><a class="btn ghost" href="#/utilisateurs">Annuler</a><button class="btn">Créer l'utilisateur</button></div>
+    </form></div>`;
+  $("#nf").onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = e.submitter; btn.disabled = true;
+    try {
+      const r = await api("POST", "/api/extensions", formData(e.target));
+      flash = { text: `Utilisateur ${r.id} « ${r.name} » créé. Saisis ces identifiants dans le téléphone.` };
+      location.hash = `#/utilisateurs/${r.id}/telephone`;
+    } catch (err) { showFormError(e.target, err); btn.disabled = false; }
+  };
+}
+
+const USER_TABS = [["general", "Général"], ["renvois", "Renvois d'appels"], ["telephone", "Téléphone IP"], ["messagerie", "Messagerie vocale"], ["options", "Options"]];
+
+function destField(name, label, dest, users, selfId) {
+  const others = users.filter((x) => x.id !== selfId);
+  return `<div class="dest" data-dest="${name}"><span class="dl">${label}</span>
+    <div class="row"><select name="${name}.type">${Object.entries(DEST_LABELS).map(([k, l]) => `<option value="${k}" ${dest.type === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <select name="${name}.target" data-for="extension" ${dest.type === "extension" ? "" : "hidden disabled"}>
+      <option value="">— Choisir —</option>${others.map((x) => `<option value="${esc(x.id)}" ${dest.type === "extension" && dest.target === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select>
+    <input name="${name}.target" data-for="external" inputmode="tel" placeholder="06 12 34 56 78" value="${dest.type === "external" ? esc(fmtPhone(dest.target)) : ""}" ${dest.type === "external" ? "" : "hidden disabled"}></div></div>`;
+}
+function wireDest(root) {
+  root.querySelectorAll(".dest").forEach((box) => {
+    const sel = box.querySelector("select[name$='.type']");
+    const sync = () => box.querySelectorAll("[data-for]").forEach((el) => { const on = el.dataset.for === sel.value; el.hidden = !on; el.disabled = !on; });
+    sel.addEventListener("change", sync);
+  });
+}
+
+async function renderUser(id, tab = "general") {
+  setNav("ext");
+  clearInterval(timer);
+  const [{ user: u, server }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
+  const users = list.extensions;
+  const fw = u.forwarding;
+  const tabs = `<nav class="tabs">${USER_TABS.map(([k, l]) => `<a href="#/utilisateurs/${esc(u.id)}${k === "general" ? "" : "/" + k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
+  const head = `<a class="back" href="#/utilisateurs">← Utilisateurs</a>
+    <div class="bar"><div class="grow"><h1>${esc(u.id)} · ${esc(u.name)}</h1>
+      <p class="sub" style="margin:0">${statusPill(u)} ${u.registered ? '<span class="pill ok">Téléphone connecté</span>' : '<span class="pill off">Téléphone non connecté</span>'}
+      ${u.updated_by ? `<span class="s">· modifié le ${esc(new Date(u.updated_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }))} par ${esc(u.updated_by)}</span>` : ""}</p></div></div>
+    ${u.forwards.length ? `<div class="note fwsum"><strong>En ce moment :</strong> ${u.forwards.map((f) => esc(f.text)).join(" · ")}</div>` : ""}${tabs}`;
+  const save = `<div class="actions"><button class="btn">Enregistrer</button></div>`;
+  let body = "";
+
+  if (tab === "general") {
+    body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
+      <label>Numéro de poste<input value="${esc(u.id)}" readonly></label><span class="hide-sm"></span>
+      <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
+      <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
+      <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
+      <label>Mobile<input name="mobile" inputmode="tel" value="${esc(fmtPhone(u.mobile) === "—" ? "" : fmtPhone(u.mobile))}" placeholder="06 12 34 56 78"></label>
+      <label>Numéro présenté (appels sortants)<input name="outbound_cid" inputmode="tel" value="${esc(u.outbound_cid ? fmtPhone(u.outbound_cid) : "")}" placeholder="Celui du trunk"><span class="hint">Vide = numéro du trunk. Doit être un numéro de ta ligne, sinon l'opérateur peut refuser l'appel.</span></label>
+      <label>SDA attribuées<textarea name="dids" rows="3" placeholder="04 12 34 56 78">${esc(u.dids.map(fmtPhone).join("\n"))}</textarea><span class="hint">Un numéro par ligne. Les appels vers ces numéros sonnent directement chez cet utilisateur.</span></label>
+      ${save}</form>`;
+  } else if (tab === "renvois") {
+    body = `<form method="post" id="uf" novalidate class="pad stack"><div class="form-msg"></div>
+      <div><span class="dl">Statut actuel</span><div class="seg">${Object.entries(STATUS_LABELS).map(([k, l]) => `<label class="${u.status === k ? "on" : ""}"><input type="radio" name="status" value="${k}" ${u.status === k ? "checked" : ""}>${l}</label>`).join("")}</div>
+        <span class="hint">Le statut choisit les règles appliquées ci-dessous.</span></div>
+      <fieldset><legend>Disponible</legend>
+        <label class="short">Délai de non-réponse<span class="suffix"><input name="forwarding.timeout" type="number" min="5" max="120" value="${esc(fw.timeout)}"><span>secondes</span></span></label>
+        ${destField("forwarding.no_answer", "Si pas de réponse, transférer vers", fw.no_answer, users, u.id)}
+        ${destField("forwarding.busy", "Si occupé ou téléphone non connecté, transférer vers", fw.busy, users, u.id)}
+      </fieldset>
+      <fieldset><legend>Absent</legend>${destField("forwarding.away", "Transférer tous les appels vers", fw.away, users, u.id)}</fieldset>
+      <fieldset><legend>Ne pas déranger</legend>${destField("forwarding.dnd", "Transférer tous les appels vers", fw.dnd, users, u.id)}</fieldset>
+      <fieldset><legend>Options</legend>
+        <label class="check"><input type="checkbox" name="options.ring_mobile" ${u.options.ring_mobile ? "checked" : ""}> Faire sonner aussi mon mobile${u.mobile ? ` (${esc(fmtPhone(u.mobile))})` : " (renseigne-le dans Général)"}</label>
+        <label class="check"><input type="checkbox" name="options.accept_group_calls" ${u.options.accept_group_calls ? "checked" : ""}> Recevoir les appels des groupes (route entrante « tous les postes »)</label>
+      </fieldset>
+      <p class="hint" style="margin:0">Les renvois vers l'extérieur passent par le trunk sortant et présentent le numéro du trunk. International et surtaxés interdits.</p>
+      <div class="actions" style="padding-top:16px"><button class="btn">Enregistrer</button></div></form>`;
+  } else if (tab === "telephone") {
+    const host = server.host || server.fqdn;
+    body = `<div class="pad" style="padding-bottom:0"><p class="hint" style="margin:0">À saisir dans le téléphone ou le softphone (compte SIP).</p></div>
+      <dl class="creds">
+        <div><dt>Serveur / domaine</dt><dd><span class="mono">${esc(host)}</span> <button class="copy" data-copy="${esc(host)}">Copier</button>
+          ${!server.dns_ok ? `<div class="s">Le FQDN ${esc(server.fqdn)} ne pointe pas encore vers ce serveur : utilise l'IP en attendant.</div>` : ""}</dd></div>
+        <div><dt>Port</dt><dd>5060 (UDP ou TCP)${server.tls ? " · 5061 en TLS" : ""}</dd></div>
+        <div><dt>Numéro / utilisateur</dt><dd><span class="mono">${esc(u.id)}</span> <button class="copy" data-copy="${esc(u.id)}">Copier</button></dd></div>
+        <div><dt>ID d'authentification</dt><dd id="authid"><span class="s">…</span></dd></div>
+        <div><dt>Mot de passe</dt><dd id="pw"><span class="s">…</span></dd></div>
+        <div><dt>Appareil connecté</dt><dd>${u.contacts.length ? u.contacts.map((c) => `${esc(c.user_agent || "—")} · <span class="mono">${esc(c.ip)}</span>`).join("<br>") : '<span class="s">Aucun pour l\'instant</span>'}</dd></div>
+      </dl>
+      <div class="pad" style="border-top:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn ghost sm" id="regen">Générer un nouveau mot de passe</button>
+        <span class="hint">Le téléphone devra être reconfiguré avec le nouveau mot de passe.</span></div>
+      <div class="pad" style="border-top:1px solid var(--line)"><p class="hint" style="margin:0">Provisioning automatique des téléphones (Yealink, Fanvil…) par adresse MAC : prévu dans une prochaine version.</p></div>`;
+  } else if (tab === "messagerie") {
+    const vm = u.voicemail;
+    body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
+      <label class="check full"><input type="checkbox" name="voicemail.enabled" ${vm.enabled ? "checked" : ""}> Activer la messagerie vocale</label>
+      <label>Code PIN<input name="voicemail.pin" type="password" inputmode="numeric" maxlength="8" value="${esc(vm.pin)}" autocomplete="new-password"><span class="hint">4 à 8 chiffres.</span></label>
+      <span class="hide-sm"></span>
+      <label class="check full"><input type="checkbox" name="voicemail.skip_pin" ${vm.skip_pin ? "checked" : ""}> Ne pas demander le code depuis son propre poste</label>
+      <div class="note full">Consulter : <strong>*97</strong> depuis son poste, <strong>*98</strong> depuis un autre poste (numéro de boîte + code).
+        Envoi des messages par e-mail : prévu dans une prochaine version.</div>
+      ${save}</form>`;
+  } else if (tab === "options") {
+    body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
+      <label class="check full"><input type="checkbox" name="options.disabled" ${u.options.disabled ? "checked" : ""}> Désactiver l'utilisateur <span class="hint">(ne reçoit plus d'appels, n'appelle plus que les urgences)</span></label>
+      <label class="check full"><input type="checkbox" name="options.block_external" ${u.options.block_external ? "checked" : ""}> Interdire les appels externes <span class="hint">(appels internes et urgences toujours possibles)</span></label>
+      <div class="note full">L'audio passe toujours par le PBX (indispensable derrière une box ou un pare-feu).</div>
+      ${save}</form>
+      <div class="pad" style="border-top:1px solid var(--line)"><h2 style="margin-bottom:8px">Supprimer l'utilisateur</h2>
+        <p class="hint">Le poste ${esc(u.id)}, ses identifiants et sa messagerie seront supprimés.</p>
+        <button class="btn danger sm" id="udel">Supprimer ${esc(u.id)}</button></div>`;
+  }
+
+  app.innerHTML = `${takeFlash()}${head}<div class="panel tabbed">${body}</div>`;
+  copyButtons();
+  wireDest(app);
+  app.querySelectorAll(".seg input").forEach((i) => i.addEventListener("change", () => app.querySelectorAll(".seg label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked))));
+
+  const form = $("#uf");
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = e.submitter; if (btn) btn.disabled = true;
+    const data = formData(form);
+    if (typeof data.dids === "string") data.dids = data.dids.split("\n");
+    try {
+      await api("PUT", `/api/extensions/${u.id}`, data);
+      flash = { text: "Enregistré et appliqué." };
+      renderUser(u.id, tab);
+    } catch (err) { showFormError(form, err); if (btn) btn.disabled = false; }
+  };
+  if (tab === "telephone") {
+    const showSecret = (s) => {
+      $("#authid").innerHTML = `<span class="mono">${esc(s.auth_id)}</span> <button class="copy" data-copy="${esc(s.auth_id)}">Copier</button>`;
+      $("#pw").innerHTML = `<span class="secret"><input type="password" readonly value="${esc(s.password)}" class="mono"></span> <button class="copy" data-copy="${esc(s.password)}">Copier</button>`;
+      copyButtons($("#authid")); copyButtons($("#pw"));
+    };
+    showSecret(await api("GET", `/api/extensions/${u.id}/secret`));
+    $("#regen").onclick = async () => {
+      if (!confirm("Générer un nouveau mot de passe ? L'ancien ne fonctionnera plus.")) return;
+      showSecret(await api("POST", `/api/extensions/${u.id}/secret`));
+    };
+  }
+  $("#udel")?.addEventListener("click", async () => {
+    if (!confirm(`Supprimer l'utilisateur ${u.id} (${u.name}) ?`)) return;
+    try {
+      await api("DELETE", `/api/extensions/${u.id}`);
+      flash = { text: `Utilisateur ${u.id} supprimé.` }; location.hash = "#/utilisateurs";
+    } catch (err) { flash = { cls: "bad", text: err.message }; renderUser(u.id, tab); }
+  });
 }
 
 // ---------------------------------------------------------------- Routes
@@ -430,10 +612,10 @@ async function renderRoutes() {
   app.innerHTML = `${takeFlash()}<h1>Routes</h1><p class="sub">Qui sonne quand on appelle, et par où sortent les appels.</p>
     <form method="post" id="rf" class="stack">
       <div class="panel"><div class="ph"><h2>Appels entrants</h2></div><div class="pad">
-        <p class="hint" style="margin-top:0">Les postes cochés sonnent en même temps (45 s).</p>
+        <p class="hint" style="margin-top:0">Les postes cochés sonnent en même temps (45 s). Ceux qui sont absents, en « ne pas déranger », désactivés ou qui refusent les appels de groupe ne sonnent pas. Les SDA attribuées à un utilisateur (fiche utilisateur › Général) vont directement chez lui.</p>
         ${ext.extensions.length ? `<div class="chips">${ext.extensions.map((x) => `<label class="chip ${sel.has(x.id) ? "on" : ""}">
           <input type="checkbox" name="inbound" value="${esc(x.id)}" ${sel.has(x.id) ? "checked" : ""}> ${esc(x.id)} · ${esc(x.name)}</label>`).join("")}</div>`
-          : `<p>Aucun poste : <a href="#/postes">crée d'abord un poste</a>.</p>`}
+          : `<p>Aucun poste : <a href="#/utilisateurs">crée d'abord un poste</a>.</p>`}
       </div></div>
       <div class="panel"><div class="ph"><h2>Appels sortants</h2></div><div class="pad">
         <label style="max-width:420px">Trunk utilisé<select name="outbound_trunk"><option value="">— Aucun (appels sortants impossibles) —</option>
@@ -516,7 +698,9 @@ async function route() {
     if (h === "#/trunks") await renderTrunks();
     else if (h === "#/trunks/nouveau") await renderTrunkForm(null);
     else if ((m = h.match(/^#\/trunks\/([\w-]+)$/))) await renderTrunkForm(m[1]);
-    else if (h === "#/postes") await renderExtensions();
+    else if (h === "#/postes" || h === "#/utilisateurs") await renderUsers();
+    else if (h === "#/utilisateurs/nouveau") await renderUserNew();
+    else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if (h === "#/routes") await renderRoutes();
     else if (h === "#/appels") await renderCalls();
     else if (h === "#/systeme") await renderSystem();

@@ -74,6 +74,28 @@ echo "$REG" | grep -q "dstny/sip:voip03.myopenip.fr" && pass "Enregistrement du 
 sudo /usr/sbin/asterisk -rx "dialplan show 0412345678@from-internal" | grep -q "outbound" && pass "Plan de numérotation : numéro national → trunk" || fail "dialplan national"
 sudo /usr/sbin/asterisk -rx "dialplan show 0044123456@from-internal" | grep -q "International" && pass "Plan de numérotation : international bloqué" || fail "dialplan international"
 sudo /usr/sbin/asterisk -rx "dialplan show globals" | grep -q "OUTBOUND_TRUNK=dstny" && pass "Routes appliquées dans Asterisk (OUTBOUND_TRUNK=dstny)" || fail "globals"
+# 4b. Utilisateurs : renvois, SDA, messagerie, restrictions
+R="$(api PUT /api/extensions/201 '{"mobile":"0612345678","dids":["04 65 00 15 30"],"forwarding":{"timeout":15,"no_answer":{"type":"external","target":"0612345678"},"busy":{"type":"extension","target":"202"}},"options":{"ring_mobile":true},"voicemail":{"pin":"4321"}}')"
+echo "$R" | grep -q '"timeout":15' && pass "Fiche utilisateur 201 : renvois, SDA, mobile enregistrés" || fail "fiche 201 : $R"
+R="$(api PUT /api/extensions/202 '{"status":"away","forwarding":{"away":{"type":"extension","target":"201"}},"options":{"block_external":true}}')"
+echo "$R" | grep -q '"status":"away"' && pass "Utilisateur 202 : statut Absent + appels externes interdits" || fail "fiche 202 : $R"
+R="$(api PUT /api/extensions/201 '{"forwarding":{"busy":{"type":"external","target":"0044 20 1234 5678"}}}')"
+echo "$R" | grep -q "international" && pass "Renvoi vers l'international refusé" || fail "international accepté : $R"
+sleep 2
+D="$(sudo /usr/sbin/asterisk -rx 'dialplan show 201@users')"
+echo "$D" | grep -q "PJSIP/201&Local/0612345678@user-external/n,15" && pass "Asterisk : 201 sonne poste + mobile 15 s" || { echo "$D" | head -20 >> "$OUT"; fail "dialplan 201"; }
+echo "$D" | grep -q "user-external,0612345678" && pass "Asterisk : non-réponse de 201 → 06 12 34 56 78" || fail "renvoi non-réponse 201"
+echo "$D" | grep -q "Goto(users,202,1)" && pass "Asterisk : occupé/non connecté → poste 202" || fail "renvoi occupé 201"
+sudo /usr/sbin/asterisk -rx 'dialplan show 202@users' | grep -q "Goto(users,201,1)" && pass "Asterisk : 202 absent → 201" || fail "202 absent"
+sudo /usr/sbin/asterisk -rx 'dialplan show 0465001530@did-map' | grep -q "users,201" && pass "Asterisk : SDA 04 65 00 15 30 → 201" || fail "did-map"
+VM="$(sudo /usr/sbin/asterisk -rx 'voicemail show users')"
+echo "$VM" | grep -q "201" && pass "Messagerie vocale : boîtes créées ($(echo "$VM" | grep -c '^default'))" || { echo "$VM" | head >> "$OUT"; fail "voicemail"; }
+sudo /usr/sbin/asterisk -rx 'pjsip show endpoint 202' | grep -q "USER_OPTS=,1" && pass "Asterisk : 202 marqué « appels externes interdits »" || fail "set_var 202"
+sudo /usr/sbin/asterisk -rx 'dialplan show *97@from-internal' | grep -q "vm-access" && pass "*97 : accès à sa messagerie" || fail "*97"
+sudo grep -q "^INBOUND_TARGET = PJSIP/201$" /var/lib/pbxmaison/extensions_routes.conf && pass "Route entrante : 202 (absent) retiré de la sonnerie" || { sudo cat /var/lib/pbxmaison/extensions_routes.conf >> "$OUT"; fail "INBOUND_TARGET"; }
+sudo grep -E "ERROR|WARNING" /var/log/asterisk/messages | grep -iE "pbx_config|extensions|app_voicemail|voicemail\.conf" | tail -5 > ast-err.txt || true
+if [[ -s ast-err.txt ]]; then cat ast-err.txt >> "$OUT"; fail "Erreurs Asterisk au chargement du plan de numérotation"; else pass "Aucune erreur Asterisk au chargement du plan de numérotation"; fi
+
 R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"
@@ -83,4 +105,5 @@ api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lectu
 sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 timeout 900 bash ../../install.sh > reinstall.out 2>&1 || { tail -n 30 reinstall.out; fail "réinstallation"; }
 sleep 3
 sudo /usr/sbin/asterisk -rx 'pjsip show endpoints' | grep -qE "Endpoint:\s+201(/|\s)" && pass "Mise à jour (relance de la commande) : configuration conservée" || fail "config perdue après mise à jour"
+sudo /usr/sbin/asterisk -rx 'dialplan show 201@users' | grep -q "user-external,0612345678" && pass "Mise à jour : renvois conservés" || fail "renvois perdus après mise à jour"
 echo "OK" >> "$OUT"

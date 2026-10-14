@@ -306,6 +306,7 @@ ok "fail2ban : 5 échecs en 10 min → IP bannie 1 h"
 step "Assistant de configuration"
 # =============================================================================
 if [[ -f "$ETC/pbx.env" ]]; then
+  "$APP/pbx/bin/pbx-configure" render
   systemctl restart asterisk 2>/dev/null || true
   set -a; . "$ETC/pbx.env"; set +a
   URL="https://${PBX_FQDN}"; [[ -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]] || URL="http://${PUBLIC_IP}"

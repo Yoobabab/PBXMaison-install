@@ -154,6 +154,12 @@ export async function buildApp({ db, ami } = {}) {
     };
   });
 
+  function sipServer() {
+    const env = pbxEnv(), st = installState(), ss = setupState();
+    return { fqdn: env.PBX_FQDN, dns_ok: ss.DNS_OK === "1", tls: ss.TLS === "1", public_ip: st.PUBLIC_IP,
+      local_ip: st.LOCAL_IP, behind_nat: st.BEHIND_NAT === "1", host: ss.DNS_OK === "1" ? env.PBX_FQDN : st.PUBLIC_IP };
+  }
+
   app.get("/api/templates", { preHandler: requireUser }, async () => pbx.templates());
   app.get("/api/trunks", { preHandler: requireUser }, async () => pbx.listTrunks());
   app.post("/api/trunks", { preHandler: requireUser }, async (req) => pbx.createTrunk(req.body || {}));
@@ -163,10 +169,13 @@ export async function buildApp({ db, ami } = {}) {
 
   app.get("/api/extensions", { preHandler: requireUser }, async () => ({
     extensions: await pbx.listExtensions(), next: await pbx.nextFreeExtension(),
-    server: { fqdn: pbxEnv().PBX_FQDN, tls: setupState().TLS === "1" },
+    server: sipServer(),
   }));
-  app.post("/api/extensions", { preHandler: requireUser }, async (req) => pbx.createExtension(req.body || {}));
+  app.post("/api/extensions", { preHandler: requireUser }, async (req) => pbx.createExtension(req.body || {}, currentUser(req).email));
+  app.get("/api/extensions/:id", { preHandler: requireUser }, async (req) => ({ user: await pbx.getUser(req.params.id), server: sipServer() }));
+  app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email));
   app.get("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.extensionSecret(req.params.id));
+  app.post("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.resetSecret(req.params.id));
   app.delete("/api/extensions/:id", { preHandler: requireUser }, async (req) => { await pbx.deleteExtension(req.params.id); return { ok: true }; });
 
   app.get("/api/routes", { preHandler: requireUser }, async () => pbx.getRoutes());
@@ -180,6 +189,7 @@ export async function buildApp({ db, ami } = {}) {
     return reply.sendFile("index.html");
   });
 
+  app.decorate("pbx", pbx);
   app.addHook("onClose", async () => { ami.close(); await db.end(); });
   return app;
 }
@@ -188,5 +198,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
   const app = await buildApp();
   await app.listen({ port: settings.port, host: settings.host });
   console.log(`Console PBXMaison sur http://${settings.host}:${settings.port}`);
+  // Après une mise à jour : régénère les fichiers lus par Asterisk (nouveau format éventuel)
+  if (isConfigured()) app.pbx.applyDialplan().catch((e) => console.error("Plan de numérotation non régénéré :", e.message));
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => app.close().then(() => process.exit(0)));
 }

@@ -7,19 +7,19 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
+import { UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 
 export const EMERGENCY = ["15", "17", "18", "112", "114", "115", "116000", "119", "191", "196", "197"];
 const FORMATS = ["national", "e164", "e164_plus"];
 
-export class UserError extends Error {
-  constructor(message, field) { super(message); this.field = field; this.status = 400; }
-}
+export { UserError };
 
 export function loadTemplates(file) {
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
   return data.templates.map(validateTemplate);
 }
 
+const genAuthId = () => crypto.randomBytes(16).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 10);
 const genPassword = () => crypto.randomBytes(24).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 20);
 const hostOk = (h) => /^[A-Za-z0-9.-]+$/.test(h) && h.includes(".");
 
@@ -172,24 +172,46 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     if (routes.outbound_trunk === id) await setRoutes({ ...routes, outbound_trunk: "" });
   }
 
-  // ------------------------------------------------------------------ Postes
-  async function listExtensions() {
+  // ------------------------------------------------------------------ Utilisateurs (postes)
+  async function loadUsers() {
+    const r = await db.query("SELECT * FROM pbxmaison_extensions ORDER BY id");
+    return r.rows.map(fromRow);
+  }
+
+  async function registrations() {
     const r = await db.query(`
-      SELECT e.id, x.name, e.callerid,
+      SELECT e.id,
              (SELECT json_agg(json_build_object('uri', c.uri, 'user_agent', c.user_agent, 'via', c.via_addr,
                       'expires', c.expiration_time) ORDER BY c.expiration_time DESC)
               FROM ps_contacts c WHERE c.endpoint = e.id) AS contacts
-      FROM ps_endpoints e LEFT JOIN pbxmaison_extensions x ON x.id = e.id
-      WHERE e.context = 'from-internal'
-      ORDER BY e.id`);
+      FROM ps_endpoints e WHERE e.context = 'from-internal'`);
     const now = Math.floor(Date.now() / 1000);
-    return r.rows.map((row) => {
+    const map = new Map();
+    for (const row of r.rows) {
       const contacts = (row.contacts || []).filter((c) => !c.expires || Number(c.expires) > now);
+      map.set(row.id, contacts.map((c) => ({ user_agent: c.user_agent || "", ip: c.via || (/@([^:;>]+)/.exec(c.uri || "")?.[1] ?? "") })));
+    }
+    return map;
+  }
+
+  /** Postes présents dans Asterisk mais sans fiche (créés avant les fiches) : fiche minimale. */
+  async function adoptOrphans() {
+    await db.query(`INSERT INTO pbxmaison_extensions (id, name)
+      SELECT e.id, COALESCE(substring(e.callerid from '"([^"]*)"'), 'Poste ' || e.id)
+      FROM ps_endpoints e WHERE e.context = 'from-internal'
+        AND NOT EXISTS (SELECT 1 FROM pbxmaison_extensions x WHERE x.id = e.id)`);
+  }
+
+  async function listExtensions() {
+    await adoptOrphans();
+    const [users, reg] = await Promise.all([loadUsers(), registrations()]);
+    return users.map((u) => {
+      const contacts = reg.get(u.id) || [];
       return {
-        id: row.id,
-        name: row.name || (/"([^"]*)"/.exec(row.callerid || "")?.[1] ?? `Poste ${row.id}`),
-        registered: contacts.length > 0,
-        contacts: contacts.map((c) => ({ user_agent: c.user_agent || "", ip: c.via || (/@([^:;>]+)/.exec(c.uri || "")?.[1] ?? "") })),
+        id: u.id, name: displayName(u), first_name: u.first_name, last_name: u.last_name, email: u.email,
+        status: u.status, status_label: STATUSES[u.status], disabled: u.options.disabled,
+        registered: contacts.length > 0, contacts, dids: u.dids, mobile: u.mobile,
+        forwards: forwardSummary(u),
       };
     });
   }
@@ -199,36 +221,91 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     if (EMERGENCY.includes(num)) throw new UserError(`${num} est un numéro d'urgence : choisis-en un autre.`, "number");
   }
 
-  async function createExtension(input) {
+  async function validationContext(selfId) {
+    const users = await loadUsers();
+    const didOwners = new Map();
+    for (const u of users) for (const d of u.dids) didOwners.set(d, u.id);
+    return { cc: countryCode(), extensions: new Set([...users.map((u) => u.id), selfId]), didOwners };
+  }
+
+  async function saveUser(c, u, by) {
+    await c.query(
+      `UPDATE pbxmaison_extensions SET name = $2, first_name = $3, last_name = $4, email = $5, mobile = $6,
+         outbound_cid = $7, dids = $8, status = $9, forwarding = $10, options = $11, voicemail = $12,
+         updated_at = now(), updated_by = $13 WHERE id = $1`,
+      [u.id, displayName(u), u.first_name, u.last_name, u.email, u.mobile, u.outbound_cid, u.dids, u.status,
+        JSON.stringify(u.forwarding), JSON.stringify(u.options), JSON.stringify(u.voicemail), by || ""]);
+    await c.query("UPDATE ps_endpoints SET callerid = $2, set_var = $3 WHERE id = $1",
+      [u.id, `"${displayName(u)}" <${u.id}>`, userOpts(u)]);
+  }
+
+  async function createExtension(input, by) {
     const num = String(input.number || "").trim();
     checkExtNumber(num);
-    const name = String(input.name || "").replace(/["<>]/g, "").trim().slice(0, 40) || `Poste ${num}`;
     const exists = await db.query("SELECT 1 FROM ps_endpoints WHERE id = $1", [num]);
     if (exists.rowCount) throw new UserError(`Le poste ${num} existe déjà.`, "number");
+    // Compatibilité : « name » seul (ancienne API) → prénom
+    const data = { ...input };
+    if (data.first_name === undefined && data.last_name === undefined) data.first_name = input.name || `Poste ${num}`;
+    const u = validateUser(data, defaultUser(num), await validationContext(num));
     const password = genPassword();
+    const authId = genAuthId();
     await db.tx(async (c) => {
-      await c.query("INSERT INTO ps_auths (id, auth_type, username, password) VALUES ($1, 'userpass', $1, $2)", [num, password]);
+      await c.query("INSERT INTO ps_auths (id, auth_type, username, password) VALUES ($1, 'userpass', $2, $3)", [num, authId, password]);
       await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency) VALUES ($1, 3, 'yes', 60)", [num]);
       await c.query(
         `INSERT INTO ps_endpoints (id, aors, auth, context, disallow, allow, callerid, direct_media, rtp_symmetric,
-           force_rport, rewrite_contact, dtmf_mode, language)
-         VALUES ($1, $1, $1, 'from-internal', 'all', 'g722,alaw,ulaw', $2, 'no', 'yes', 'yes', 'yes', 'rfc4733', $3)`,
-        [num, `"${name}" <${num}>`, language()],
+           force_rport, rewrite_contact, dtmf_mode, language, mailboxes)
+         VALUES ($1, $1, $1, 'from-internal', 'all', 'g722,alaw,ulaw', '', 'no', 'yes', 'yes', 'yes', 'rfc4733', $2, $3)`,
+        [num, language(), `${num}@default`],
       );
-      await c.query("INSERT INTO pbxmaison_extensions (id, name) VALUES ($1, $2)", [num, name]);
+      await c.query("INSERT INTO pbxmaison_extensions (id, name) VALUES ($1, $2)", [num, displayName(u)]);
+      await saveUser(c, u, by);
     });
-    return { id: num, name, password };
+    await applyDialplan();
+    return { id: num, name: displayName(u), auth_id: authId, password };
+  }
+
+  async function getUser(num) {
+    checkExtNumber(num);
+    await adoptOrphans();
+    const r = await db.query("SELECT * FROM pbxmaison_extensions WHERE id = $1", [num]);
+    if (!r.rowCount) throw Object.assign(new UserError("Utilisateur introuvable."), { status: 404 });
+    const u = fromRow(r.rows[0]);
+    const reg = (await registrations()).get(num) || [];
+    return { ...u, name: displayName(u), registered: reg.length > 0, contacts: reg, forwards: forwardSummary(u),
+      updated_at: r.rows[0].updated_at, updated_by: r.rows[0].updated_by };
+  }
+
+  async function updateUser(num, input, by) {
+    const current = await getUser(num);
+    const u = validateUser(input, current, await validationContext(num));
+    await db.tx((c) => saveUser(c, u, by));
+    await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id = $1", [num, u.voicemail.enabled ? `${num}@default` : null]);
+    await applyDialplan();
+    return getUser(num);
   }
 
   async function extensionSecret(num) {
     checkExtNumber(num);
-    const r = await db.query("SELECT password FROM ps_auths WHERE id = $1", [num]);
+    const r = await db.query("SELECT username, password FROM ps_auths WHERE id = $1", [num]);
     if (!r.rowCount) throw Object.assign(new UserError("Poste introuvable."), { status: 404 });
-    return { id: num, password: r.rows[0].password };
+    return { id: num, auth_id: r.rows[0].username, password: r.rows[0].password };
+  }
+
+  async function resetSecret(num) {
+    checkExtNumber(num);
+    const password = genPassword();
+    const r = await db.query("UPDATE ps_auths SET password = $2 WHERE id = $1", [num, password]);
+    if (!r.rowCount) throw Object.assign(new UserError("Poste introuvable."), { status: 404 });
+    return extensionSecret(num);
   }
 
   async function deleteExtension(num) {
     checkExtNumber(num);
+    const users = await loadUsers();
+    const refs = users.filter((u) => u.id !== num && Object.values(u.forwarding).some((d) => d?.type === "extension" && d.target === num));
+    if (refs.length) throw new UserError(`Impossible : ${refs.map((u) => `${u.id} (${displayName(u)})`).join(", ")} renvoie vers ce poste. Modifie d'abord ces renvois.`);
     await db.tx(async (c) => {
       for (const t of ["ps_endpoints", "ps_aors", "ps_auths"]) {
         await c.query(`DELETE FROM ${t} WHERE id = $1`, [num]);
@@ -238,6 +315,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     });
     const routes = await getRoutes();
     if (routes.inbound.includes(num)) await setRoutes({ ...routes, inbound: routes.inbound.filter((x) => x !== num) });
+    else await applyDialplan();
   }
 
   // ------------------------------------------------------------------ Routes
@@ -253,27 +331,47 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       if (r.rowCount !== inbound.length) throw new UserError("Un des postes choisis n'existe pas.", "inbound");
     }
     const trunk = String(input.outbound_trunk || "");
-    let cid = "", fmt = "national";
     if (trunk) {
-      const r = await db.query("SELECT outbound_cid, dial_format FROM pbxmaison_trunks WHERE id = $1", [trunk]);
+      const r = await db.query("SELECT 1 FROM pbxmaison_trunks WHERE id = $1", [trunk]);
       if (!r.rowCount) throw new UserError("Trunk introuvable.", "outbound_trunk");
-      cid = r.rows[0].outbound_cid; fmt = r.rows[0].dial_format;
     }
     const value = { inbound, outbound_trunk: trunk };
     await db.setSetting("routes", value);
-    const conf = [
+    await applyDialplan();
+    return value;
+  }
+
+  function writeAtomic(file, text) {
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, text, { mode: 0o640 });
+    fs.renameSync(tmp, file);
+  }
+
+  /** Réécrit les fichiers lus par Asterisk (routes, utilisateurs, messagerie) puis recharge. */
+  async function applyDialplan() {
+    const routes = await getRoutes();
+    const users = await loadUsers();
+    let cid = "", fmt = "national", cidFmt = "national";
+    if (routes.outbound_trunk) {
+      const r = await db.query("SELECT outbound_cid, dial_format, cid_format FROM pbxmaison_trunks WHERE id = $1", [routes.outbound_trunk]);
+      if (r.rowCount) ({ outbound_cid: cid, dial_format: fmt, cid_format: cidFmt } = r.rows[0]);
+    }
+    const byId = new Map(users.map((u) => [u.id, u]));
+    const ringing = routes.inbound.filter((n) => byId.has(n) ? ringsForGroups(byId.get(n)) : true);
+    writeAtomic(routesFile, [
       `; Routes — écrit par la console web (${new Date().toISOString()}). Ne pas modifier à la main.`,
-      `INBOUND_TARGET = ${inbound.map((n) => `PJSIP/${n}`).join("&")}`,
-      `OUTBOUND_TRUNK = ${trunk}`,
+      `INBOUND_TARGET = ${ringing.map((n) => `PJSIP/${n}`).join("&")}`,
+      `OUTBOUND_TRUNK = ${routes.outbound_trunk}`,
       `OUTBOUND_CID = ${cid}`,
       `OUTBOUND_FORMAT = ${fmt}`,
+      `OUTBOUND_CID_FORMAT = ${cidFmt}`,
       "",
-    ].join("\n");
-    const tmp = `${routesFile}.tmp`;
-    fs.writeFileSync(tmp, conf, { mode: 0o640 });
-    fs.renameSync(tmp, routesFile);
+    ].join("\n"));
+    const dir = path.dirname(routesFile);
+    writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
+    writeAtomic(path.join(dir, "voicemail_users.conf"), buildVoicemail(users));
     try { await ami.command("dialplan reload"); } catch { /* rechargé au démarrage d'Asterisk */ }
-    return value;
+    try { await ami.command("module reload app_voicemail.so"); } catch { /* idem */ }
   }
 
   // ------------------------------------------------------------------ Appels en cours
@@ -318,7 +416,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
 
   return {
     templates, listTrunks, createTrunk, deleteTrunk,
-    listExtensions, createExtension, extensionSecret, deleteExtension, nextFreeExtension,
+    listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
+    getUser, updateUser, applyDialplan,
     getRoutes, setRoutes, listCalls, registrationStatus,
   };
 }

@@ -36,6 +36,19 @@ export function createDb(cfg) {
         name text NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now()
       );
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS first_name text NOT NULL DEFAULT '';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS last_name text NOT NULL DEFAULT '';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS email text NOT NULL DEFAULT '';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS mobile text NOT NULL DEFAULT '';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS outbound_cid text NOT NULL DEFAULT '';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS dids text[] NOT NULL DEFAULT '{}';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'available';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS forwarding jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS options jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS voicemail jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS phone jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+      ALTER TABLE pbxmaison_extensions ADD COLUMN IF NOT EXISTS updated_by text NOT NULL DEFAULT '';
     `);
   }
 

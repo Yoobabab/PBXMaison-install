@@ -4,6 +4,7 @@
 #  La console tourne sans droits root ; seules les actions ci-dessous lui sont permises.
 #
 #    pbx-configure apply <fichier>   applique un pbx-config.json déposé dans l'assistant
+#    pbx-configure render            réécrit /etc/asterisk depuis les modèles (mise à jour)
 #    pbx-configure nginx             réécrit la config web (après obtention du certificat)
 #
 #  Sortie : une ligne JSON par étape {"step":…, "status":"ok|warn|error|run", "message":…}
@@ -96,6 +97,17 @@ EOF
   if systemctl is-active --quiet nginx; then systemctl reload nginx; else systemctl enable --now nginx >/dev/null 2>&1; fi
 }
 
+# Écrit /etc/asterisk à partir des modèles (variables de pbx.env, secrets.env, install.state)
+render_asterisk() {
+  install -d -o asterisk -g asterisk -m 0750 /etc/asterisk /etc/asterisk/keys
+  node "$APP/pbx/lib/render-asterisk.mjs" "$APP/pbx/asterisk" /etc/asterisk
+  local ind=us
+  case "$PBX_COUNTRY" in FR|MC|LU) ind=fr ;; BE) ind=be ;; CH) ind=ch ;; esac
+  sed "s/^country=.*/country=${ind}/" /usr/share/asterisk/indications.conf.sample > /etc/asterisk/indications.conf
+  cp /usr/share/asterisk/musiconhold.conf.sample /etc/asterisk/musiconhold.conf
+  chown -R asterisk:asterisk /etc/asterisk
+}
+
 cmd_apply() {
   local src="${1:-}"
   [[ -n "$src" ]] || fail verification "Fichier manquant."
@@ -120,13 +132,7 @@ cmd_apply() {
 
   # 2. Configuration d'Asterisk
   json asterisk run "Configuration du moteur téléphonique…"
-  install -d -o asterisk -g asterisk -m 0750 /etc/asterisk /etc/asterisk/keys
-  node "$APP/pbx/lib/render-asterisk.mjs" "$APP/pbx/asterisk" /etc/asterisk
-  local ind=us
-  case "$PBX_COUNTRY" in FR|MC|LU) ind=fr ;; BE) ind=be ;; CH) ind=ch ;; esac
-  sed "s/^country=.*/country=${ind}/" /usr/share/asterisk/indications.conf.sample > /etc/asterisk/indications.conf
-  cp /usr/share/asterisk/musiconhold.conf.sample /etc/asterisk/musiconhold.conf
-  chown -R asterisk:asterisk /etc/asterisk
+  render_asterisk
   json asterisk ok "Configuration écrite (IP publique ${PUBLIC_IP}, langue ${PBX_LANGUAGE})"
 
   # 3. Fuseau horaire
@@ -205,7 +211,9 @@ EOF
 
 case "${1:-}" in
   apply) shift; cmd_apply "$@" ;;
+  render) [[ -f "$ETC/pbx.env" ]] || { echo "PBX pas encore configuré" >&2; exit 1; }
+          set -a; . "$ETC/pbx.env"; set +a; render_asterisk ;;
   nginx) set -a; . "$ETC/pbx.env" 2>/dev/null || true; set +a
          if [[ -n "${PBX_FQDN:-}" && -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]]; then nginx_write "$PBX_FQDN" 1; else nginx_write "" 0; fi ;;
-  *) echo "Usage : pbx-configure apply <fichier> | nginx" >&2; exit 2 ;;
+  *) echo "Usage : pbx-configure apply <fichier> | render | nginx" >&2; exit 2 ;;
 esac
