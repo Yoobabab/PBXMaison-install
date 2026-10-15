@@ -54,9 +54,45 @@ document.addEventListener("click", (e) => {
 });
 const formError = (form, err) => {
   form.querySelectorAll(".has-err").forEach((x) => x.classList.remove("has-err"));
-  const box = form.querySelector(".form-msg"); if (box) box.innerHTML = `<div class="flash bad">${esc(err.message)}</div>`;
-  const f = err.field && form.querySelector(`[name="${err.field}"]`); if (f) { f.closest("label")?.classList.add("has-err"); f.focus(); }
+  const msg = `<div class="flash bad">${esc(err?.message || "Erreur inattendue : recharge la page et réessaie.")}</div>`;
+  const near = form.querySelector(".form-near"); if (near) near.innerHTML = msg;
+  const box = form.querySelector(".form-msg"); if (box && !near) box.innerHTML = msg;
+  const f = err?.field && form.querySelector(`[name="${err.field}"]`);
+  if (f) { f.closest("label")?.classList.add("has-err"); f.focus(); } else (near || box)?.scrollIntoView({ block: "center" });
 };
+/** Formulaire : envoi par Entrée ou par le bouton, bouton bloqué pendant l'envoi, toute erreur affichée. */
+function bindForm(form, handler) {
+  const btn = form.querySelector("button.btn:not(.link):not(.ghost)");
+  const run = async (e) => {
+    e?.preventDefault?.();
+    if (btn?.disabled) return;
+    const label = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = "Patiente…"; }
+    form.querySelectorAll(".form-msg, .form-near").forEach((x) => (x.innerHTML = ""));
+    try { await handler(Object.fromEntries(new FormData(form)), form); }
+    catch (err) { console.error(err); formError(form, err); }
+    finally { if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = label; } }
+  };
+  form.addEventListener("submit", run);
+  if (btn) { btn.type = "button"; btn.addEventListener("click", run); }
+}
+// Œil pour afficher / masquer les mots de passe
+const EYE = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 3l18 18" stroke="currentColor" stroke-width="2"/></svg>';
+function addPasswordEyes(root = document) {
+  for (const input of root.querySelectorAll('input[type="password"]:not([data-eye])')) {
+    input.dataset.eye = "1";
+    const wrap = document.createElement("span"); wrap.className = "pw-wrap";
+    input.replaceWith(wrap);
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "pw-eye"; b.innerHTML = EYE; b.title = b.ariaLabel = "Afficher le mot de passe";
+    b.addEventListener("click", (e) => { e.preventDefault(); const show = input.type === "password"; input.type = show ? "text" : "password";
+      b.innerHTML = show ? EYE_OFF : EYE; b.title = b.ariaLabel = show ? "Masquer le mot de passe" : "Afficher le mot de passe"; input.focus(); });
+    wrap.append(input, b);
+  }
+}
+new MutationObserver(() => addPasswordEyes()).observe(document.body, { childList: true, subtree: true });
+window.addEventListener("unhandledrejection", (e) => console.error("Callikoe :", e.reason));
 const recoveryBox = (codes) => `<div class="warnbox"><strong>Codes de secours</strong> : à garder en lieu sûr (Psono). Chacun remplace une fois le code du téléphone.
   <pre class="code">${esc(codes.join("\n"))}</pre><button class="copy" data-copy="${esc(codes.join("\n"))}">Copier les codes</button></div>`;
 const totpBlock = (t) => `<div class="totp"><div class="totp-qr">${t.qr}</div><div class="totp-steps"><ol>
@@ -72,25 +108,25 @@ async function renderSetup() {
   catch (e) { app.innerHTML = `<div class="wizard"><h1>Console du serveur</h1><div class="flash bad">${esc(e.message)}</div>
     <p class="hint">Ouvre l'adresse complète affichée à la fin de l'installation (avec « ?jeton=… »).</p></div>`; return; }
   app.innerHTML = `<div class="wizard"><h1>Bienvenue sur ${esc(state.server.name)}</h1>
-    <p class="sub">Crée le compte <strong>super administrateur</strong> du serveur (<strong>${esc(t.email)}</strong>). Il pourra ensuite inviter les autres comptes IRT.</p>
+    <p class="sub">Crée le compte <strong>super administrateur</strong> du serveur. Il pourra ensuite inviter les autres comptes IRT.</p>
     <div class="panel"><form id="sf" class="grid" novalidate><div class="form-msg full"></div>
-      <label>Ton nom<input name="name" maxlength="80" autocomplete="name"></label><span></span>
+      <label>Identifiant de connexion<input value="${esc(t.email)}" readonly autocomplete="username" name="login_email" style="background:var(--bg)">
+        <span class="hint">C'est avec cet e-mail que tu te connecteras (choisi dans le portail).</span></label>
+      <label>Ton nom<input name="name" maxlength="80" autocomplete="name"><span class="hint">Affiché dans la console et le journal ; ce n'est pas l'identifiant.</span></label>
       <label>Mot de passe<input type="password" name="password" autocomplete="new-password"><span class="hint">10 caractères minimum, lettres et chiffres.</span></label>
       <label>Confirmation<input type="password" name="confirm" autocomplete="new-password"></label>
       <div class="full">${totpBlock(t)}</div>
+      <div class="form-near full"></div>
       <div class="actions"><button class="btn">Créer le compte</button></div></form></div></div>`;
-  $("#sf").onsubmit = async (e) => {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    if (f.password !== f.confirm) return formError(e.target, { message: "Les deux mots de passe sont différents.", field: "confirm" });
-    try {
-      const r = await api("POST", "/api/setup/admin", f);
-      sessionStorage.removeItem("cxhub_setup");
-      await loadState();
-      $(".wizard .panel").innerHTML = `<div class="pad stack">${recoveryBox(r.recovery_codes)}<div class="actions"><a class="btn" href="#/">Ouvrir la console du serveur</a></div></div>`;
-      $(".wizard .panel a.btn").onclick = (ev) => { ev.preventDefault(); location.hash = "#/"; route(); };
-    } catch (err) { formError(e.target, err); }
-  };
+  bindForm($("#sf"), async (f) => {
+    if (f.password !== f.confirm) throw Object.assign(new Error("Les deux mots de passe sont différents."), { field: "confirm" });
+    if (!/^\d{6}$/.test(String(f.totp_code || "").trim())) throw Object.assign(new Error("Tape le code à 6 chiffres affiché par Psono."), { field: "totp_code" });
+    const r = await api("POST", "/api/setup/admin", { name: f.name, password: f.password, totp_code: String(f.totp_code).trim() });
+    sessionStorage.removeItem("cxhub_setup");
+    await loadState();
+    $(".wizard .panel").innerHTML = `<div class="pad stack"><div class="flash">Compte créé. Identifiant : <strong>${esc(t.email)}</strong></div>${recoveryBox(r.recovery_codes)}<div class="actions"><a class="btn" href="#/">Ouvrir la console du serveur</a></div></div>`;
+    $(".wizard .panel a.btn").onclick = (ev) => { ev.preventDefault(); location.hash = "#/"; route(); };
+  });
 }
 
 // ---------------------------------------------------------------- Connexion
@@ -102,19 +138,17 @@ function renderLogin(ticket = null) {
         <label>Code de double authentification<input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus placeholder="123456"></label>
         <button class="btn">Valider</button><button type="button" class="btn link" id="back">Recommencer</button>`
       : `<p class="hint" style="margin:0">Console du serveur multi-tenant : comptes IRT uniquement. Les clients se connectent à l'adresse de leur PBX.</p>
-        <label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
+        <label>E-mail (identifiant)<input type="email" name="email" autocomplete="username" required autofocus></label>
         <label>Mot de passe<input type="password" name="password" autocomplete="current-password" required></label>
         <button class="btn">Se connecter</button>`}</form></div></div>`;
   $("#back")?.addEventListener("click", () => renderLogin());
-  $("#login").onsubmit = async (e) => {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
+  bindForm($("#login"), async (f) => {
     try {
       if (ticket) { await api("POST", "/api/login/totp", { ticket, code: f.code }); await loadState(); route(); return; }
       const r = await api("POST", "/api/login", f);
       renderLogin(r.ticket);
     } catch (err) { flash = { cls: "bad", text: err.message }; renderLogin(ticket); }
-  };
+  });
 }
 
 async function renderInvite(token) {
@@ -122,22 +156,19 @@ async function renderInvite(token) {
   let inv;
   try { inv = await api("GET", `/api/invite/${token}`); } catch (e) { app.innerHTML = `<div class="wizard"><div class="flash bad">${esc(e.message)}</div></div>`; return; }
   app.innerHTML = `<div class="wizard"><h1>Bienvenue${inv.name ? " " + esc(inv.name) : ""}</h1>
-    <p class="sub">Compte <strong>${esc(inv.email)}</strong> · ${esc(inv.role)}. Choisis ton mot de passe et active la double authentification.</p>
+    <p class="sub">Identifiant de connexion : <strong>${esc(inv.email)}</strong> · ${esc(inv.role)}. Choisis ton mot de passe et active la double authentification.</p>
     <div class="panel"><form id="invf" class="grid" novalidate><div class="form-msg full"></div>
       <label>Mot de passe<input type="password" name="password" autocomplete="new-password"><span class="hint">10 caractères minimum, lettres et chiffres.</span></label>
       <label>Confirmation<input type="password" name="confirm" autocomplete="new-password"></label>
       <div class="full">${totpBlock(inv)}</div>
+      <div class="form-near full"></div>
       <div class="actions"><button class="btn">Activer mon compte</button></div></form></div></div>`;
-  $("#invf").onsubmit = async (e) => {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    if (f.password !== f.confirm) return formError(e.target, { message: "Les deux mots de passe sont différents.", field: "confirm" });
-    try {
-      const r = await api("POST", `/api/invite/${token}`, { password: f.password, totp_code: f.totp_code });
-      await loadState();
-      $(".wizard .panel").innerHTML = `<div class="pad stack">${recoveryBox(r.recovery_codes)}<div class="actions"><a class="btn" href="#/">Ouvrir la console du serveur</a></div></div>`;
-    } catch (err) { formError(e.target, err); }
-  };
+  bindForm($("#invf"), async (f) => {
+    if (f.password !== f.confirm) throw Object.assign(new Error("Les deux mots de passe sont différents."), { field: "confirm" });
+    const r = await api("POST", `/api/invite/${token}`, { password: f.password, totp_code: String(f.totp_code || "").trim() });
+    await loadState();
+    $(".wizard .panel").innerHTML = `<div class="pad stack">${recoveryBox(r.recovery_codes)}<div class="actions"><a class="btn" href="#/">Ouvrir la console du serveur</a></div></div>`;
+  });
 }
 
 // ---------------------------------------------------------------- PBX clients (vue globale, recherche)
