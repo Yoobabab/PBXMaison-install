@@ -32,6 +32,7 @@ const ICONS = {
   trunk: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="17" r="1"/>',
   lic: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
+  restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
 };
 const icon = (k, s = 18) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ""}</svg>`;
 const can = (...roles) => roles.includes(state.user?.role);
@@ -40,7 +41,7 @@ function setNav(active, label = "") {
   const on = !!state.user;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"]] : []),
+  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []),
     ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   $("#nav").innerHTML = on ? `<div class="ng">${items.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`).join("")}</div>` : "";
   $("#user").innerHTML = on ? `<div class="sf-user"><span class="sf-av">${esc(state.user.email.charAt(0).toUpperCase())}</span>
@@ -241,7 +242,7 @@ async function renderList() {
   };
   app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Tableau de bord</h1>
       <p class="sub" style="margin:0">Tous les PBX du serveur. « Ouvrir » ouvre la console d'un PBX sans te reconnecter.</p></div>
-      ${can("super", "admin") ? `<a class="btn" href="#/nouveau">+ Nouveau PBX</a>` : ""}</div>
+      ${can("super", "admin") ? `<a class="btn ghost" href="#/restaurer">Restaurer un PBX</a><a class="btn" href="#/nouveau">+ Nouveau PBX</a>` : ""}</div>
     ${!d.signing?.configured && can("super") ? `<div class="flash warn">Pour créer des PBX ici, installe d'abord la clé de signature des licences : <a href="#/cle">Clé de signature</a>.</div>` : ""}
     <div id="dash"></div>
     <div class="panel pad stack">
@@ -285,13 +286,13 @@ async function renderList() {
 // ---------------------------------------------------------------- Nouveau PBX (licence créée et signée ici)
 const toSlug = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").replace(/--+/g, "-").slice(0, 24).replace(/-+$/, "");
 function importPanel() {
-  return `<details class="panel" style="margin-top:20px" id="imp"><summary class="ph" style="cursor:pointer"><h2>Ou restaurer un PBX depuis une sauvegarde</h2><span class="hint">PBX installé seul, ou PBX supprimé de ce serveur</span></summary>
+  return `<div class="panel" id="imp">
       <form id="if" class="stack pad" novalidate><div class="form-msg"></div>
         <p class="hint" style="margin:0">Sauvegarde faite depuis la console du PBX (Administration › Sauvegardes) : fichier <code>pbxmaison-….tar.gz</code>. Utilisateurs, trunks, messages, comptes et licence reviennent tels quels.</p>
         <label>Fichier de sauvegarde<input type="file" name="file" accept=".gz,.tgz,application/gzip"></label>
         <label>Nom sur le serveur<input name="slug" maxlength="24" spellcheck="false" autocapitalize="off" placeholder="boulangerie-dupont"></label>
         <div class="form-near"></div>
-        <div class="actions"><button class="btn">Restaurer le PBX</button></div></form></details>`;
+        <div class="actions"><button class="btn">Restaurer le PBX</button></div></form></div>`;
 }
 function bindImport() {
   const imp = $("#if");
@@ -307,14 +308,21 @@ function bindImport() {
       : `<div class="actions"><a class="btn ghost" href="#/nouveau" onclick="setTimeout(()=>location.reload(),50)">Réessayer</a></div>`);
   });
 }
+function renderRestore() {
+  setNav("restore", "Restaurer un PBX");
+  app.innerHTML = `<h1>Restaurer un PBX</h1>
+    <p class="sub">Remet sur ce serveur un PBX à partir de sa sauvegarde : PBX installé seul sur un autre VPS, ou PBX supprimé de ce serveur.
+    Pour restaurer un PBX déjà présent, utilise plutôt le bouton « Sauvegardes » de sa carte.</p>
+    ${importPanel()}<div id="job"></div>`;
+  bindImport();
+}
 async function renderNew() {
   setNav("add", "Nouveau PBX");
   let o; try { o = await api("GET", "/api/pbx/options"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
   if (!o.signing.configured) {
     app.innerHTML = `<h1>Nouveau PBX</h1><div class="panel pad stack"><div class="flash warn" style="margin:0">La clé de signature des licences n'est pas encore installée sur ce serveur.</div>
       ${can("super") ? `<p>Installe-la une fois (fichier <code>pbx-cle-privee.pem</code> rangé dans Psono) : <a class="btn sm" href="#/cle">Clé de signature</a></p>` : `<p>Demande au super administrateur de l'installer.</p>`}</div>
-      ${importPanel()}<div id="job"></div>`;
-    bindImport();
+      <div id="job"></div>`;
     return;
   }
   const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
@@ -346,9 +354,8 @@ async function renderNew() {
       </fieldset>
       <div class="form-near full"></div>
       <div class="actions"><a class="btn ghost" href="#/">Annuler</a><button class="btn">Créer le PBX</button></div></form></div>
-    ${importPanel()}
     <div id="job"></div>`;
-  bindImport();
+
   const form = $("#nf");
   for (const k of ["label", "slug"]) form[k].addEventListener("keydown", () => { form[k].dataset.touched = "1"; });
   const auto = () => {
@@ -483,6 +490,7 @@ function route() {
   if (state.setup_needed) return renderSetup();
   if (!state.user) return renderLogin();
   if (h === "#/nouveau" && can("super", "admin")) return renderNew();
+  if (h === "#/restaurer" && can("super", "admin")) return renderRestore();
   if (h === "#/comptes" && can("super")) return renderAccounts();
   if (h === "#/cle" && can("super")) return renderSigning();
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
