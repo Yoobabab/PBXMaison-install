@@ -66,17 +66,33 @@ hjob() { # hjob <id> [silencieux] : attend la fin d'une tâche ; sortie dans le 
   echo "$j" > "$LAB/job-$1.json"
   [[ "$j" == *'"ok":true'* ]] || { [[ -n "${2:-}" ]] && return 1; echo "$j" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const l of JSON.parse(s).lines||[])console.log("   "+l)})' | cut -c1-200 >> "$OUT"; return 1; }
 }
+R="$(hapi POST /api/pbx/new '{"slug":"clia","name":"PBX A"}')"
+[[ "$R" == *"clé de signature"* ]] && pass "Création bloquée tant que la clé de signature n'est pas installée" || fail "création sans clé : $R"
+KEYJSON="$(node -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(process.argv[1],"utf8")))' test-key-private.pem)"
+R="$(hapi POST /api/signing "{\"pem\":$KEYJSON,\"code\":\"000000\"}")"
+[[ "$R" == *"incorrect"* ]] && pass "Clé de signature : code de double authentification exigé" || fail "clé sans code : $R"
+OTHER="$(node -e 'const c=require("crypto");process.stdout.write(JSON.stringify(c.generateKeyPairSync("ed25519").privateKey.export({type:"pkcs8",format:"pem"})))')"
+R="$(hapi POST /api/signing "{\"pem\":$OTHER,\"code\":\"$(otp "$HTOTP")\"}")"
+[[ "$R" == *"pas reconnue"* ]] && pass "Clé de signature étrangère refusée (pas celle d'IRT)" || fail "clé étrangère acceptée : $R"
+R="$(hapi POST /api/signing "{\"pem\":$KEYJSON,\"code\":\"$(otp "$HTOTP")\"}")"
+[[ "$R" == *'"configured":true'* ]] && pass "Clé de signature des licences installée sur la console du serveur" || fail "clé : $R"
+sudo -u cx-clia true 2>/dev/null; sudo test "$(sudo stat -c '%U %a' /var/lib/callikoe/hub/portal-key.pem)" == "callikoe-hub 600" && pass "Clé de signature lisible par la console du serveur seulement" || fail "droits de la clé : $(sudo stat -c '%U %a' /var/lib/callikoe/hub/portal-key.pem)"
+NEWPBX() { # NEWPBX <slug> <fqdn> <nom>
+  printf '{"slug":"%s","name":"%s","company":"%s SARL","phone":"04 12 34 56 78","domain":"custom","fqdn":"%s","country":"FR","timezone":"Europe/Paris","language":"fr","edition":"pro","simultaneous_calls":"8","duration_months":"12","admin_email":"contact@%s"}' "$1" "$3" "$3" "$2" "$2"
+}
 for c in a b; do
-  R="$(hapi POST /api/pbx "{\"slug\":\"cli$c\",\"config\":$(cat "cfg-$c.json")}")"
+  R="$(hapi POST /api/pbx/new "$(NEWPBX "cli$c" "$c.e2e.invalid" "PBX $c")")"
   JID="$(echo "$R" | jget id)"; [[ -n "$JID" ]] || fail "création cli$c : $R"
-  hjob "$JID" && pass "PBX cli$c créé depuis la console du serveur" || fail "création cli$c"
+  hjob "$JID" && pass "PBX cli$c créé depuis la console du serveur (formulaire, licence signée sur place)" || fail "création cli$c"
 done
-R="$(hapi POST /api/pbx "{\"slug\":\"clic\",\"config\":\"$(base64 -w0 cfg-a.json)\"}")"
-JID="$(echo "$R" | jget id)"; [[ -n "$JID" ]] && ! hjob "$JID" q && pass "Même adresse/licence qu'un autre PBX refusée (texte base64 du portail)" || fail "doublon accepté : $R"
-R="$(hapi POST /api/pbx '{"slug":"clix","config":{"version":1,"pbx":{"fqdn":"x.invalid"},"signature":"faux"}}')"
-JID="$(echo "$R" | jget id)"; [[ -n "$JID" ]] && ! hjob "$JID" q && pass "Configuration non signée par le portail refusée" || fail "config non signée : $R"
+R="$(hapi POST /api/pbx/new "$(NEWPBX clic a.e2e.invalid "PBX c")")"
+[[ "$R" == *"déjà utilisée"* ]] && pass "Adresse déjà utilisée par un autre PBX refusée" || fail "doublon accepté : $R"
+[[ "$(curl -sS -b "$HJAR" "$HUB/api/pbx/clia/config" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).pbx.fqdn)}catch{console.log("")}})')" == a.e2e.invalid ]] \
+  && pass "Fichier de configuration signé de cli a téléchargeable (réinstallation)" || fail "config clia"
 R="$(hapi GET /api/pbx)"
 [[ "$(echo "$R" | jget pbx.length)" == 2 ]] && pass "Console du serveur : 2 PBX listés" || fail "liste : $R"
+[[ "$(echo "$R" | jget totals.online)" == 2 && "$(echo "$R" | jget totals.max_calls)" == 16 ]] \
+  && pass "Tableau de bord : 2 PBX en ligne, 16 appels simultanés autorisés au total" || fail "tableau de bord : $(echo "$R" | jget totals | head -c 300)"
 L="$(sudo /opt/pbxmaison/pbx/bin/callikoe-host liste)"; echo "$L" | sed 's/^/   /' >> "$OUT"
 for c in a b; do
   sudo systemctl is-active --quiet "callikoe-asterisk@cli$c" && sudo systemctl is-active --quiet "callikoe-console@cli$c" \
@@ -369,6 +385,15 @@ reset; labx pa "channel originate PJSIP/0412345678@pbx extension s@wait" >/dev/n
 reset; labx pb "channel originate PJSIP/0412345678@pbx extension s@wait" >/dev/null; sleep 8
 [[ "$(glob op LASTOUT)" == "0465001550:0412345678" ]] && pass "Sortant de cli b → opérateur, compte de cli b" || { echo "LASTOUT=$(glob op LASTOUT)" >> "$OUT"; fail "sortant B"; }
 astx clia "pjsip show endpoints" | grep -qE "Endpoint:\s+op" && ! astx clia "pjsip show endpoints" | grep -q "acctb" && pass "Le PBX de cli a ne voit que son trunk" || fail "endpoints A"
+
+# 6b. Désactivation d'un PBX depuis la console du serveur, puis réactivation
+JID="$(hapi POST /api/pbx/clib/suspendre | jget id)"; [[ -n "$JID" ]] && hjob "$JID" || fail "désactivation clib"
+! sudo systemctl is-active --quiet callikoe-asterisk@clib && sleep 9 && [[ "$(hapi GET /api/pbx | jget totals.suspended)" == 1 ]] \
+  && pass "cli b désactivé depuis la console du serveur (moteur arrêté, compté « désactivé »)" || fail "clib toujours actif"
+reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null 2>&1 || true; sleep 6
+[[ "$(glob pb RANG)" == none ]] && pass "PBX désactivé : plus aucun appel ne lui parvient" || fail "appel arrivé sur un PBX désactivé"
+JID="$(hapi POST /api/pbx/clib/reactiver | jget id)"; [[ -n "$JID" ]] && hjob "$JID" || fail "réactivation clib"
+waitfor 30 sudo systemctl is-active --quiet callikoe-asterisk@clib && waitfor 60 regd pb && pass "cli b réactivé : moteur actif, poste de nouveau enregistré" || fail "réactivation clib"
 
 # 7. Sauvegarde du serveur entier → suppression de cli b → restauration (commande PuTTY)
 sudo /opt/pbxmaison/pbx/bin/callikoe-host sauvegarder > bk.out 2>&1 || { tail -n 20 bk.out >> "$OUT"; fail "sauvegarder"; }

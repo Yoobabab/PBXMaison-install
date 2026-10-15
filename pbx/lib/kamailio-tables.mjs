@@ -47,7 +47,7 @@ export function buildTables(tenants, routes = {}, ips = {}) {
     map.set(k, { value, slug });
   };
   for (const t of [...tenants].sort((a, b) => a.n - b.n)) {
-    if (!/^[a-z0-9][a-z0-9-]{1,30}$/.test(t.slug) || !Number.isInteger(t.n) || t.n < 1 || t.n > 250) continue;
+    if (!/^[a-z0-9][a-z0-9-]{1,30}$/.test(t.slug) || !Number.isInteger(t.n) || t.n < 1 || t.n > 250 || t.suspended) continue;
     const be = backend(t);
     if (t.fqdn && HOST.test(t.fqdn)) claim(dom, t.fqdn, be, t.slug, "adresse");
     for (const a of t.aliases || []) if (HOST.test(a)) claim(dom, a, be, t.slug, "adresse");

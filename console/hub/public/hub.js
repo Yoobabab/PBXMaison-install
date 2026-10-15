@@ -27,6 +27,11 @@ const ICONS = {
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.8 2.7 2.5 3 5.2"/>',
   log: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7M9 7h3"/>',
   out: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  call: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
+  phone: '<rect x="6" y="3" width="12" height="18" rx="2"/><path d="M10 18h4"/>',
+  trunk: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="17" r="1"/>',
+  lic: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
 };
 const icon = (k, s = 18) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ""}</svg>`;
 const can = (...roles) => roles.includes(state.user?.role);
@@ -35,8 +40,8 @@ function setNav(active, label = "") {
   const on = !!state.user;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  const items = [["#/", "PBX clients", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"]] : []),
-    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"]] : []), ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
+  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"]] : []),
+    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   $("#nav").innerHTML = on ? `<div class="ng">${items.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`).join("")}</div>` : "";
   $("#user").innerHTML = on ? `<div class="sf-user"><span class="sf-av">${esc(state.user.email.charAt(0).toUpperCase())}</span>
     <span class="sf-mail" title="${esc(state.user.email)} · ${esc(state.user.role_label)}">${esc(state.user.email)}</span>
@@ -180,69 +185,169 @@ async function renderInvite(token) {
   });
 }
 
-// ---------------------------------------------------------------- PBX clients (vue globale, recherche)
-let pbxFilter = "";
+// ---------------------------------------------------------------- Tableau de bord + PBX clients (vue globale, recherche)
+let pbxFilter = "", pbxStatus = "", listTimer = null;
+const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const kpi = (ic, k, v, s, cls = "") => `<div class="kpi ${cls}"><span class="kpi-ic">${icon(ic, 20)}</span><div><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div></div>`;
+function pbxState(p) {
+  if (p.suspended) return ["off", "Désactivé"];
+  if (p.engine === "active") return ["ok", "En ligne"];
+  if (p.engine === "activating") return ["wait", "Démarre"];
+  return ["bad", "Hors ligne"];
+}
 async function renderList() {
-  setNav("pbx", "PBX clients");
+  setNav("pbx", "Tableau de bord");
+  clearInterval(listTimer);
   let d;
   try { d = await api("GET", "/api/pbx"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
-  const pill = (s, l) => `<span class="pill ${s === "active" ? "ok" : s === "activating" ? "wait" : "bad"}">${l} ${s === "active" ? "actif" : s === "activating" ? "démarre" : "arrêté"}</span>`;
+  const t = d.totals || {};
+  const dash = () => `<div class="kpis">
+      ${kpi("pbx", "PBX", `${t.online ?? 0} <small>/ ${t.pbx ?? 0} en ligne</small>`, `${t.offline ? `<span style="color:var(--bad)">${t.offline} hors ligne</span>` : "0 hors ligne"} · ${t.suspended || 0} désactivé${t.suspended > 1 ? "s" : ""}`, t.offline ? "warn" : "good")}
+      ${kpi("call", "Appels en cours", `${t.calls ?? 0} <small>/ ${t.max_calls ?? 0}</small>`, "appels simultanés autorisés (total des licences)")}
+      ${kpi("phone", "Postes connectés", `${t.phones_online ?? 0} <small>/ ${t.phones ?? 0}</small>`, "téléphones et softphones enregistrés")}
+      ${kpi("trunk", "Trunks", `${t.trunks_ok ?? 0} <small>/ ${t.trunks ?? 0}</small>`, "enregistrés chez l'opérateur", t.trunks && t.trunks_ok < t.trunks ? "warn" : "good")}
+      ${kpi("lic", "Licences", `${t.expiring || 0}`, "expirent dans moins de 30 jours", t.expiring ? "warn" : "good")}
+    </div>`;
+  const card = (p) => {
+    const [cls, label] = pbxState(p);
+    const exp = p.expires_at ? Date.parse(p.expires_at) - Date.now() : null;
+    return `<div class="pbx-card${p.suspended ? " off" : ""}">
+      <div class="row" style="justify-content:space-between;margin:0"><strong>${esc(p.name)}</strong><span class="pill ${cls}">${label}</span></div>
+      <span class="mono">${esc(p.fqdn)}</span>
+      <span class="hint">${esc(p.company || p.slug)}${p.edition ? ` · ${esc(p.edition)}` : ""}</span>
+      <div class="pbx-stats">
+        <span title="Appels en cours / appels simultanés">${icon("call", 15)} ${p.calls || 0}/${p.max_calls || "—"}</span>
+        <span title="Postes connectés / postes">${icon("phone", 15)} ${p.phones_online || 0}/${p.phones || 0}</span>
+        <span title="Trunks enregistrés / trunks" class="${p.trunks && p.trunks_ok < p.trunks ? "warn" : ""}">${icon("trunk", 15)} ${p.trunks_ok || 0}/${p.trunks || 0}</span>
+        <span title="Fin de licence" class="${exp !== null && exp < 30 * 86400000 ? "warn" : ""}">${icon("lic", 15)} ${fmtDay(p.expires_at)}</span>
+      </div>
+      <div class="row" style="margin-top:6px">
+        ${p.suspended ? "" : `<a class="btn sm" href="/ouvrir/${encodeURIComponent(p.slug)}">Ouvrir</a>`}
+        ${can("super", "admin") ? (p.suspended ? `<button class="btn ghost sm" data-react="${esc(p.slug)}">Réactiver</button>`
+          : `<button class="btn ghost sm" data-susp="${esc(p.slug)}">Désactiver</button>`) : ""}
+        ${can("super", "admin") ? `<a class="btn ghost sm" href="/api/pbx/${encodeURIComponent(p.slug)}/config" title="Fichier pbx-config.json signé (réinstallation)">⬇ Config</a>` : ""}
+      </div></div>`;
+  };
   const draw = () => {
     const q = pbxFilter.trim().toLowerCase();
-    const list = d.pbx.filter((p) => !q || [p.name, p.slug, p.fqdn].join(" ").toLowerCase().includes(q));
-    $("#cards").innerHTML = list.length ? list.map((p) => `<a class="pbx-card" href="/ouvrir/${encodeURIComponent(p.slug)}" title="Ouvrir la console de ce PBX">
-        <strong>${esc(p.name)}</strong><span class="mono">${esc(p.fqdn)}</span><span class="hint">${esc(p.slug)} · n°${p.n}</span>
-        <span class="row">${pill(p.engine, "Moteur")}${pill(p.console, "Console")}</span></a>`).join("")
+    const list = d.pbx.filter((p) => (!q || [p.name, p.slug, p.fqdn, p.company, p.license].join(" ").toLowerCase().includes(q))
+      && (!pbxStatus || pbxState(p)[0] === pbxStatus));
+    $("#dash").innerHTML = dash();
+    $("#cards").innerHTML = list.length ? list.map(card).join("")
       : `<div class="empty" style="grid-column:1/-1">${d.pbx.length ? "Aucun PBX ne correspond à la recherche." : `Aucun PBX sur ce serveur pour l'instant.${can("super", "admin") ? ` <a href="#/nouveau">Créer le premier PBX</a>` : ""}`}</div>`;
     $("#count").textContent = `${list.length} sur ${d.pbx.length} PBX (${d.max} au maximum)`;
   };
-  app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>PBX clients</h1>
-      <p class="sub" style="margin:0">Clique sur un PBX pour ouvrir sa console, sans te reconnecter.</p></div>
+  app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Tableau de bord</h1>
+      <p class="sub" style="margin:0">Tous les PBX du serveur. « Ouvrir » ouvre la console d'un PBX sans te reconnecter.</p></div>
       ${can("super", "admin") ? `<a class="btn" href="#/nouveau">+ Nouveau PBX</a>` : ""}</div>
-    <div class="panel pad stack"><label>Rechercher<input id="q" type="search" placeholder="Nom, adresse, identifiant…" value="${esc(pbxFilter)}" autocomplete="off"></label>
+    ${!d.signing?.configured && can("super") ? `<div class="flash warn">Pour créer des PBX ici, installe d'abord la clé de signature des licences : <a href="#/cle">Clé de signature</a>.</div>` : ""}
+    <div id="dash"></div>
+    <div class="panel pad stack">
+      <div class="row" style="gap:12px;align-items:flex-end">
+        <label style="flex:1;min-width:220px">Rechercher<input id="q" type="search" placeholder="Nom, entreprise, adresse, licence…" value="${esc(pbxFilter)}" autocomplete="off"></label>
+        <label>État<select id="st"><option value="">Tous</option><option value="ok">En ligne</option><option value="bad">Hors ligne</option><option value="off">Désactivés</option></select></label>
+      </div>
       <div class="hint" id="count"></div><div class="pbx-grid" id="cards"></div></div>`;
+  $("#st").value = pbxStatus;
   $("#q").oninput = (e) => { pbxFilter = e.target.value; draw(); };
+  $("#st").onchange = (e) => { pbxStatus = e.target.value; draw(); };
+  app.onclick = async (e) => {
+    const s = e.target.closest("[data-susp]"), r = e.target.closest("[data-react]");
+    if (!s && !r) return;
+    const slug = (s || r).dataset.susp || (s || r).dataset.react;
+    if (s && !confirm(`Désactiver le PBX « ${slug} » ? Ses téléphones et ses appels s'arrêtent ; ses données sont gardées.`)) return;
+    try { const j = await api("POST", `/api/pbx/${encodeURIComponent(slug)}/${s ? "suspendre" : "reactiver"}`); app.innerHTML = `<div id="job"></div>`;
+      followJob(j.id, () => `<div class="actions"><a class="btn" href="#/" onclick="setTimeout(()=>location.reload(),50)">Retour au tableau de bord</a></div>`); }
+    catch (err) { flash = { cls: "bad", text: err.message }; renderList(); }
+  };
   draw();
+  // Mise à jour toutes les 15 s tant que la page est affichée
+  listTimer = setInterval(async () => {
+    if (location.hash && location.hash !== "#/") return clearInterval(listTimer);
+    try { d = await api("GET", "/api/pbx"); Object.assign(t, d.totals); draw(); } catch { /* prochain essai */ }
+  }, 15000);
 }
 
-// ---------------------------------------------------------------- Nouveau PBX
+// ---------------------------------------------------------------- Nouveau PBX (licence créée et signée ici)
 const toSlug = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").replace(/--+/g, "-").slice(0, 24).replace(/-+$/, "");
-function renderNew() {
+async function renderNew() {
   setNav("add", "Nouveau PBX");
+  let o; try { o = await api("GET", "/api/pbx/options"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+  if (!o.signing.configured) {
+    app.innerHTML = `<h1>Nouveau PBX</h1><div class="panel pad stack"><div class="flash warn" style="margin:0">La clé de signature des licences n'est pas encore installée sur ce serveur.</div>
+      ${can("super") ? `<p>Installe-la une fois (fichier <code>pbx-cle-privee.pem</code> rangé dans Psono) : <a class="btn sm" href="#/cle">Clé de signature</a></p>` : `<p>Demande au super administrateur de l'installer.</p>`}</div>`;
+    return;
+  }
+  const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
   app.innerHTML = `<h1>Nouveau PBX</h1>
-    <p class="sub">Crée d'abord le PBX dans le portail (licence, adresse), puis dépose ici son <strong>pbx-config.json</strong> ou colle le texte copié depuis le portail.</p>
-    <div class="panel"><form id="nf" class="stack pad" novalidate><div class="form-msg"></div>
-      <div class="drop" id="drop">Dépose <strong>pbx-config.json</strong> ici, ou <label style="display:inline;color:var(--accent);cursor:pointer">choisis le fichier<input type="file" accept=".json" id="file" hidden></label></div>
-      <label>Ou colle le texte du portail<textarea name="config" rows="4" spellcheck="false" placeholder="eyJ2ZXJzaW9uIjox… ou { &quot;version&quot;: 1, … }"></textarea></label>
-      <div id="summary"></div>
-      <label>Nom sur le serveur<input name="slug" maxlength="24" spellcheck="false" autocapitalize="off" placeholder="boulangerie-dupont"><span class="hint">Identifiant technique : minuscules, chiffres et tirets.</span></label>
-      <div class="actions"><button class="btn">Créer le PBX</button></div></form></div>
+    <p class="sub">La licence est créée et signée ici ; le PBX est prêt en environ une minute.</p>
+    <div class="panel"><form id="nf" class="grid" novalidate><div class="form-msg full"></div>
+      <fieldset><legend>Client</legend>
+        <label>Nom du PBX<input name="name" maxlength="80" placeholder="Standard Boulangerie Dupont" autofocus></label>
+        <label>Nom de l'entreprise<input name="company" maxlength="120" placeholder="Boulangerie Dupont SARL"></label>
+        <label>Numéro de téléphone<input name="phone" type="tel" placeholder="04 12 34 56 78"><span class="hint">Numéro principal de l'entreprise.</span></label>
+        <label>Adresse du PBX<div class="addr"><input name="label" placeholder="boulangerie-dupont" autocapitalize="off" spellcheck="false" maxlength="42">
+          <select name="domain">${o.domains.map((dm) => `<option value="${dm}">.${dm}</option>`).join("")}<option value="custom">Autre (FQDN personnalisé)</option></select></div>
+          <input name="fqdn" placeholder="pbx.domaine-du-client.fr" autocapitalize="off" spellcheck="false" hidden style="margin-top:8px">
+          <span class="hint" id="addrhint">L'adresse est créée automatiquement, avec son certificat HTTPS.</span></label>
+      </fieldset>
+      <fieldset><legend>Région</legend>
+        <label>Pays<select name="country">${opt(o.countries.map((c) => [c.code, `${c.name} (+${c.dial})`]), "FR")}</select></label>
+        <label>Fuseau horaire<select name="timezone">${opt(o.timezones.map((z) => [z, z]), "Europe/Paris")}</select></label>
+        <label>Langue<select name="language">${opt(Object.entries(o.languages), "fr")}</select></label>
+      </fieldset>
+      <fieldset><legend>Licence</legend>
+        <label>Édition<select name="edition">${opt(Object.entries(o.editions), "pro")}</select></label>
+        <label>Appels simultanés<select name="simultaneous_calls">${opt(o.sc.map((n) => [n, `${n} appels`]), 8)}</select></label>
+        <label>Durée<select name="duration_months">${opt(Object.entries(o.durations), 12)}</select></label>
+      </fieldset>
+      <fieldset><legend>Contact du client</legend>
+        <label>E-mail du client<input name="admin_email" type="email" placeholder="contact@entreprise.fr" autocapitalize="off"><span class="hint">Pour les alertes du PBX. Les comptes de connexion se créent ensuite dans la console du PBX.</span></label>
+        <label>Nom sur le serveur<input name="slug" maxlength="24" spellcheck="false" autocapitalize="off" placeholder="boulangerie-dupont"><span class="hint">Identifiant technique, rempli tout seul.</span></label>
+      </fieldset>
+      <div class="form-near full"></div>
+      <div class="actions"><a class="btn ghost" href="#/">Annuler</a><button class="btn">Créer le PBX</button></div></form></div>
     <div id="job"></div>`;
   const form = $("#nf");
-  const parse = (txt) => { const s = txt.trim(); try { return JSON.parse(s.startsWith("{") ? s : decodeURIComponent(escape(atob(s.replace(/\s+/g, ""))))); } catch { return null; } };
-  const show = () => {
-    const c = parse(form.config.value);
-    $("#summary").innerHTML = c?.pbx ? `<div class="note">PBX <strong>${esc(c.pbx.name)}</strong> · ${esc(c.pbx.company || "")} · <span class="mono">${esc(c.pbx.fqdn)}</span> · licence ${esc(c.license?.key || "")}</div>` : "";
-    if (c?.pbx && !form.slug.dataset.touched) form.slug.value = toSlug(/\.callikoe\.(fr|com)$/.test(c.pbx.fqdn) ? c.pbx.fqdn.split(".")[0] : c.pbx.company || c.pbx.name);
+  for (const k of ["label", "slug"]) form[k].addEventListener("keydown", () => { form[k].dataset.touched = "1"; });
+  const auto = () => {
+    const base = toSlug(form.company.value || form.name.value);
+    if (!form.label.dataset.touched) form.label.value = base.slice(0, 42);
+    if (!form.slug.dataset.touched) form.slug.value = (form.domain.value === "custom" ? base : toSlug(form.label.value)).slice(0, 24);
+    check();
   };
-  form.config.oninput = show;
-  form.slug.oninput = () => (form.slug.dataset.touched = "1");
-  const load = async (file) => { form.config.value = await file.text(); show(); };
-  $("#file").onchange = (e) => e.target.files[0] && load(e.target.files[0]);
-  const drop = $("#drop");
-  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("on"); };
-  drop.ondragleave = () => drop.classList.remove("on");
-  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("on"); e.dataTransfer.files[0] && load(e.dataTransfer.files[0]); };
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const btn = form.querySelector("button"); btn.disabled = true;
-    try {
-      const job = await api("POST", "/api/pbx", { slug: form.slug.value, config: form.config.value });
-      form.closest(".panel").hidden = true;
-      followJob(job.id, (j) => j.ok ? `<div class="actions"><a class="btn" href="/ouvrir/${encodeURIComponent(form.slug.value)}">Ouvrir la console du PBX</a><a class="btn ghost" href="#/">Tous les PBX</a></div>`
-        : `<div class="actions"><a class="btn ghost" href="#/nouveau" onclick="location.reload()">Réessayer</a></div>`);
-    } catch (err) { btn.disabled = false; formError(form, err); }
-  };
+  form.name.addEventListener("input", auto); form.company.addEventListener("input", auto);
+  form.label.addEventListener("input", () => { if (!form.slug.dataset.touched) form.slug.value = toSlug(form.label.value); check(); });
+  form.label.addEventListener("blur", () => { form.label.value = toSlug(form.label.value); });
+  form.country.addEventListener("change", () => { const c = o.countries.find((x) => x.code === form.country.value); if (c) form.timezone.value = c.tz; });
+  let timer = null, seq = 0;
+  function check() {
+    clearTimeout(timer);
+    const custom = form.domain.value === "custom";
+    form.fqdn.hidden = !custom; form.label.hidden = custom; form.label.disabled = custom;
+    const h = $("#addrhint");
+    const fqdn = custom ? form.fqdn.value.trim().toLowerCase() : (toSlug(form.label.value) ? `${toSlug(form.label.value)}.${form.domain.value}` : "");
+    if (!fqdn) { h.className = "hint"; h.textContent = custom ? "Le DNS de ce nom devra pointer vers l'IP du serveur." : "L'adresse est créée automatiquement, avec son certificat HTTPS."; return; }
+    h.className = "hint"; h.textContent = `${fqdn} : vérification…`;
+    const my = ++seq;
+    timer = setTimeout(async () => {
+      try {
+        const r = await api("GET", `/api/fqdn-check?fqdn=${encodeURIComponent(fqdn)}`);
+        if (my !== seq) return;
+        h.className = r.available ? "ok-text" : r.available === null ? "hint" : "err";
+        h.textContent = r.available ? (r.custom ? `✔ ${fqdn} : fais pointer son DNS vers l'IP du serveur` : `✔ ${fqdn} est disponible`) : `${r.available === null ? "⚠" : "✖"} ${r.reason || "déjà utilisée"}`;
+      } catch { /* ignoré */ }
+    }, 350);
+  }
+  form.domain.addEventListener("change", () => { auto(); });
+  form.fqdn.addEventListener("input", check);
+  bindForm(form, async (f) => {
+    f.domain = form.domain.value; f.label = toSlug(form.label.value);
+    const job = await api("POST", "/api/pbx/new", f);
+    form.closest(".panel").hidden = true;
+    followJob(job.id, (j) => j.ok ? `<div class="actions"><a class="btn" href="/ouvrir/${encodeURIComponent(f.slug)}">Ouvrir la console du PBX</a><a class="btn ghost" href="#/">Tableau de bord</a></div>`
+      : `<div class="actions"><a class="btn ghost" href="#/nouveau" onclick="setTimeout(()=>location.reload(),50)">Réessayer</a></div>`);
+  });
 }
 async function followJob(id, after) {
   const box = $("#job");
@@ -253,6 +358,29 @@ async function followJob(id, after) {
     if (!j.running) return;
     await new Promise((r) => setTimeout(r, 1500));
   }
+}
+
+// ---------------------------------------------------------------- Clé de signature des licences (super administrateur)
+async function renderSigning() {
+  setNav("key", "Clé de signature");
+  let s; try { s = await api("GET", "/api/signing"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+  app.innerHTML = takeFlash() + `<h1>Clé de signature des licences</h1>
+    <p class="sub">C'est elle qui signe la licence et la configuration de chaque PBX créé sur ce serveur. Les PBX n'acceptent que les fichiers signés par la clé d'IRT.</p>
+    <div class="panel pad stack">
+      ${s.configured ? `<div class="flash" style="margin:0">✔ Clé installée · empreinte <code>${esc(s.fingerprint)}</code></div>` : `<div class="flash warn" style="margin:0">Aucune clé installée : la création de PBX est bloquée.</div>`}
+      <form id="kf" class="stack" novalidate><div class="form-msg"></div>
+        <label>Fichier <code>pbx-cle-privee.pem</code> (rangé dans Psono)<input type="file" accept=".pem,.txt" id="kfile"></label>
+        <label>Ou colle son contenu<textarea name="pem" rows="5" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"></textarea></label>
+        <label>Code de double authentification<input name="code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></label>
+        <p class="hint" style="margin:0">La clé est gardée sur le serveur, lisible par la console du serveur seulement (pas par les PBX clients). Garde ta copie dans Psono.</p>
+        <div class="form-near"></div>
+        <div class="actions"><button class="btn">${s.configured ? "Remplacer la clé" : "Installer la clé"}</button></div></form></div>`;
+  const form = $("#kf");
+  $("#kfile").onchange = async (e) => { if (e.target.files[0]) form.pem.value = (await e.target.files[0].text()).trim(); };
+  bindForm(form, async (f) => {
+    const r = await api("POST", "/api/signing", { pem: f.pem, code: String(f.code || "").trim() });
+    flash = { text: `Clé installée (empreinte ${r.fingerprint}). Tu peux créer des PBX.` }; renderSigning();
+  });
 }
 
 // ---------------------------------------------------------------- Comptes du serveur
@@ -315,6 +443,7 @@ function route() {
   if (!state.user) return renderLogin();
   if (h === "#/nouveau" && can("super", "admin")) return renderNew();
   if (h === "#/comptes" && can("super")) return renderAccounts();
+  if (h === "#/cle" && can("super")) return renderSigning();
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
   return renderList();
 }
