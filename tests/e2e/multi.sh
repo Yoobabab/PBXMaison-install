@@ -384,7 +384,7 @@ sleep 15; waitfor 90 opreg acctb && reset && labx op "channel originate PJSIP/ac
   && pass "Entrant vers cli b après restauration" || { echo "RANG B=$(glob pb RANG)" >> "$OUT"; sudo cat /var/lib/callikoe/kamailio/db/tru >> "$OUT"; fail "entrant B après restauration"; }
 : > "$HJAR"
 T="$(hapi POST /api/login '{"email":"irt-admin@test.invalid","password":"MotDePasse2026"}' | jget ticket)"
-R="$(hapi POST /api/login/totp "{"ticket":"$T","code":"$(otp "$HTOTP")"}")"
+R="$(hapi POST /api/login/totp "{\"ticket\":\"$T\",\"code\":\"$(otp "$HTOTP")\"}")"
 [[ "$R" == *'"ok":true'* ]] && pass "Compte de la console du serveur retrouvé après restauration" || fail "login console du serveur après restauration : $R"
 LOC="$(curl -sS -b "$HJAR" -o /dev/null -w '%{redirect_url}' "$HUB/ouvrir/clib")"
 [[ "$(curl -sS -c "$LAB/jar-b2" -o /dev/null -w '%{http_code}' "http://127.0.0.1:9002/api/sso?t=${LOC#*t=}")" == 302 ]]   && [[ "$(curl -sS -b "$LAB/jar-b2" http://127.0.0.1:9002/api/extensions)" == *'"201"'* ]] && pass "cli b restauré ouvert depuis la console du serveur (poste 201 présent)" || fail "ouverture de clib après restauration"
