@@ -510,6 +510,8 @@ cmd_f2b() {
       local auto manual active=0
       systemctl is-active --quiet fail2ban && active=1
       auto="$(f2b_banned "$F2B_SIP_JAIL")"; manual="$(f2b_banned callikoe-manual)"
+      # Serveur multi-tenant : aussi les adresses bloquées pour appels/enregistrements vers des PBX inconnus
+      [[ -n "$TENANT" ]] && auto="$auto $(f2b_banned callikoe-sip-unknown)"
       F2B_ACTIVE="$active" F2B_AUTO="$auto" F2B_MANUAL="$manual" node -e '
         const sp = (s) => (s || "").trim().split(/\s+/).filter(Boolean);
         process.stdout.write(JSON.stringify({ ok: true, active: process.env.F2B_ACTIVE === "1", auto: sp(process.env.F2B_AUTO), manual: sp(process.env.F2B_MANUAL) }) + "\n");' ;;
