@@ -35,6 +35,8 @@ trap 'json erreur error "Erreur inattendue ligne $LINENO : $BASH_COMMAND (voir j
 [[ $EUID -eq 0 ]] || { echo "pbx-configure doit être lancé en root" >&2; exit 2; }
 set -a; . "$ETC/secrets.env"; . "$ETC/install.state"; set +a
 
+# Port de la console d'administration (HTTPS) : séparé du 443 public (softphone, appli, téléphones)
+ADMIN_PORT=8822
 nginx_write() {
   local fqdn="${1:-}" tls="${2:-0}"
   install -d /var/www/letsencrypt
@@ -44,6 +46,27 @@ nginx_write() {
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
 EOF
     if [[ "$tls" == 1 ]]; then
+      local ssl="    ssl_certificate /etc/letsencrypt/live/${fqdn}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${fqdn}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security \"max-age=31536000\" always;
+    server_tokens off;"
+      local proxy='        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;'
+      local ws='    location = /ws {
+        proxy_pass http://127.0.0.1:8088/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }'
       cat <<EOF
 server {
     listen 80 default_server;
@@ -58,29 +81,32 @@ server {
         proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto http;
     }
-    location / { return 301 https://${fqdn}\$request_uri; }
+    location ~ ^/(softphone|prov/|app/) { return 301 https://${fqdn}\$request_uri; }
+    location / { return 301 https://${fqdn}:${ADMIN_PORT}\$request_uri; }
 }
 server {
+    # 443 public : softphone web, appli mobile, provisionnement des téléphones. La console n'y est pas.
     # nginx 1.22 (Debian 12) et 1.24 (Ubuntu 24.04) : syntaxe « listen … http2 »
     listen 443 ssl http2 default_server;
     listen [::]:443 ssl http2 default_server;
     server_name ${fqdn};
-    server_tokens off;
-    ssl_certificate /etc/letsencrypt/live/${fqdn}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${fqdn}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    add_header Strict-Transport-Security "max-age=31536000" always;
+${ssl}
     client_max_body_size 2m;
-    # Softphone web : WebSocket SIP vers Asterisk (WebRTC)
-    location = /ws {
-        proxy_pass http://127.0.0.1:8088/ws;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+${ws}
+    location ~ ^/(softphone(\.js|\.css)?\$|style\.css\$|vendor/|phone/|prov/|app/|api/u/|api/health\$) {
+${proxy}
     }
+    location / { return 302 https://${fqdn}/softphone; }
+}
+server {
+    # Console d'administration : port dédié, à réserver aux adresses de l'installateur (pare-feu ou Sécurité › Accès console)
+    listen ${ADMIN_PORT} ssl http2;
+    listen [::]:${ADMIN_PORT} ssl http2;
+    server_name ${fqdn};
+${ssl}
+    client_max_body_size 2m;
+    error_page 497 https://\$host:${ADMIN_PORT}\$request_uri;
+${ws}
     location = /api/backups/upload {
         client_max_body_size 4g;
         proxy_request_buffering off;
@@ -91,13 +117,7 @@ server {
         proxy_set_header X-Forwarded-Proto https;
     }
     location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Forwarded-For \$remote_addr;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
+${proxy}
     }
 }
 EOF
@@ -247,7 +267,7 @@ external_signaling_address = ${PUBLIC_IP}
 EOF
       chown asterisk:asterisk /etc/asterisk/pjsip_tls.conf
       tls=1
-      json certificat ok "Certificat obtenu : https://${PBX_FQDN} et SIP TLS (5061)"
+      json certificat ok "Certificat obtenu : https://${PBX_FQDN}:${ADMIN_PORT} (console) et SIP TLS (5061)"
     else
       json certificat warn "Certificat refusé par Let's Encrypt : le port 80 doit être joignable depuis Internet. Relance l'assistant une fois corrigé."
     fi
@@ -470,7 +490,7 @@ cmd_firewall_check() {
     const opened = (proto, port) => fw === "none" ? null : fw === "ufw" ? new RegExp(`(^|\\s)${port}(:\\d+)?(/${proto})?\\s+ALLOW`, "m").test(rules) || new RegExp(`${port.split("-")[0]}:\\d+/${proto}`).test(rules)
       : new RegExp(`${proto} dport \\{?[^\\n]*\\b${port.split("-")[0]}\\b`).test(rules);
     const checks = [["SIP (UDP 5060)", "udp", "5060"], ["SIP (TCP 5060)", "tcp", "5060"], ["SIP chiffré TLS (TCP 5061)", "tcp", "5061"],
-      ["Audio RTP (UDP 10000-20000)", "udp", "10000-20000"], ["Console web HTTP (TCP 80)", "tcp", "80"], ["Console web et softphone HTTPS (TCP 443)", "tcp", "443"]];
+      ["Audio RTP (UDP 10000-20000)", "udp", "10000-20000"], ["Console web HTTP (TCP 80)", "tcp", "80"], ["Softphone, appli et téléphones HTTPS (TCP 443)", "tcp", "443"], ["Console d’administration HTTPS (TCP 8822)", "tcp", "8822"]];
     const out = checks.map(([label, proto, port]) => ({ label, proto, port, listening: port.includes("-") ? null : isListening(proto, port), open: opened(proto, port) }));
     process.stdout.write(JSON.stringify({ ok: true, firewall: fw, checks: out }) + "\n");'
 }
