@@ -289,4 +289,14 @@ sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 timeout 900 bash ../../
 sleep 3
 sudo /usr/sbin/asterisk -rx 'pjsip show endpoints' | grep -qE "Endpoint:\s+201(/|\s)" && pass "Mise à jour (relance de la commande) : configuration conservée" || fail "config perdue après mise à jour"
 sudo /usr/sbin/asterisk -rx 'dialplan show 201@users' | grep -q "user-external,0612345678" && pass "Mise à jour : renvois conservés" || fail "renvois perdus après mise à jour"
+
+# 6. Réinitialisation du serveur puis réinstallation sur serveur propre
+sudo bash ../../reset.sh > reset.out 2>&1 && fail "réinitialisation sans --confirmer acceptée" || true
+sudo bash ../../reset.sh --confirmer > reset.out 2>&1 || { tail -n 20 reset.out >> "$OUT"; fail "réinitialisation"; }
+[[ ! -d /opt/pbxmaison && ! -d /etc/pbxmaison && ! -d /var/lib/pbxmaison ]] && ! systemctl is-active --quiet asterisk \
+  && [[ -z "$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='asterisk'" 2>/dev/null)" ]] && pass "Réinitialisation : serveur nettoyé (fichiers, services, base)" || fail "réinitialisation incomplète"
+# shellcheck disable=SC2024
+sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 timeout 900 bash ../../install.sh > reinstall2.out 2>&1 || { tail -n 30 reinstall2.out >> "$OUT"; fail "installation après réinitialisation"; }
+sleep 3
+curl -sS http://127.0.0.1/api/state | grep -q '"configured":false' && sudo /usr/sbin/asterisk -rx 'core show version' | grep -q Asterisk && pass "Réinstallation sur serveur propre : assistant prêt" || fail "réinstallation après reset"
 echo "OK" >> "$OUT"
