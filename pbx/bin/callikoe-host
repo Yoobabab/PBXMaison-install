@@ -582,6 +582,7 @@ cmd_mettre_a_jour() {
 cmd_dns() {
   local slug
   while read -r slug; do [[ -n "$slug" ]] && "$CONF" --tenant "$slug" dns || true; done < <(reg_slugs)
+  aiguilleur   # adresses IP des opérateurs relues (elles peuvent changer)
 }
 
 # ----------------------------------------------------------------------------- Sauvegarde du serveur entier

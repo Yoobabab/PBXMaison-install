@@ -189,6 +189,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       // Appels entrants : reconnus par l'adresse de l'opérateur (et, en multi-tenant, par le jeton « line » du Contact)
       if (!tenant) await c.query("INSERT INTO ps_endpoint_id_ips (id, endpoint, match) VALUES ($1, $1, $2)",
         [name, proxy ? `${host},${proxy.host}` : host]);
+      // Multi-tenant : l'aiguilleur SIP désigne le trunk dans l'en-tête X-CX-Trunk (jeton secret, jamais accepté depuis Internet)
+      else await c.query("INSERT INTO ps_endpoint_id_ips (id, endpoint, match_header) VALUES ($1, $1, $2)", [name, `X-CX-Trunk: ${contactUser}`]);
       await c.query(
         `INSERT INTO ps_registrations (id, transport, outbound_auth, server_uri, client_uri, contact_user, outbound_proxy,
            retry_interval, forbidden_retry_interval, fatal_retry_interval, max_retries, expiration,
@@ -362,6 +364,10 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       await db.query(`UPDATE ps_aors a SET support_path = 'yes' FROM ps_endpoints e WHERE e.aors = a.id AND e.context = 'from-internal' AND e.id !~ '-web$' AND a.support_path IS DISTINCT FROM 'yes'`);
       await db.query(`UPDATE ps_endpoints SET rewrite_contact = 'no' WHERE context = 'from-internal' AND id !~ '-web$' AND rewrite_contact IS DISTINCT FROM 'no'`);
       const tr = await db.query("UPDATE ps_endpoints SET transport = NULL WHERE context = 'from-trunk' AND transport IS NOT NULL");
+      const hd = await db.query(`INSERT INTO ps_endpoint_id_ips (id, endpoint, match_header)
+        SELECT t.id, t.id, 'X-CX-Trunk: ' || t.contact_user FROM pbxmaison_trunks t
+        WHERE t.contact_user IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ps_endpoint_id_ips i WHERE i.id = t.id)`);
+      if (hd.rowCount) await reload("res_pjsip_endpoint_identifier_ip.so").catch(() => {});
       await db.query("UPDATE ps_registrations SET transport = NULL WHERE transport IS NOT NULL");
       if (tr.rowCount) await reload("res_pjsip.so").catch(() => {});
       try { await publishRoutes(); } catch { /* l'aiguilleur sera mis à jour au prochain changement */ }

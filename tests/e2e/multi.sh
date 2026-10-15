@@ -354,6 +354,9 @@ NRTP="$(grep -cE '> [0-9.]+\.310[0-9]{2}:' "$LAB/rtp-all.txt" || true)"
 (( NRTP > 50 )) && pass "Son de l'opérateur reçu par le poste de cli a (${NRTP} paquets RTP, directs, sans passer par l'aiguilleur)" || { echo "   (RTP vers le poste A : ${NRTP} paquets ; compteur du poste : $(glob pa RTPRX))" >> "$OUT"; fail "son entrant"; }
 reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null; sleep 9
 [[ "$(glob pb RANG)" == 201 && "$(glob pa RANG)" == none ]] && pass "Entrant sur le trunk de cli b → poste 201 de cli b uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clib; fail "entrant B"; }
+# L'opérateur appelle directement la SDA de B (sans le jeton du trunk) : accepté car il vient de l'adresse de l'opérateur
+reset; labx op "channel originate PJSIP/0465001550@acctb extension s@wait" >/dev/null; sleep 9
+[[ "$(glob pb RANG)" == 201 && "$(glob pa RANG)" == none ]] && pass "Entrant vers la SDA de cli b depuis l'adresse de l'opérateur → poste 201 de cli b" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clib; fail "entrant SDA B"; }
 # Appel « pirate » vers la SDA de A, sans le jeton du trunk : refusé
 reset; labx px "channel originate PJSIP/0465001540@pbx extension s@wait" >/dev/null 2>&1 || true; sleep 6
 [[ "$(glob pa RANG)" == none ]] && pass "Appel vers la SDA de cli a sans le jeton de son trunk : refusé" || fail "appel pirate arrivé chez A"
@@ -377,7 +380,7 @@ sudo /opt/pbxmaison/pbx/bin/callikoe-host restaurer /root/sauvegarde-test.tar.gz
 grep -q "clia existe déjà" rs.out && pass "Restauration : cli a (déjà présent) laissé tel quel" || true
 waitfor 30 sudo systemctl is-active --quiet callikoe-asterisk@clib && pass "cli b restauré : moteur actif" || { sudo journalctl -u callikoe-asterisk@clib -n 20 --no-pager >> "$OUT"; fail "clib non restauré"; }
 waitfor 60 regd pb && pass "Poste 201 de cli b de nouveau enregistré (mêmes identifiants)" || { labx pb "pjsip show registrations" >> "$OUT"; fail "poste B après restauration"; }
-waitfor 90 opreg acctb && reset && labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null && sleep 9 && [[ "$(glob pb RANG)" == 201 ]] \
+sleep 15; waitfor 90 opreg acctb && reset && labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null && sleep 9 && [[ "$(glob pb RANG)" == 201 ]] \
   && pass "Entrant vers cli b après restauration" || { echo "RANG B=$(glob pb RANG)" >> "$OUT"; sudo cat /var/lib/callikoe/kamailio/db/tru >> "$OUT"; fail "entrant B après restauration"; }
 : > "$HJAR"
 T="$(hapi POST /api/login '{"email":"irt-admin@test.invalid","password":"MotDePasse2026"}' | jget ticket)"

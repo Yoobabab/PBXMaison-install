@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import dns from "node:dns/promises";
 
 export const sipPortOf = (n) => 6000 + Number(n);
 export const backend = (t) => `sip:127.0.0.1:${sipPortOf(t.n)}`;
@@ -38,8 +39,8 @@ export function didForms(did, cc = "33") {
  * tenants : [{ slug, n, fqdn, cc }] ; routes : { slug: { trunks: [{contact_user, host, port, transport, proxy}], dids: [] } }
  * → { dom: Map, tru: Map, prx: Map, conflicts: [] }
  */
-export function buildTables(tenants, routes = {}) {
-  const dom = new Map(), tru = new Map(), prx = new Map(), conflicts = [];
+export function buildTables(tenants, routes = {}, ips = {}) {
+  const dom = new Map(), tru = new Map(), prx = new Map(), ops = new Map(), conflicts = [];
   const claim = (map, key, value, slug, what) => {
     const k = String(key).toLowerCase();
     if (map.has(k) && map.get(k).slug !== slug) { conflicts.push({ key: k, what, kept: map.get(k).slug, refused: slug }); return; }
@@ -52,7 +53,13 @@ export function buildTables(tenants, routes = {}) {
     for (const a of t.aliases || []) if (HOST.test(a)) claim(dom, a, be, t.slug, "adresse");
     const r = routes[t.slug] || {};
     for (const tr of r.trunks || []) {
-      if (tr.contact_user && USER.test(tr.contact_user)) claim(tru, tr.contact_user, be, t.slug, "compte de trunk");
+      if (tr.contact_user && USER.test(tr.contact_user)) {
+        claim(tru, tr.contact_user, be, t.slug, "compte de trunk");
+        // Adresses de l'opérateur (serveur et proxy du trunk) : seules autorisées à appeler les SDA de ce client sans le jeton
+        for (const h of [tr.host, String(tr.proxy || "").split(":")[0]].filter(Boolean)) {
+          for (const ip of ips[h] || []) { const k = `${ip}|${be}`; if (!ops.has(k)) ops.set(k, { value: tr.contact_user, slug: t.slug }); }
+        }
+      }
       if (tr.host && HOST.test(tr.host)) {
         const transport = ["udp", "tcp", "tls"].includes(tr.transport) ? tr.transport : "udp";
         const [ph, pp] = tr.proxy ? String(tr.proxy).split(":") : [tr.host, tr.port];
@@ -63,7 +70,7 @@ export function buildTables(tenants, routes = {}) {
     }
     for (const did of r.dids || []) for (const f of didForms(did, t.cc || "33")) claim(tru, f, be, t.slug, "SDA");
   }
-  return { dom, tru, prx, conflicts };
+  return { dom, tru, prx, ops, conflicts };
 }
 
 /** Fichier db_text pour htable (les « : » des valeurs sont échappés). */
@@ -81,12 +88,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   for (const t of tenants) {
     try { routes[t.slug] = JSON.parse(fs.readFileSync(path.join(varRoot, t.slug, "kamailio-routes.json"), "utf8")); } catch { /* rien publié */ }
   }
-  const { dom, tru, prx, conflicts } = buildTables(tenants, routes);
+  // Résolution des serveurs des opérateurs (adresses IP d'où viennent leurs appels)
+  const ips = {};
+  const hosts = new Set(Object.values(routes).flatMap((r) => (r.trunks || []).flatMap((x) => [x.host, String(x.proxy || "").split(":")[0]])).filter(Boolean));
+  await Promise.all([...hosts].map(async (h) => {
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) { ips[h] = [h]; return; }
+    try { ips[h] = (await dns.lookup(h, { all: true, family: 4 })).map((a) => a.address); } catch { ips[h] = []; }
+  }));
+  const { dom, tru, prx, ops, conflicts } = buildTables(tenants, routes, ips);
   fs.mkdirSync(dbDir, { recursive: true });
-  for (const [name, map] of [["dom", dom], ["tru", tru], ["prx", prx]]) {
+  for (const [name, map] of [["dom", dom], ["tru", tru], ["prx", prx], ["ops", ops]]) {
     fs.writeFileSync(path.join(dbDir, `${name}.new`), dbtext(map));
     fs.renameSync(path.join(dbDir, `${name}.new`), path.join(dbDir, name));
   }
-  if (!fs.existsSync(path.join(dbDir, "version"))) fs.writeFileSync(path.join(dbDir, "version"), "table_name(str) table_version(int)\ndom:2\ntru:2\nprx:2\n");
-  console.log(JSON.stringify({ ok: true, counts: { dom: dom.size, tru: tru.size, prx: prx.size }, conflicts }));
+  fs.writeFileSync(path.join(dbDir, "version"), "table_name(str) table_version(int)\ndom:2\ntru:2\nprx:2\nops:2\n");
+  console.log(JSON.stringify({ ok: true, counts: { dom: dom.size, tru: tru.size, prx: prx.size, ops: ops.size }, conflicts }));
 }

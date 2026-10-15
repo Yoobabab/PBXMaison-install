@@ -5,7 +5,7 @@ set -uo pipefail
 export PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 SOCK=unix:/run/kamailio/kamailio_ctl
 chown -R kamailio:kamailio /var/lib/callikoe/kamailio/db 2>/dev/null || true
-for t in dom tru prx; do
+for t in dom tru prx ops; do
   out="$(kamcmd -s "$SOCK" htable.reload "$t" 2>&1)"
   if [[ "$out" != *"reloaded"* ]]; then
     logger -t callikoe-aiguilleur "rechargement de la table $t impossible ($out) : redémarrage de l'aiguilleur"
