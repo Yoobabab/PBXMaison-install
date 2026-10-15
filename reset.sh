@@ -31,6 +31,25 @@ fi
 
 echo "${B}Réinitialisation de Callikoe…${N}"
 
+# 0. Serveur multi-tenant : PBX clients, console du serveur, aiguilleur SIP
+if [[ -d /etc/callikoe ]]; then
+  for u in $(systemctl list-units --all --plain --no-legend 'callikoe-*' 2>/dev/null | awk '{print $1}'); do systemctl disable --now "$u" >/dev/null 2>&1 || true; done
+  for u in $(systemctl list-unit-files --plain --no-legend 'callikoe-*' 2>/dev/null | awk '{print $1}'); do systemctl disable "$u" >/dev/null 2>&1 || true; done
+  systemctl disable --now kamailio >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/callikoe-*.service /etc/systemd/system/callikoe-*.timer
+  if command -v psql >/dev/null && systemctl is-active --quiet postgresql; then
+    for db in $(cd /tmp && sudo -u postgres psql -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'cx\_%' OR datname = 'callikoe_hub'" 2>/dev/null); do
+      (cd /tmp && sudo -u postgres psql -q -c "DROP DATABASE IF EXISTS \"$db\"" -c "DROP ROLE IF EXISTS \"$db\"") >/dev/null 2>&1 || true
+    done
+  fi
+  for u in $(getent passwd | cut -d: -f1 | grep -E '^(cx-|ast-)[a-z0-9-]+$|^callikoe-hub$'); do userdel "$u" >/dev/null 2>&1 || true; done
+  for g in $(getent group | cut -d: -f1 | grep -E '^cx-[a-z0-9-]+$|^callikoe-hub$'); do groupdel "$g" >/dev/null 2>&1 || true; done
+  rm -rf /etc/callikoe /var/lib/callikoe /var/spool/callikoe /var/log/callikoe /usr/local/sbin/callikoe-host
+  rm -f /etc/sudoers.d/callikoe-* /etc/nginx/sites-enabled/callikoe-* /etc/nginx/sites-available/callikoe-* \
+        /etc/fail2ban/jail.d/callikoe.conf /etc/fail2ban/filter.d/callikoe-*.conf
+  ok "Serveur multi-tenant effacé (PBX clients, console du serveur, aiguilleur SIP)"
+fi
+
 # 1. Services
 for s in pbxmaison-console pbxmaison-dns.timer pbxmaison-dns pbxmaison-update asterisk; do
   systemctl disable --now "$s" >/dev/null 2>&1 || true
