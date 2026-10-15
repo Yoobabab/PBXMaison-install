@@ -1,16 +1,27 @@
 #!/usr/bin/env bash
-# Recharge les tables de l'aiguilleur SIP (Kamailio) sans coupure ; en cas d'échec, redémarre l'aiguilleur.
-# (kamcmd renvoie 0 même quand le rechargement échoue : on vérifie sa réponse)
+# Aiguilleur SIP (Kamailio) : régénère ses tables à partir du registre et des routes publiées par les PBX, puis les recharge
+# sans coupure. Une seule exécution à la fois (plusieurs PBX peuvent publier en même temps). Le contenu chargé est vérifié ;
+# en cas d'écart, l'aiguilleur est redémarré (il relit alors ses tables).
+# Sortie : la ligne JSON de kamailio-tables.mjs (conflits éventuels).
 set -uo pipefail
 export PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+APP=/opt/pbxmaison
+DB=/var/lib/callikoe/kamailio/db
 SOCK=unix:/run/kamailio/kamailio_ctl
-chown -R kamailio:kamailio /var/lib/callikoe/kamailio/db 2>/dev/null || true
+exec 9>/run/callikoe-aiguilleur.lock
+flock -w 60 9 || { logger -t callikoe-aiguilleur "verrou indisponible"; exit 1; }
+out="$(node "$APP/pbx/lib/kamailio-tables.mjs" /etc/callikoe/tenants.json "$DB" /var/lib/callikoe/t)" || { echo "$out"; exit 1; }
+chown -R kamailio:kamailio "$DB" 2>/dev/null || true
+loaded() { kamcmd -s "$SOCK" htable.dump "$1" 2>/dev/null | grep -c 'name:' || true; }
+want() { echo $(( $(grep -c . "$DB/$1" 2>/dev/null || echo 1) - 1 )); }
+ok=1
 for t in dom tru prx ops; do
-  out="$(kamcmd -s "$SOCK" htable.reload "$t" 2>&1)"
-  if [[ "$out" != *"reloaded"* ]]; then
-    logger -t callikoe-aiguilleur "rechargement de la table $t impossible ($out) : redémarrage de l'aiguilleur"
-    systemctl restart kamailio
-    exit 0
+  r="$(kamcmd -s "$SOCK" htable.reload "$t" 2>&1)"
+  if [[ "$r" != *"reloaded"* || "$(loaded "$t")" != "$(want "$t")" ]]; then
+    sleep 0.3; r="$(kamcmd -s "$SOCK" htable.reload "$t" 2>&1)"
+    [[ "$r" == *"reloaded"* && "$(loaded "$t")" == "$(want "$t")" ]] || { ok=0; logger -t callikoe-aiguilleur "table $t : ${r:0:120} (chargé $(loaded "$t") / attendu $(want "$t"))"; }
   fi
 done
-logger -t callikoe-aiguilleur "tables rechargées"
+if (( ok )); then logger -t callikoe-aiguilleur "tables rechargées"
+else logger -t callikoe-aiguilleur "rechargement incomplet : redémarrage de l'aiguilleur"; systemctl restart kamailio; fi
+echo "$out"

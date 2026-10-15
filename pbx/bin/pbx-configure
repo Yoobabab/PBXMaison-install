@@ -460,10 +460,7 @@ EOF
 # ----------------------------------------------------------------------------- Aiguilleur SIP (multi-tenant)
 # Reconstruit les tables de Kamailio (adresses des PBX, comptes des trunks, SDA) et les recharge sans coupure
 kamailio_sync() {
-  local out
-  out="$(node "$APP/pbx/lib/kamailio-tables.mjs" /etc/callikoe/tenants.json /var/lib/callikoe/kamailio/db /var/lib/callikoe/t)"
-  "$APP/pbx/bin/callikoe-kamreload" >/dev/null 2>&1 || true
-  echo "$out"
+  "$APP/pbx/bin/callikoe-kamreload" 2>/dev/null | tail -n1
 }
 
 # ----------------------------------------------------------------------------- Anti-intrusion

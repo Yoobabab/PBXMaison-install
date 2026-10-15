@@ -485,8 +485,7 @@ reg_del() {
   node -e 'const fs=require("fs");const [f,slug]=process.argv.slice(1);const r=JSON.parse(fs.readFileSync(f,"utf8"));r.tenants=(r.tenants||[]).filter(t=>t.slug!==slug);fs.writeFileSync(f+".new",JSON.stringify(r,null,2));fs.renameSync(f+".new",f)' "$REG" "$1"
 }
 aiguilleur() {
-  node "$APP/pbx/lib/kamailio-tables.mjs" "$REG" "$KDB" "$TVAR" >/dev/null
-  "$APP/pbx/bin/callikoe-kamreload" || true
+  "$APP/pbx/bin/callikoe-kamreload" >/dev/null || true
 }
 
 # Lit un pbx-config.json (fichier ou base64) et le vérifie ; écrit le fichier dans $2
