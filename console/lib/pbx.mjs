@@ -777,6 +777,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
           AND (deny IS DISTINCT FROM $1 OR permit IS DISTINCT FROM $2)`, [ext.sipAcl.deny, ext.sipAcl.permit]);
       } catch (e) { console.error("Restriction des postes SIP non appliquée :", e.message); }
     }
+    // Voyant de la touche « Statut » de chaque téléphone (rouge = ne pas déranger ou absent)
+    for (const u of users) { try { await ami.command(`devstate change Custom:dnd${u.id} ${u.status === "available" ? "NOT_INUSE" : "INUSE"}`); } catch { /* Asterisk arrêté */ } }
     try { await ami.command("dialplan reload"); } catch { /* rechargé au démarrage d'Asterisk */ }
     try { await ami.command("module reload app_voicemail.so"); } catch { /* idem */ }
     try { await ami.command("moh reload"); } catch { /* idem */ }

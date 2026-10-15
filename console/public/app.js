@@ -756,7 +756,7 @@ async function renderUsers() {
     });
     rows.innerHTML = list.map((x) => `<tr class="click" data-href="#/utilisateurs/${esc(x.id)}">
       <td><strong>${esc(x.id)}</strong></td>
-      <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.hidden ? ' <span class="pill off">Masqué</span>' : ""}${x.team ? ` <span class="pill wait" title="Groupe de visibilité">${esc(x.team)}</span>` : ""}${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
+      <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.hidden ? ' <span class="pill off">Masqué</span>' : ""}${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
       <td>${statusPill(x)}</td>
       <td class="hide-sm">${x.registered ? `<span class="devs">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}<span class="pill ok">Connecté</span></span>` : '<span class="pill off">Non connecté</span>'}</td>
       <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td>
@@ -844,7 +844,6 @@ async function renderUser(id, tab = "general") {
   const [{ user: u, server }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
   if ((tab === "telephone" || tab === "touches") && !phoneOpts) phoneOpts = await api("GET", "/api/phone-options");
   const users = list.extensions;
-  window.__teams = users.map((x) => x.team).filter(Boolean);
   const fw = u.forwarding;
   const tabs = `<nav class="tabs">${USER_TABS.map(([k, l]) => `<a href="#/utilisateurs/${esc(u.id)}${k === "general" ? "" : "/" + k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
   const head = `<a class="back" href="#/utilisateurs">← Utilisateurs</a>
@@ -965,9 +964,7 @@ async function renderUser(id, tab = "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label class="check full"><input type="checkbox" name="options.disabled" ${u.options.disabled ? "checked" : ""}> Désactiver l'utilisateur <span class="hint">(ne reçoit plus d'appels, n'appelle plus que les urgences)</span></label>
       <label class="check full"><input type="checkbox" name="options.block_external" ${u.options.block_external ? "checked" : ""}> Interdire les appels externes <span class="hint">(appels internes et urgences toujours possibles)</span></label>
-      <label class="check full"><input type="checkbox" name="options.hidden" ${u.options.hidden ? "checked" : ""}> Masquer cet utilisateur <span class="hint">(absent de l'équipe du softphone, des annuaires des téléphones et du chat ; on peut toujours composer son numéro)</span></label>
-      <label class="full">Groupe de visibilité<input name="options.team" list="teams" value="${esc(u.options.team || "")}" placeholder="Vide = groupe par défaut (ex. Agence Lyon, Société B)"><datalist id="teams">${[...new Set((window.__teams || []))].map((t) => `<option value="${esc(t)}">`).join("")}</datalist>
-        <span class="hint">Les utilisateurs ne voient (softphone, annuaire du téléphone, présence) que ceux de leur groupe. Utile pour plusieurs sociétés ou sites sur le même standard.</span></label>
+      <label class="check full"><input type="checkbox" name="options.hidden" ${u.options.hidden ? "checked" : ""}> Masquer cet utilisateur <span class="hint">(invisible pour les autres utilisateurs : softphone, annuaires des téléphones, chat ; reste visible dans la console d'administration et on peut toujours composer son numéro)</span></label>
       <div class="note full">L'audio passe toujours par le PBX (indispensable derrière une box ou un pare-feu).</div>
       ${save}</form>
       <div class="pad" style="border-top:1px solid var(--line)" id="delzone"><h2 style="margin-bottom:8px">Supprimer l'utilisateur</h2>
@@ -1095,7 +1092,7 @@ function wireKeys(u, users) {
       const i = Number(row.dataset.i);
       row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
         keys[i][el.dataset.f] = el.value;
-        if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = ""; draw(); }
+        if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = keys[i].type === "status" ? "Ne pas déranger" : ""; draw(); }
         if (el.dataset.f === "value" && keys[i].type === "blf") { keys[i].label = others.find((x) => x.id === el.value)?.name || ""; draw(); }
       }));
       row.querySelector("[data-rm]").onclick = () => { keys.splice(i, 1); draw(); };

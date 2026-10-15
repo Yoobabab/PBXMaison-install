@@ -77,7 +77,7 @@ curl -sS -b "$JAR" -c "$JAR" -X POST "$API/api/login/totp" -H "content-type: app
   && pass "Connexion à la console (mot de passe + code de double authentification)" || fail "connexion"
 raw_api GET /api/audit | grep -q "Connexion à la console" && pass "Journal d'audit : connexion notée (IP, date)" || fail "audit"
 R="$(raw_api PUT /api/security '{"max_per_hour":100}')"
-[[ "$R" == *'"need_reauth":true'* || "$R" == *'"settings"'* ]] && pass "Action sensible : code redemandé après 15 min (ou accepté s'il est récent)" || fail "reauth : $R"
+[[ "$R" == *'"settings"'* ]] && pass "Action sensible : acceptée sans redemander le code (session validée par la double authentification)" || fail "action sensible : $R"
 R="$(api POST /api/trunks '{"template":"dstny","name":"dstny","number":"0465001530","username":"testuser","password":"testpass"}')"
 echo "$R" | grep -q '"id":"dstny"' && pass "Trunk Dstny créé depuis le modèle" || fail "trunk : $R"
 R="$(api POST /api/trunks '{"template":"unyc","name":"unyc","number":"0465000800","username":"10000","password":"x","host":"pbx.eqinoxe.com"}')"
@@ -253,9 +253,8 @@ curl -sS -b "$UJ" "$API/api/u/contacts" | grep -q "Boulangerie Dupont" && pass "
 api PUT /api/extensions/206 '{"options":{"hidden":true}}' >/dev/null
 curl -sS -b "$UJ" "$API/api/u/team" | grep -q '"id":"206"' && fail "utilisateur masqué visible" || pass "Utilisateur masqué : absent de l'équipe du softphone"
 curl -sS "http://127.0.0.1${PPATH}phonebook-204.xml" | grep -q "<Telephone>206</Telephone>" && fail "masqué dans l'annuaire du téléphone" || pass "Utilisateur masqué : absent de l'annuaire du téléphone"
-api PUT /api/extensions/206 '{"options":{"hidden":false,"team":"Societe B"}}' >/dev/null
-curl -sS -b "$UJ" "$API/api/u/team" | grep -q '"id":"206"' && fail "groupe de visibilité ignoré" || pass "Groupes de visibilité : 204 ne voit pas 206 (autre groupe)"
-api PUT /api/extensions/206 '{"options":{"team":""}}' >/dev/null
+api GET /api/extensions | grep '"id":"206"' >/dev/null && pass "Utilisateur masqué : toujours visible dans la console admin" || fail "masqué absent de la console admin"
+api PUT /api/extensions/206 '{"options":{"hidden":false}}' >/dev/null
 # Sonnerie selon le type d'appel
 sudo /usr/sbin/asterisk -rx 'dialplan show s@pickup-mark' | grep -q "info=callikoe-" && pass "Sonneries : type d'appel envoyé au téléphone (Alert-Info)" || fail "alert-info"
 api PUT /api/extensions/201 '{"phone":{"settings":{"rings":{"externe":"3"}}}}' >/dev/null
@@ -324,7 +323,11 @@ sudo /usr/sbin/asterisk -rx 'parking show default' | grep -q "701-709" && pass "
 sudo /usr/sbin/asterisk -rx 'database put callikoe_status 204 away' >/dev/null
 sleep 7
 api GET /api/extensions/204 | grep -q '"status":"away"' && pass "Code *31 : statut « absent » appliqué par la console" || fail "statut par code"
+sudo /usr/sbin/asterisk -rx 'devstate list' | grep "dnd204" | grep -q "INUSE" && pass "Touche Statut : voyant allumé sur le téléphone (statut absent)" || { sudo /usr/sbin/asterisk -rx 'devstate list' | grep dnd >> "$OUT"; fail "voyant statut"; }
+sudo /usr/sbin/asterisk -rx 'dialplan show status204@from-internal' | grep -q "DEVICE_STATE(Custom:dnd" && pass "Touche Statut : appui = bascule du statut" || fail "bascule statut"
 api PUT /api/extensions/204 '{"status":"available"}' >/dev/null
+sleep 2
+sudo /usr/sbin/asterisk -rx 'devstate list' | grep "dnd204" | grep -q "NOT_INUSE" && pass "Statut changé dans la console : voyant éteint sur le téléphone" || { sudo /usr/sbin/asterisk -rx 'devstate list' | grep dnd >> "$OUT"; fail "voyant statut console"; }
 sudo /usr/sbin/asterisk -rx 'dialplan show s@rec-start' | grep -q "MixMonitor" && sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep -q "REC_ENABLED=1" && pass "Enregistrement des appels externes actif par défaut" || fail "enregistrement"
 api GET /api/recordings | grep -q '"recordings":\[' && pass "Enregistrements : liste lisible" || fail "liste enregistrements"
 

@@ -62,7 +62,7 @@ export const TRANSPORTS = { udp: ["UDP (5060)", 0, 5060], tcp: ["TCP (5060)", 1,
 /** Sonnerie selon le type d'appel (en-tête Alert-Info envoyé par le PBX) */
 export const RING_TYPES = { interne: "Appel interne (collègue)", externe: "Appel externe (client)", groupe: "Groupe d'appel", file: "File d'attente", svi: "Via le SVI (standard automatique)" };
 export const RINGERS = { "": "Sonnerie par défaut du téléphone", 1: "Sonnerie 1", 2: "Sonnerie 2", 3: "Sonnerie 3", 4: "Sonnerie 4", 5: "Sonnerie 5", 6: "Sonnerie 6", 7: "Sonnerie 7", 8: "Sonnerie 8" };
-export const KEY_TYPES = { line: "Ligne", blf: "BLF (supervision + interception)", speed: "Numérotation rapide", none: "Aucune" };
+export const KEY_TYPES = { line: "Ligne", blf: "BLF (supervision + interception)", status: "Statut Ne pas déranger (voyant + bascule)", speed: "Numérotation rapide", none: "Aucune" };
 
 export function defaultPhone(tz = "Europe/Paris") {
   return {
@@ -150,6 +150,7 @@ export function validatePhone(input, current, ctx) {
         if (!label) throw new PhoneError(`Touche ${i + 1} : indique un libellé.`, `phone.keys.${i}`);
         return { type, value: value.replace(/[\s.]/g, ""), label };
       }
+      if (type === "status") return { type, value: "", label: label || "Ne pas déranger" };
       return { type, value: "", label: type === "line" ? label : "" };
     });
     while (p.keys.length && p.keys.at(-1).type === "none") p.keys.pop();
@@ -266,6 +267,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     const p = `linekey.${i + 1}`;
     if (k.type === "line") L.push(v(`${p}.type`, 15), v(`${p}.line`, 1), v(`${p}.value`, ""), v(`${p}.label`, k.label || ""));
     else if (k.type === "blf") L.push(v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label || names.get(k.value) || k.value));
+    else if (k.type === "status") L.push(v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `status${user.id}`), v(`${p}.label`, k.label || "Ne pas déranger"));
     else if (k.type === "speed") L.push(v(`${p}.type`, 13), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label));
     else L.push(v(`${p}.type`, 0), v(`${p}.value`, ""), v(`${p}.label`, ""));
   }

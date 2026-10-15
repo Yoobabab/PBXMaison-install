@@ -78,8 +78,16 @@ export function buildShortcodesDialplan(c) {
   L.push(`exten => _${lit(c.vm_direct)}XXX,1,Answer()`, ` same => n,VoiceMail(\${EXTEN:${c.vm_direct.length}}@default,u)`, " same => n,Hangup()");
   // Statut : noté dans la base Asterisk, la console l'applique (renvois, groupes) dans les secondes qui suivent
   for (const [k, st] of [["st_available", "available"], ["st_away", "away"], ["st_dnd", "dnd"]]) {
-    L.push(`exten => ${lit(c[k])},1,Answer()`, ` same => n,Set(DB(callikoe_status/${SRC})=${st})`, " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()");
+    L.push(`exten => ${lit(c[k])},1,Answer()`, ` same => n,Set(DB(callikoe_status/${SRC})=${st})`, ` same => n,Set(DEVICE_STATE(Custom:dnd${SRC})=${st === "available" ? "NOT_INUSE" : "INUSE"})`, " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()");
   }
+  // Touche « Statut » du téléphone (BLF sur status<poste> ; pas de x, z ou n dans le préfixe : Asterisk les lit comme des jokers) : voyant allumé si l'utilisateur n'est pas disponible, appui = bascule
+  L.push("exten => _statusXXX,1,Answer()", // le voyant (hint) est déclaré par poste dans [users-hints]
+    ` same => n,GotoIf($["${SRC}" != "\${EXTEN:6}"]?deny)`,
+    " same => n,Set(NEW=${IF($[\"${DEVICE_STATE(Custom:dnd${EXTEN:6})}\" = \"NOT_INUSE\"]?dnd:available)})",
+    " same => n,Set(DB(callikoe_status/${EXTEN:6})=${NEW})",
+    " same => n,Set(DEVICE_STATE(Custom:dnd${EXTEN:6})=${IF($[\"${NEW}\" = \"available\"]?NOT_INUSE:INUSE)})",
+    " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()",
+    " same => n(deny),Playback(pbx-invalid)", " same => n,Hangup()");
   L.push(`exten => ${lit(c.q_login)},1,Answer()`, ` same => n,UnpauseQueueMember(,Local/${SRC}@queue-ring/n)`, " same => n,Playback(agent-loginok)", " same => n,Hangup()");
   L.push(`exten => ${lit(c.q_logout)},1,Answer()`, ` same => n,PauseQueueMember(,Local/${SRC}@queue-ring/n)`, " same => n,Playback(agent-loggedoff)", " same => n,Hangup()");
   L.push("");

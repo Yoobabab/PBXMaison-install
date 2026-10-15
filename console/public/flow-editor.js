@@ -1,6 +1,6 @@
 // Gestion d'appels › Routages : éditeur visuel simplifié (étapes de gauche à droite, glisser-déposer ou bouton +)
 // et routage décrit en texte (proposition à valider).
-let h = null, cf = null;
+let h = null, cf = null, kit = null; // kit : champs partagés avec les fiches (annonces, destinations, horaires)
 const esc = (v) => h.esc(v);
 const fmtP = (n) => /^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "");
 const objs = (kind) => cf.objects.filter((o) => o.kind === kind);
@@ -28,14 +28,14 @@ const icon = (k, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}"
 
 const STEPS = [
   ["ring", "Sonnerie", "Faire sonner une ou plusieurs personnes"], ["group", "Groupe d'appel", "Un groupe existant"], ["queue", "File d'attente", "Mise en attente avec musique"],
-  ["prompt", "Annonce", "Jouer un message puis continuer"],
+  ["prompt", "Annonce", "Jouer un message puis continuer"], ["ivr", "SVI", "Menu « tapez 1, tapez 2 »"],
 ];
 const ENDS = [
-  ["user_vm", "Boîte vocale", "Messagerie d'un utilisateur"], ["groupvm", "Boîte de groupe", "Messagerie partagée"], ["ivr", "SVI", "Menu « tapez 1, tapez 2 »"],
+  ["user_vm", "Boîte vocale", "Messagerie d'un utilisateur"], ["groupvm", "Boîte de groupe", "Messagerie partagée"],
   ["user", "Utilisateur", "Avec ses propres renvois"], ["conf", "Réunion", "Salle de réunion"], ["external", "Numéro externe", "Renvoi vers un mobile…"], ["hangup", "Fin de l'appel", "Raccrocher"],
 ];
 const LABEL = Object.fromEntries([...STEPS, ...ENDS].map(([k, l]) => [k, l]));
-const TERMINAL = ENDS.map(([k]) => k);
+const TERMINAL = [...ENDS.map(([k]) => k), "ivr"]; // le SVI termine le routage : ce sont ses touches qui envoient l'appel ailleurs
 const BR = { open: "Heures d'ouverture", closed: "Bureau fermé", break: "Pause", holiday: "Jour férié / congés" };
 
 let flow = null, sel = null, tab = "open", errAt = null, cur = null, adding = null;
@@ -45,8 +45,8 @@ export function flowSummary(cfData, helpers, d) {
   return (d.branches.open || []).map((s, i) => `${i + 1}. ${describe(s)}`).join(" → ");
 }
 
-export function renderFlowEditor(helpers, cfData, head, id) {
-  h = helpers; cf = cfData;
+export function renderFlowEditor(helpers, cfData, head, id, shared) {
+  h = helpers; cf = cfData; kit = shared;
   cur = id && id !== "nouveau" ? cf.objects.find((o) => o.kind === "flow" && o.id === id) : null;
   flow = cur ? structuredClone(cur.data) : { name: "", dids: [], is_default: false, schedule: "", branches: { open: [], closed: null, break: null, holiday: null } };
   sel = null; tab = "open"; errAt = null; adding = null;
@@ -64,7 +64,7 @@ export function renderFlowEditor(helpers, cfData, head, id) {
       <div class="fx-box"><span class="fx-bi">${icon("did", 18)}</span><div class="fx-bc"><span class="fx-bl">Numéros appelés (SDA)</span>
         <div class="fx-chips" id="dids"></div></div></div>
       <div class="fx-box"><span class="fx-bi">${icon("schedule", 18)}</span><div class="fx-bc"><span class="fx-bl">Horaires</span>
-        <select id="fsched"><option value="">Toujours ouvert</option>${objs("schedule").map((s) => `<option value="${esc(s.id)}" ${flow.schedule === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div></div>
+        <div class="fx-srow"><select id="fsched"></select><button type="button" class="btn ghost sm" id="fsedit" hidden>Modifier</button></div></div></div>
       <label class="check fx-def"><input type="checkbox" id="fdef" ${flow.is_default ? "checked" : ""}> Routage par défaut (SDA sans règle)</label>
     </div>
     <nav class="fx-tabs" id="tabs"></nav>
@@ -79,13 +79,49 @@ export function renderFlowEditor(helpers, cfData, head, id) {
   h.$("#fdel")?.addEventListener("click", del);
   h.$("#nlgo").onclick = propose;
   h.$("#fsched").onchange = (e) => {
-    flow.schedule = e.target.value;
-    if (!flow.schedule) { flow.branches.closed = flow.branches.break = flow.branches.holiday = null; tab = "open"; }
-    else if (flow.branches.closed === null) flow.branches.closed = [];
-    draw();
+    if (e.target.value === "__new") { e.target.value = flow.schedule; schedPanel(null); return; }
+    setSchedule(e.target.value);
   };
-  h.$("#scrim").onclick = closePanel;
+  h.$("#fsedit").onclick = () => schedPanel(flow.schedule);
+  drawSched();
+  h.$("#scrim").onclick = () => { sel = null; closePanel(); draw(); };
   drawDids(); draw();
+}
+
+// ---------------------------------------------------------------- Horaires (créés et modifiés sans quitter l'éditeur)
+function drawSched() {
+  const sel2 = h.$("#fsched");
+  sel2.innerHTML = `<option value="">Toujours ouvert</option>${objs("schedule").map((s) => `<option value="${esc(s.id)}" ${flow.schedule === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}<option value="__new">+ Nouveaux horaires…</option>`;
+  sel2.value = flow.schedule || "";
+  h.$("#fsedit").hidden = !flow.schedule;
+}
+function setSchedule(v) {
+  flow.schedule = v;
+  if (!flow.schedule) { flow.branches.closed = flow.branches.break = flow.branches.holiday = null; tab = "open"; }
+  else if (flow.branches.closed === null) flow.branches.closed = [];
+  drawSched(); draw();
+}
+function schedPanel(id) {
+  const o = id ? cf.objects.find((x) => x.kind === "schedule" && x.id === id) : null;
+  const d = o ? structuredClone(o.data) : kit.defaults("schedule");
+  const side = h.$("#fxpop");
+  side.classList.add("wide");
+  side.innerHTML = `<div class="fx-ph"><span class="fx-ci">${icon("schedule")}</span><strong>${o ? "Horaires" : "Nouveaux horaires"}</strong><button type="button" class="fx-x" id="pclose2" aria-label="Fermer">${icon("x", 16)}</button></div>
+    <form class="fx-pb stack" id="fxform" novalidate><label>Nom<input name="name" maxlength="50" value="${esc(d.name || "")}" placeholder="ex. Bureau"></label>${kit.scheduleFields(d)}
+      <p class="hint" style="margin:0">Hors de ces plages, les onglets « Bureau fermé », « Pause » et « Jour férié » du routage s'appliquent.</p><div class="fx-perr" id="perr"></div></form>
+    <div class="fx-pf"><button type="button" class="btn ghost" id="pdel">Annuler</button><button type="button" class="btn" id="pok">${o ? "Enregistrer" : "Créer"}</button></div>`;
+  side.classList.add("open"); h.$("#scrim").classList.add("on");
+  const form = h.$("#fxform");
+  kit.wireSchedule(form, d);
+  h.$("#pclose2").onclick = h.$("#pdel").onclick = closePanel;
+  h.$("#pok").onclick = async () => {
+    const btn = h.$("#pok"); btn.disabled = true;
+    try {
+      const r = await h.api(o ? "PUT" : "POST", `/api/callflow/schedule${o ? "/" + o.id : ""}`, kit.collect(form, "schedule"));
+      cf.objects = (await h.api("GET", "/api/callflow")).objects;
+      closePanel(); setSchedule(r.id || id);
+    } catch (err) { h.$("#perr").textContent = err.message; btn.disabled = false; }
+  };
 }
 
 // ---------------------------------------------------------------- Entrée (SDA)
@@ -150,7 +186,7 @@ function link(label, i, isEnd = false) {
 const linkLabel = (st) => !st ? "" : st.type === "prompt" ? "puis" : st.type === "queue" ? "attente dépassée" : "sans réponse";
 function picker() {
   const prevTerminal = adding > 0 && TERMINAL.includes(flow.branches[tab][adding - 1]?.type);
-  const tile = ([k, l, d]) => `<button type="button" class="fx-tile ${TERMINAL.includes(k) ? "end" : ""}" data-new="${k}" draggable="true"><span class="fx-ci">${icon(k)}</span><span><strong>${esc(l)}</strong><small>${esc(d)}</small></span></button>`;
+  const tile = ([k, l, d]) => `<button type="button" class="fx-tile ${ENDS.some((e) => e[0] === k) ? "end" : ""}" data-new="${k}" draggable="true"><span class="fx-ci">${icon(k)}</span><span><strong>${esc(l)}</strong><small>${esc(d)}</small></span></button>`;
   return `<div class="fx-picker" id="picker"><div class="fx-ph"><strong>Que doit-il se passer ${adding === 0 ? "en premier" : "ensuite"} ?</strong><button type="button" class="fx-x" id="pclose" aria-label="Fermer">${icon("x", 16)}</button></div>
     ${prevTerminal ? "" : `<span class="fx-pl">Étapes (si personne ne répond, l'appel passe à la suite)</span><div class="fx-tiles">${STEPS.map(tile).join("")}</div>`}
     <span class="fx-pl">Fin du routage</span><div class="fx-tiles">${ENDS.map(tile).join("")}</div></div>`;
@@ -212,18 +248,19 @@ function describe(st) {
 }
 
 // ---------------------------------------------------------------- Réglage d'une étape (fenêtre au clic sur un cadre)
-const EDIT = { group: "groupe d'appel", queue: "file d'attente", groupvm: "messagerie de groupe", conf: "salle de réunion" };
+const EDIT = { group: "groupe d'appel", queue: "file d'attente", ivr: "SVI", groupvm: "messagerie de groupe", conf: "salle de réunion" };
 const RANGES = { group: 600, queue: 700, ivr: 800, groupvm: 900, conf: 500 };
 function nextNumber(kind) {
   const used = new Set([...cf.objects.map((o) => o.number).filter(Boolean), ...cf.users.map((u) => u.id)]);
   for (let n = RANGES[kind] || 600; n < 1000; n++) if (!used.has(String(n))) return String(n);
   return "";
 }
-function closePanel() { h.$("#fxpop")?.classList.remove("open"); h.$("#scrim")?.classList.remove("on"); }
+function closePanel() { h.$("#fxpop")?.classList.remove("open", "wide"); h.$("#scrim")?.classList.remove("on"); }
 function panel() {
   const side = h.$("#fxpop");
   const st = sel !== null && flow.branches[tab]?.[sel];
   if (!st) { closePanel(); return; }
+  side.classList.toggle("wide", st.type === "ivr");
   const opt = (list, v, empty) => `${empty !== null ? `<option value="">${esc(empty)}</option>` : ""}${list.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("")}`;
   const objOpts = (kind) => objs(kind).map((o) => [o.id, `${o.number ? o.number + " · " : ""}${o.name}`]);
   const users = cf.users.map((u) => [u.id, `${u.id} · ${u.name}`]);
@@ -232,18 +269,28 @@ function panel() {
   if (EDIT[st.type]) {
     // Élément existant à modifier, ou nouveau créé ici même
     const o = cf.objects.find((x) => x.kind === st.type && x.id === st.target);
-    ed = o ? { id: o.id, number: o.number, ...structuredClone(o.data) } : { id: "", number: nextNumber(st.type), name: "", members: [], strategy: st.type === "queue" ? "ringall" : "all", ring_time: 20, member_timeout: 15, max_wait: 300, pin: "" };
+    ed = o ? { id: o.id, number: o.number, ...structuredClone(o.data) } : { id: "", number: nextNumber(st.type), name: "", members: [], strategy: st.type === "queue" ? "ringall" : "all", ring_time: 20, member_timeout: 15, max_wait: 300, pin: "", greeting: "", moh: "",
+      prompt: "", timeout: 5, retries: 2, direct_dial: true, options: {}, invalid: { type: "hangup", target: "" } };
     const list = objs(st.type);
     body = `${list.length ? `<label>${esc(LABEL[st.type])}<select data-pick>${opt([["", `+ Nouveau ${EDIT[st.type]}`], ...objOpts(st.type)], ed.id, null)}</select></label>` : ""}
       <div class="fx-g2"><label>Nom<input data-e="name" value="${esc(ed.name)}" placeholder="ex. Accueil"></label><label>Numéro interne<input data-e="number" value="${esc(ed.number)}" inputmode="numeric" maxlength="3"></label></div>`;
     if (st.type === "group") body += `<div class="fx-g2"><label>Comment ça sonne<select data-e="strategy">${opt(Object.entries(cf.options.group_strategies).map(([k, v]) => [k, String(Array.isArray(v) ? v[0] : v).split(" (")[0]]), ed.strategy, null)}</select></label>
         <label>Sonnerie (secondes)<input type="number" min="5" max="300" data-e="ring_time" value="${esc(ed.ring_time)}"></label></div>
-      <div class="fx-f"><span class="dl">Membres</span>${memberList(ed.members)}</div>`;
+      <div class="fx-f"><span class="dl">Membres</span>${memberList(ed.members)}</div>
+      ${kit.promptField("greeting", ed.greeting, "Message d'accueil (facultatif)", "Joué à l'appelant avant de faire sonner le groupe. WAV, MP3, M4A… ou micro : converti automatiquement.")}`;
     else if (st.type === "queue") body += `<div class="fx-g2"><label>Distribution<select data-e="strategy">${opt(Object.entries(cf.options.queue_strategies).map(([k, v]) => [k, String(Array.isArray(v) ? v[0] : v).split(" (")[0]]), ed.strategy, null)}</select></label>
         <label>Sonnerie par agent (s)<input type="number" min="5" max="120" data-e="member_timeout" value="${esc(ed.member_timeout)}"></label></div>
       <label>Attente maximum (secondes)<input type="number" min="10" max="3600" data-e="max_wait" value="${esc(ed.max_wait)}"></label>
       <div class="fx-f"><span class="dl">Agents</span>${memberList(ed.members)}</div>
-      <p class="hint" style="margin:0">Musique d'attente et annonces : <a href="#/gestion/files${ed.id ? "/" + esc(ed.id) : ""}" target="_blank" rel="noopener">réglages complets de la file</a>.</p>`;
+      ${kit.promptField("greeting", ed.greeting, "Message d'accueil (facultatif)", "Joué entièrement avant d'appeler les agents.")}
+      ${kit.promptField("moh", ed.moh, "Musique d'attente", "Vide : musique par défaut du PBX. WAV, MP3, M4A… converti automatiquement.")}
+      <p class="hint" style="margin:0">Annonces répétées pendant l'attente, position dans la file : <a href="#/gestion/files${ed.id ? "/" + esc(ed.id) : ""}" target="_blank" rel="noopener">réglages complets de la file</a>.</p>`;
+    else if (st.type === "ivr") body += `${kit.promptField("prompt", ed.prompt, "Annonce du menu", "« Pour le service commercial, tapez 1… ». WAV, MP3, M4A… ou micro : converti automatiquement.")}
+      <div class="fx-f"><span class="dl">Touches</span><table class="ivrkeys fx-keys"><tbody>
+      ${kit.IVR_KEYS.map((k) => `<tr><td><span class="kbadge">${esc(k)}</span></td><td>${kit.destPicker(`options.${k}`, ed.options[k], { selfId: ed.id, allowNone: true, noneLabel: "Rien", withPrompt: false, keyLabels: true })}</td></tr>`).join("")}</tbody></table></div>
+      <div class="fx-g2"><label>Délai pour choisir (s)<input type="number" min="1" max="30" name="timeout" value="${esc(ed.timeout)}"></label><label>Répéter le menu (fois)<input type="number" min="0" max="5" name="retries" value="${esc(ed.retries)}"></label></div>
+      <label class="check"><input type="checkbox" name="direct_dial" ${ed.direct_dial ? "checked" : ""}> L'appelant peut composer directement un numéro de poste</label>
+      ${kit.destPicker("invalid", ed.invalid, { label: "Aucun choix ou touche invalide", selfId: ed.id })}`;
     else if (st.type === "groupvm") body += `<label>Code PIN (4 à 8 chiffres)<input data-e="pin" inputmode="numeric" value="${esc(ed.pin)}" placeholder="généré si vide"></label>
       <div class="fx-f"><span class="dl">Membres (voyant de messagerie)</span>${memberList(ed.members)}</div>`;
     else if (st.type === "conf") body += `<label>Code PIN (facultatif)<input data-e="pin" inputmode="numeric" value="${esc(ed.pin)}" placeholder="aucun"></label>`;
@@ -251,10 +298,8 @@ function panel() {
     body = `<div class="fx-f"><span class="dl">Qui sonne ?</span>${memberList(st.users)}</div>
       <div class="fx-g2"><label>Comment ?<select data-f="strategy"><option value="all" ${st.strategy !== "hunt" ? "selected" : ""}>Tous ensemble</option><option value="hunt" ${st.strategy === "hunt" ? "selected" : ""}>L'un après l'autre</option></select></label>
       <label>Sonnerie (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || 20)}"></label></div>`;
-  } else if (["ivr", "prompt"].includes(st.type)) {
-    body = `<label>${esc(LABEL[st.type])}<select data-f="target">${opt(objOpts(st.type), st.target, "— Choisir —")}</select></label>
-      ${st.type === "prompt" && st.target ? `<audio controls src="/api/prompts/${esc(st.target)}/audio"></audio>` : ""}
-      <p class="hint" style="margin:0"><a href="#/gestion/${st.type === "ivr" ? "svi" : "annonces"}/nouveau" target="_blank" rel="noopener">Créer ${st.type === "ivr" ? "un SVI (annonce et touches)" : "une annonce (fichier ou micro)"}</a> dans un nouvel onglet, puis rouvre ce cadre.</p>`;
+  } else if (st.type === "prompt") {
+    body = kit.promptField("target", st.target, "Message joué à l'appelant", "Choisis une annonce, envoie un fichier (WAV, MP3, M4A…) ou enregistre-la au micro. L'appel passe ensuite à l'étape suivante.");
   } else if (st.type === "user" || st.type === "user_vm") {
     body = `<label>Utilisateur<select data-f="target">${opt(users, st.target, "— Choisir —")}</select></label>
       <p class="hint" style="margin:0">${st.type === "user" ? "L'appel suit ensuite les renvois de sa fiche." : "L'appelant laisse un message dans sa boîte vocale."}</p>`;
@@ -262,11 +307,14 @@ function panel() {
     body = `<label>Numéro<input data-f="target" inputmode="tel" placeholder="06 12 34 56 78" value="${esc(fmtP(st.target))}"></label>`;
   } else body = '<p class="hint" style="margin:0">L\'appel est raccroché.</p>';
   side.innerHTML = `<div class="fx-ph"><span class="fx-ci">${icon(st.type)}</span><strong>${esc(LABEL[st.type])}</strong><button type="button" class="fx-x" id="pclose2" aria-label="Fermer">${icon("x", 16)}</button></div>
-    <div class="fx-pb stack">${body}<div class="fx-perr" id="perr"></div></div>
+    <form class="fx-pb stack" id="fxform" novalidate>${body}<div class="fx-perr" id="perr"></div></form>
     <div class="fx-pf"><button type="button" class="btn ghost" id="pdel">Retirer l'étape</button><button type="button" class="btn" id="pok">${ed ? (ed.id ? "Enregistrer" : "Créer") : "Terminé"}</button></div>`;
   side.classList.add("open"); h.$("#scrim").classList.add("on");
   side.querySelector("[data-uq]")?.addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); side.querySelectorAll(".fx-u").forEach((l) => { l.hidden = q && !l.textContent.toLowerCase().includes(q); }); });
+  const form = h.$("#fxform");
+  kit.wirePromptFields(form); kit.wireDests(form);
   const members = () => [...side.querySelectorAll("[data-member]:checked")].map((i) => i.value);
+  if (st.type === "prompt") { const ps = form.querySelector("[name=target]"); const upd = () => { st.target = ps.value; errAt = null; draw(); }; ps.onchange = upd; new MutationObserver(upd).observe(ps, { childList: true }); }
   if (!ed) {
     side.querySelectorAll("[data-member]").forEach((i) => i.onchange = () => { st.users = members(); draw(); });
     side.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
@@ -281,11 +329,18 @@ function panel() {
   h.$("#pdel").onclick = () => { flow.branches[tab].splice(sel, 1); sel = null; closePanel(); draw(); };
   h.$("#pclose2").onclick = () => { sel = null; closePanel(); draw(); };
   h.$("#pok").onclick = async () => {
-    if (!ed) { sel = null; closePanel(); draw(); return; }
+    if (!ed) { if (st.type === "prompt") st.target = form.querySelector("[name=target]").value; sel = null; closePanel(); draw(); return; }
     const val = (k) => side.querySelector(`[data-e="${k}"]`)?.value;
+    const named = (k) => form.querySelector(`[name="${k}"]`)?.value ?? "";
     const body2 = { name: val("name"), number: val("number") };
-    if (st.type === "group") Object.assign(body2, { strategy: val("strategy"), ring_time: Number(val("ring_time")), members: members() });
-    if (st.type === "queue") Object.assign(body2, { strategy: val("strategy"), member_timeout: Number(val("member_timeout")), max_wait: Number(val("max_wait")), members: members() });
+    if (st.type === "group") Object.assign(body2, { strategy: val("strategy"), ring_time: Number(val("ring_time")), members: members(), greeting: named("greeting") });
+    if (st.type === "queue") Object.assign(body2, { strategy: val("strategy"), member_timeout: Number(val("member_timeout")), max_wait: Number(val("max_wait")), members: members(), greeting: named("greeting"), moh: named("moh") });
+    if (st.type === "ivr") {
+      // Mêmes champs que la fiche SVI ; on ne touche ni aux SDA ni aux horaires propres au SVI
+      const all = kit.collect(form, "ivr");
+      for (const k of ["dids", "schedule", "closed", "break", "holiday", "name", "number"]) delete all[k];
+      Object.assign(body2, all, { options: all.options || {} });
+    }
     if (st.type === "groupvm") Object.assign(body2, { pin: val("pin"), members: members() });
     if (st.type === "conf") Object.assign(body2, { pin: val("pin") });
     const btn = h.$("#pok"); btn.disabled = true;
