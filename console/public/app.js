@@ -1092,7 +1092,7 @@ function wireKeys(u, users) {
       const i = Number(row.dataset.i);
       row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
         keys[i][el.dataset.f] = el.value;
-        if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = ""; draw(); }
+        if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = keys[i].type === "status" ? "Ne pas déranger" : ""; draw(); }
         if (el.dataset.f === "value" && keys[i].type === "blf") { keys[i].label = others.find((x) => x.id === el.value)?.name || ""; draw(); }
       }));
       row.querySelector("[data-rm]").onclick = () => { keys.splice(i, 1); draw(); };
