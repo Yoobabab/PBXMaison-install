@@ -636,16 +636,19 @@ cmd_restaurer() {
     install -d -o root -g callikoe-hub -m 0750 "$HUB_ETC"
     [[ -d "$tmp/hub/etc" ]] && cp -a "$tmp/hub/etc/." "$HUB_ETC/"
     hub_init >/dev/null
-    if [[ -s "$tmp/hub/hub.sql" ]]; then
+    local nusers; nusers="$(runuser -u postgres -- psql -tAq -d callikoe_hub -c "SELECT count(*) FROM hub_users" 2>/dev/null || echo 0)"
+    if [[ "${nusers:-0}" -gt 0 ]]; then
+      warn "Console du serveur déjà en service sur ce serveur : ses comptes actuels sont gardés"
+    elif [[ -s "$tmp/hub/hub.sql" ]]; then
       systemctl stop callikoe-hub
       runuser -u postgres -- psql -q -c "DROP DATABASE IF EXISTS callikoe_hub" >/dev/null
       runuser -u postgres -- createdb -O callikoe_hub callikoe_hub
-      runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d callikoe_hub -f "$tmp/hub/hub.sql" >/dev/null
+      runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d callikoe_hub < "$tmp/hub/hub.sql" >/dev/null
       runuser -u postgres -- psql -q -d callikoe_hub -c "DO \$\$ DECLARE r record; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP EXECUTE format('ALTER TABLE %I OWNER TO callikoe_hub', r.tablename); END LOOP; FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname='public' LOOP EXECUTE format('ALTER SEQUENCE %I OWNER TO callikoe_hub', r.sequencename); END LOOP; END \$\$;" >/dev/null
       rm -f "$HUB_VAR/setup-token"
       systemctl start callikoe-hub
+      ok "Console du serveur restaurée (comptes IRT)"
     fi
-    ok "Console du serveur restaurée (comptes IRT)"
   fi
   local slug n line status msg
   while read -r slug; do

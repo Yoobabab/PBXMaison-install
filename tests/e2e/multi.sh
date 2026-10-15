@@ -334,9 +334,11 @@ glob() { labx "$1" "dialplan show globals" | sed -nE "s/^\s*$2=(.*)$/\1/p" | hea
 reset() { labx pa "dialplan set global RANG none" >/dev/null; labx pb "dialplan set global RANG none" >/dev/null; labx op "dialplan set global LASTOUT none" >/dev/null; }
 
 # 5. Appels entrants : opérateur → trunk de A → poste 201 de A (et pas celui de B)
-reset; labx op "channel originate PJSIP/accta extension s@play" >/dev/null; sleep 9
+sudo timeout 9 tcpdump -i any -nn -q "udp and dst host 127.0.0.11 and dst portrange 31000-31099" 2>/dev/null > "$LAB/rtp-a.txt" &
+reset; labx op "channel originate PJSIP/accta extension s@play" >/dev/null; sleep 9.5
 [[ "$(glob pa RANG)" == 201 && "$(glob pb RANG)" == none ]] && pass "Entrant sur le trunk de cli a → poste 201 de cli a uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clia; fail "entrant A"; }
-[[ "$(glob pa RTPRX)" =~ ^[0-9]+$ && "$(glob pa RTPRX)" -gt 50 ]] && pass "Son reçu par le poste de cli a ($(glob pa RTPRX) paquets RTP)" || echo "   (RTP poste A : $(glob pa RTPRX))" >> "$OUT"
+NRTP="$(grep -c . "$LAB/rtp-a.txt" || true)"
+(( NRTP > 50 )) && pass "Son de l'opérateur reçu par le poste de cli a (${NRTP} paquets RTP, directs, sans passer par l'aiguilleur)" || { echo "   (RTP vers le poste A : ${NRTP} paquets ; compteur du poste : $(glob pa RTPRX))" >> "$OUT"; fail "son entrant"; }
 reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null; sleep 9
 [[ "$(glob pb RANG)" == 201 && "$(glob pa RANG)" == none ]] && pass "Entrant sur le trunk de cli b → poste 201 de cli b uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; fail "entrant B"; }
 # Appel « pirate » vers la SDA de A, sans le jeton du trunk : refusé
