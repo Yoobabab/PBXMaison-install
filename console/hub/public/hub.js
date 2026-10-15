@@ -50,8 +50,17 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("#burger")) document.body.classList.toggle("side-open");
   else if (e.target.closest("#sidescrim") || e.target.closest("#nav a")) document.body.classList.remove("side-open");
   const c = e.target.closest("[data-copy]");
-  if (c) navigator.clipboard.writeText(c.dataset.copy).then(() => { const t = c.textContent; c.textContent = "Copié ✓"; setTimeout(() => (c.textContent = t), 1500); });
+  if (c) copyText(c.dataset.copy).then((ok) => { const t = c.textContent; c.textContent = ok ? "Copié ✓" : "Sélectionne et copie à la main"; setTimeout(() => (c.textContent = t), 1800); });
 });
+// navigator.clipboard n'existe qu'en HTTPS : repli tant que la console est en HTTP (avant le certificat)
+async function copyText(text) {
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch { /* repli */ }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.append(ta); ta.select(); ta.setSelectionRange(0, text.length);
+  let ok = false; try { ok = document.execCommand("copy"); } catch { ok = false; }
+  ta.remove(); return ok;
+}
 const formError = (form, err) => {
   form.querySelectorAll(".has-err").forEach((x) => x.classList.remove("has-err"));
   const msg = `<div class="flash bad">${esc(err?.message || "Erreur inattendue : recharge la page et réessaie.")}</div>`;
@@ -184,7 +193,7 @@ async function renderList() {
     $("#cards").innerHTML = list.length ? list.map((p) => `<a class="pbx-card" href="/ouvrir/${encodeURIComponent(p.slug)}" title="Ouvrir la console de ce PBX">
         <strong>${esc(p.name)}</strong><span class="mono">${esc(p.fqdn)}</span><span class="hint">${esc(p.slug)} · n°${p.n}</span>
         <span class="row">${pill(p.engine, "Moteur")}${pill(p.console, "Console")}</span></a>`).join("")
-      : `<div class="empty">${d.pbx.length ? "Aucun PBX ne correspond à la recherche." : "Aucun PBX sur ce serveur pour l'instant."}</div>`;
+      : `<div class="empty" style="grid-column:1/-1">${d.pbx.length ? "Aucun PBX ne correspond à la recherche." : `Aucun PBX sur ce serveur pour l'instant.${can("super", "admin") ? ` <a href="#/nouveau">Créer le premier PBX</a>` : ""}`}</div>`;
     $("#count").textContent = `${list.length} sur ${d.pbx.length} PBX (${d.max} au maximum)`;
   };
   app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>PBX clients</h1>
