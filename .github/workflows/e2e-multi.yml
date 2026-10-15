@@ -53,6 +53,8 @@ jobs:
           for c in clia clib; do sudo tail -n 400 /var/log/callikoe/$c/sipdebug > sip-$c.txt 2>/dev/null || true; done
           sudo tail -n 300 $GITHUB_WORKSPACE/tests/e2e/multi-lab/op/log/messages > op.txt 2>/dev/null || true
           sudo journalctl -u kamailio --no-pager -n 200 > kamailio.txt 2>/dev/null || true
+          sudo pkill tcpdump || true; sleep 1
+          sudo tcpdump -r /tmp/multi-sip.pcap -nn -A 2>/dev/null | grep -v -E "^\s*$" | grep -v -E "OPTIONS sip|CSeq: [0-9]+ OPTIONS" > sip-capture.txt || true
           sudo chown -R "$(id -u)" . ; ls -la
           git init -q -b e2e-diag && git add -A && git -c user.name=ci -c user.email=ci@invalid commit -qm "diag ${GITHUB_SHA}" 
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-diag

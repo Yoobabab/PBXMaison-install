@@ -221,6 +221,10 @@ exten => _[a-z0-9].,1,Set(GLOBAL(RANG)=${EXTEN})
 exten => s,1,Answer()
  same => n,Wait(5)
  same => n,Hangup()'
+# Capture réseau SIP (aiguilleur, PBX clients, opérateur, postes) : lue en cas d'échec
+sudo rm -f /tmp/multi-sip.pcap
+sudo tcpdump -i any -nn -s0 -U -w /tmp/multi-sip.pcap "udp port 5060 or udp portrange 6001-6002 or udp port 5070 or udp port 5080" >/dev/null 2>&1 &
+sleep 1
 # Traces SIP (lues seulement en cas d'échec)
 for c in clia clib; do astx $c "logger add channel sipdebug notice,warning,error,verbose" >/dev/null; astx $c "core set verbose 3" >/dev/null; astx $c "pjsip set logger on" >/dev/null; done
 sipdump() { # sipdump <PBX client> : diagnostics dans multi-diag.txt (publiés à part)
