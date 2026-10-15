@@ -23,11 +23,11 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   await load();
   const tab = TABS.find((t) => t[0] === sub) ? sub : "routages";
   const kind = TABS.find((t) => t[0] === tab)[2];
-  const head = `<div class="bar"><div class="grow"><h1>Gestion d'appels</h1><p class="sub" style="margin:0">Où vont les appels entrants : règles par numéro, horaires, groupes, files d'attente, SVI.</p></div></div>
-    <nav class="tabs">${TABS.map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
+  const head = `<div class="bar"><div class="grow"><h1>Gestion d'appels</h1><p class="sub" style="margin:0">Où vont les appels entrants : routages par numéro (avec leurs horaires), groupes, files d'attente, SVI.</p></div></div>
+    <nav class="tabs">${TABS.filter(([s]) => s !== "regles" || tab === "regles" || objs("rule").length).map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
   if (tab === "traceur") return renderTracer(head, id);
   if (tab === "renvois") return renderForwards(head);
-  if (id && kind === "flow") return renderFlowEditor(h, cf, head, id);
+  if (id && kind === "flow") return renderFlowEditor(h, cf, head, id, { promptField, wirePromptFields, destPicker, wireDests, scheduleFields, wireSchedule, collect, defaults, IVR_KEYS });
   if (id) return kind === "prompt" ? renderPromptForm(head, id) : renderForm(head, kind, id === "nouveau" ? null : id);
   return renderList(head, kind);
 }
@@ -36,7 +36,7 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
 const INTRO = {
   flow: "Le plus simple : décris le routage en une phrase ou construis-le en glissant des cadres de gauche à droite (SDA → sonnerie → groupe → messagerie…).",
   rule: "Une règle par numéro appelé (SDA) : où va l'appel pendant les heures d'ouverture, en dehors et les jours fériés. La règle par défaut prend les SDA sans règle.",
-  schedule: "Plages d'ouverture de la semaine, jours fériés et congés. Utilisés par les règles entrantes.",
+  schedule: "Plages d'ouverture de la semaine, jours fériés et congés. Choisis-les (ou crées-les) directement dans l'éditeur de routage.",
   group: "Plusieurs postes sonnent ensemble ou à tour de rôle. Les membres Absents, en Ne pas déranger ou qui refusent les appels de groupe ne sonnent pas.",
   queue: "L'appelant patiente en musique jusqu'à ce qu'un agent se libère ; la position dans la file peut être annoncée.",
   ivr: "Standard automatique : « Tapez 1 pour le service commercial… ». L'appelant peut aussi composer directement un numéro de poste.",
@@ -290,6 +290,8 @@ function renderForm(head, kind, id) {
       <label>Préfixe du nom affiché<input name="cid_prefix" maxlength="20" value="${esc(d.cid_prefix)}" placeholder="[Accueil]"><span class="hint">Les membres voient d'où vient l'appel.</span></label></div>
       <h3 class="cf-h">Utilisateurs</h3>
       ${membersPicker("members", d.members, { ordered: true, label: "Membres (l'ordre compte en recherche prioritaire et cyclique)" })}
+      <h3 class="cf-h">Message d'accueil</h3>
+      <div class="grid2">${promptField("greeting", d.greeting || "", "Annonce jouée avant la sonnerie (facultatif)", "WAV, MP3, M4A… ou micro : converti automatiquement (WAV 8 kHz, 16 bits, mono).")}</div>
       <h3 class="cf-h">Destinations</h3>
       <div class="grid2">${destPicker("no_answer", d.no_answer, { label: "Destination de non-réponse", selfId: id })}</div>
       ${officeFields(d, id)}`;

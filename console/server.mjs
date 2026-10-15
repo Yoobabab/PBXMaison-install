@@ -82,10 +82,8 @@ export async function buildApp({ db, ami } = {}) {
   const requireLogin = async (req, reply) => { if (!currentUser(req)) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." }); };
   // Actions sensibles (sécurité, trunks, règles sortantes, restauration, mise à jour) : code de double authentification de moins de 15 min
   const MFA_FRESH = 15 * 60_000;
-  const requireFreshMfa = async (req, reply) => {
-    const r = await requireUser(req, reply); if (r) return r;
-    if (Date.now() - currentUser(req).mfa_at > MFA_FRESH) return reply.code(403).send({ error: "Confirme avec ton code de double authentification.", need_reauth: true });
-  };
+  // (Code redemandé pour les actions sensibles : retiré à la demande d'IRT NETWORK ; la double authentification reste exigée à la connexion)
+  const requireFreshMfa = requireUser;
   const audit = (req, action, ok = true, detail = "", email = currentUser(req)?.email || "") =>
     db.query("INSERT INTO pbxmaison_audit (email, ip, action, ok, detail) VALUES ($1, $2, $3, $4, $5)", [email, String(req.ip || ""), action, ok, String(detail).slice(0, 300)]).catch(() => {});
   // Assistant : jeton d'installation tant qu'aucun administrateur n'existe, session ensuite
@@ -248,7 +246,6 @@ export async function buildApp({ db, ami } = {}) {
   const pendingTotp = new Map();
   app.post("/api/totp/setup", { preHandler: requireLogin }, async (req, reply) => {
     const u = currentUser(req);
-    if (u.mfa && Date.now() - u.mfa_at > MFA_FRESH) return reply.code(403).send({ error: "Confirme avec ton code actuel.", need_reauth: true });
     const secret = newTotpSecret(); pendingTotp.set(u.email, secret);
     const uri = otpauthUri(secret, u.email, `Callikoe ${pbxEnv().PBX_NAME || ""}`.trim());
     return { secret, uri, qr: qrSvg(uri) };

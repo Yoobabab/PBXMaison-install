@@ -555,3 +555,7 @@ body.no-side .shell{margin-left:0}
 .sysrow a{color:var(--ink);font-weight:500;text-decoration:none}
 .sysrow a:hover{color:var(--accent)}
 .sysr{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+
+.fx-drawer.wide{width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 48px)}
+.fx-srow{display:flex;gap:8px;align-items:center}
+.fx-keys td{padding:6px 4px}.fx-keys .dest .row>*{min-width:150px}

@@ -56,7 +56,7 @@ export const OFFICE_KINDS = ["group", "queue", "ivr"];
 export function defaultObject(kind) {
   const hang = { type: "hangup", target: "" };
   switch (kind) {
-    case "group": return { name: "", number: "", strategy: "all", members: [], ring_time: 20, cid_prefix: "", no_answer: hang, ...OFFICE };
+    case "group": return { name: "", number: "", strategy: "all", members: [], ring_time: 20, cid_prefix: "", greeting: "", no_answer: hang, ...OFFICE };
     case "queue": return { name: "", number: "", strategy: "ringall", members: [], member_timeout: 15, max_wait: 300, wrapup: 5,
       announce_position: true, announce_holdtime: false, greeting: "", moh: "", periodic: [], periodic_freq: 30, no_answer: hang, ...OFFICE };
     case "ivr": return { name: "", number: "", prompt: "", timeout: 5, retries: 2, direct_dial: true, options: {}, invalid: hang, ...OFFICE };
@@ -168,6 +168,7 @@ export function validateObject(kind, input, current, ctx) {
     if (input.strategy !== undefined) { if (!GROUP_STRATEGIES[input.strategy]) throw new UserError("Stratégie inconnue.", "strategy"); d.strategy = input.strategy; }
     if (input.members !== undefined) d.members = validMembers(input.members, ctx, "members");
     d.ring_time = int(input.ring_time, 5, 300, d.ring_time, "Durée de sonnerie (secondes)", "ring_time");
+    if (input.greeting !== undefined) d.greeting = promptId(input.greeting, ctx, "greeting");
     if (input.cid_prefix !== undefined) d.cid_prefix = String(input.cid_prefix).replace(/[\r\n"<>,;|\\(){}$]/g, " ").replace(/\s+/g, " ").trim().slice(0, 20);
     if (input.no_answer !== undefined) d.no_answer = validateDest(input.no_answer, ctx, "no_answer");
   } else if (kind === "queue") {
@@ -333,7 +334,7 @@ export function referencesTo(kind, id, objects, users) {
     if (kind === "prompt" && d.moh === id) where.push("musique d'attente");
     if (kind === "prompt" && (d.periodic || []).includes(id)) where.push("annonce d'attente");
     for (const [k, v] of Object.entries(d.options || {})) if (hit(v)) where.push(`touche ${k}`);
-    if (kind === "prompt" && (d.greeting === id || d.prompt === id)) where.push("annonce d'accueil");
+    if (kind === "prompt" && (d.greeting === id || d.prompt === id)) where.push(o.kind === "ivr" ? "annonce du SVI" : "annonce d'accueil");
     if (kind === "schedule" && d.schedule === id) where.push("horaires");
     for (const { b, i, st } of flowSteps(d)) {
       if (st.type === kind && st.target === id) where.push(`étape ${i + 1} (${BRANCHES[b].toLowerCase()})`);
@@ -487,6 +488,8 @@ export function buildCallflowDialplan(m) {
     L.push(" same => n,Set(CDR(dest_kind)=group)", " same => n,Set(__RINGTYPE=groupe)");
     const tails = officeGate(L, o, m);
     if (d.cid_prefix) L.push(` same => n,Set(CALLERID(name)=${d.cid_prefix} \${CALLERID(name)})`);
+    const gp = d.greeting && find(m.objects, "prompt", d.greeting);
+    if (gp?.data?.file) L.push(" same => n,Answer()", ` same => n,Playback(${promptPath(m.soundsDir, gp)})`);
     const ring = ringers(d.members, m.users);
     if (ring.length && d.strategy === "page") {
       // Interphone : décroché automatique (Call-Info answer-after=0), le groupe parle à tous les membres
@@ -639,6 +642,7 @@ function stepLines(st, m, tag) {
       if (!g) { add("NoOp(Groupe supprimé)"); break; }
       const d = g.data, time = st.time || d.ring_time;
       add("Set(__RINGTYPE=groupe)");
+      { const gp = d.greeting && find(m.objects, "prompt", d.greeting); if (gp?.data?.file) { add("Answer()"); add(`Playback(${promptPath(m.soundsDir, gp)})`); } }
       if (d.cid_prefix) add(`ExecIf($["\${CID_PFX}" = ""]?Set(CALLERID(name)=${d.cid_prefix} \${CALLERID(name)}))`), add("Set(CID_PFX=1)");
       if (d.strategy === "page") { const r = ringers(d.members, m.users); if (r.length) { add(`Page(${r.map(devices).join("&")},db(page-headers^s^1)i,${time})`); add("Goto(end)"); } break; }
       if (d.strategy === "rotate") {
