@@ -157,7 +157,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       contactUser = old || `cx${crypto.randomBytes(8).toString("hex")}`;
     }
     const proxyUri = tenant ? KAMAILIO_URI : proxy ? `sip:${proxy.host}:${proxy.port}^3Blr` : null;
-    const transport = `transport-${t.transport}`;
+    // Multi-tenant : pas de transport imposé (le PBX parle en UDP à l'aiguilleur, qui passe en TCP/TLS vers l'opérateur si besoin).
+    // Un transport imposé lierait aussi le son (RTP) à 127.0.0.1 : l'opérateur ne pourrait plus l'envoyer.
+    const transport = tenant ? null : `transport-${t.transport}`;
     const expiration = Math.max(60, t.registration.interval);
 
     if (dids === null && input.replace) dids = (await db.query("SELECT dids FROM pbxmaison_trunks WHERE id = $1", [name])).rows[0]?.dids || [];
@@ -359,6 +361,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       if (old.rowCount) await reload("res_pjsip.so", "res_pjsip_endpoint_identifier_ip.so", "res_pjsip_outbound_registration.so").catch(() => {});
       await db.query(`UPDATE ps_aors a SET support_path = 'yes' FROM ps_endpoints e WHERE e.aors = a.id AND e.context = 'from-internal' AND e.id !~ '-web$' AND a.support_path IS DISTINCT FROM 'yes'`);
       await db.query(`UPDATE ps_endpoints SET rewrite_contact = 'no' WHERE context = 'from-internal' AND id !~ '-web$' AND rewrite_contact IS DISTINCT FROM 'no'`);
+      const tr = await db.query("UPDATE ps_endpoints SET transport = NULL WHERE context = 'from-trunk' AND transport IS NOT NULL");
+      await db.query("UPDATE ps_registrations SET transport = NULL WHERE transport IS NOT NULL");
+      if (tr.rowCount) await reload("res_pjsip.so").catch(() => {});
       try { await publishRoutes(); } catch { /* l'aiguilleur sera mis à jour au prochain changement */ }
     }
     // Vidéo (appels vidéo, réunions) : VP8 / H.264, jusqu'à 16 flux vidéo pour les réunions
