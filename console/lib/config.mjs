@@ -5,6 +5,10 @@ import path from "node:path";
 export const APP_DIR = path.resolve(import.meta.dirname, "..", "..");
 export const ETC = process.env.PBXM_ETC || "/etc/pbxmaison";
 export const VAR = process.env.PBXM_VAR || "/var/lib/pbxmaison";
+/** Serveur multi-tenant : ce PBX est un client derrière l'aiguilleur SIP (Kamailio, 127.0.0.2:5060). */
+export const CX_MODE = process.env.CX_MODE === "tenant" ? "tenant" : "single";
+export const CX_TENANT = process.env.CX_TENANT || "";
+export const KAMAILIO_URI = "sip:127.0.0.2:5060;lr";
 export const TEMPLATES_FILE = path.join(APP_DIR, "pbx/trunk-templates.json");
 export const CONFIGURE_CMD = (process.env.PBXM_CONFIGURE_CMD || `sudo -n ${path.join(APP_DIR, "pbx/bin/pbx-configure")}`).split(" ");
 export const TRUSTED_KEY = fs.existsSync(path.join(ETC, "trusted-key.pem"))

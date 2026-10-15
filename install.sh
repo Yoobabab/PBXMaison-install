@@ -9,8 +9,22 @@
 #  La configuration du PBX (licence, certificat, mot de passe) se fait dans l'assistant.
 #
 #  Relancer la même commande met à jour le PBX sans perdre sa configuration.
+#
+#  Serveur multi-tenant (plusieurs PBX clients sur un seul VPS, tous en 5060) :
+#    curl -fsSL …/install.sh | sudo bash -s -- --multi-tenant
+#    curl -fsSL …/install.sh | sudo bash -s -- --multi-tenant --restaurer /root/callikoe-serveur-AAAAMMJJ-HHMMSS.tar.gz
 # =============================================================================
 set -Eeuo pipefail
+
+MULTI=0; RESTORE_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --multi-tenant) MULTI=1 ;;
+    --restaurer) RESTORE_FILE="${2:-}"; shift ;;
+  esac
+  shift
+done
+[[ -f /etc/callikoe/tenants.json ]] && MULTI=1   # serveur déjà multi-tenant : la mise à jour garde ce mode
 
 REPO="${PBXM_REPO:-Yoobabab/PBXMaison-install}"
 REF="${PBXM_REF:-main}"
@@ -32,7 +46,12 @@ trap 'die "Erreur ligne $LINENO : $BASH_COMMAND"' ERR
 [[ $EUID -eq 0 ]] || die "Lance la commande avec sudo (… | sudo bash)."
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
-echo "${B}Callikoe — installation${N} ($(date '+%F %T'))"
+echo "${B}Callikoe — installation$( ((MULTI)) && echo " du serveur multi-tenant")${N} ($(date '+%F %T'))"
+if ((MULTI)); then
+  [[ -f /etc/pbxmaison/pbx.env ]] && die "Ce serveur héberge déjà un PBX seul. Le serveur multi-tenant s'installe sur un VPS neuf ; le PBX actuel y sera importé avec sa sauvegarde (callikoe-host importer)."
+  [[ -z "$RESTORE_FILE" || -f "$RESTORE_FILE" ]] || die "Sauvegarde introuvable : ${RESTORE_FILE}"
+  ETC=/etc/callikoe
+fi
 export DEBIAN_FRONTEND=noninteractive
 apt_install() { apt-get install -y -q --no-install-recommends "$@" >/dev/null; }
 START=$SECONDS
@@ -68,6 +87,7 @@ if [[ ! -x /usr/bin/node ]] || [[ "$(/usr/bin/node -p 'process.versions.node.spl
   apt-get update -q >/dev/null
 fi
 apt_install nodejs postgresql unixodbc odbc-postgresql alembic python3-alembic python3-psycopg2 nginx certbot fail2ban python3-systemd
+((MULTI)) && apt_install kamailio kamailio-extra-modules conntrack
 [[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" -ge $NODE_MAJOR ]] || die "Node.js ${NODE_MAJOR} n'a pas pu être installé ($(/usr/bin/node -v))."
 systemctl enable --now nginx >/dev/null 2>&1 || true
 ok "Node.js $(/usr/bin/node -v), PostgreSQL, Nginx, Certbot, fail2ban"
@@ -116,7 +136,7 @@ chmod -R g+rwX /var/spool/asterisk/voicemail
 find /var/spool/asterisk/voicemail -type d -exec chmod g+s {} +
 # Enregistrements des appels (lus par la console : groupe asterisk)
 install -d -o asterisk -g asterisk -m 2770 /var/spool/asterisk/monitor /var/spool/asterisk/monitor/callikoe
-cat > /etc/systemd/system/asterisk.service <<'EOF'
+((MULTI)) || cat > /etc/systemd/system/asterisk.service <<'EOF'
 [Unit]
 Description=Asterisk (Callikoe)
 After=network-online.target postgresql.service
@@ -145,6 +165,11 @@ EOF
 # =============================================================================
 step "Base de données"
 # =============================================================================
+if ((MULTI)); then
+  install -d -m 0755 "$ETC"
+  systemctl enable --now postgresql >/dev/null 2>&1
+  ok "PostgreSQL prêt (une base par PBX client)"
+else
 install -d -m 0750 "$ETC"
 id pbxmaison >/dev/null 2>&1 || useradd --system --home-dir "$VAR" --no-create-home --shell /usr/sbin/nologin pbxmaison
 chgrp pbxmaison "$ETC"
@@ -186,14 +211,17 @@ rm -rf "$TMP/dbm" && cp -a /usr/share/asterisk/ast-db-manage "$TMP/dbm"
 sed "s#^sqlalchemy.url = .*#sqlalchemy.url = postgresql://asterisk:${DB_PASSWORD}@127.0.0.1/asterisk#" "$TMP/dbm/config.ini.sample" > "$TMP/dbm/config.ini"
 (cd "$TMP/dbm" && alembic -c config.ini upgrade head >/dev/null)
 ok "Base « asterisk » à jour"
+fi
 
 # =============================================================================
 step "Console web"
 # =============================================================================
+if ((MULTI)); then :; else
 install -d -o pbxmaison -g asterisk -m 2750 "$VAR"
 install -d -o pbxmaison -g pbxmaison -m 0700 "$VAR/staging"
 install -d -o pbxmaison -g asterisk -m 2750 "$VAR/sounds"
 [[ -f "$VAR/extensions_routes.conf" ]] || install -o pbxmaison -g asterisk -m 0640 /dev/null "$VAR/extensions_routes.conf"
+fi
 # Modules Node.js : réinstallés seulement s'ils ont changé (npm ci repart de zéro et prend 1 à 2 min sur un petit VPS)
 LOCKSUM="$(sha256sum "$APP/console/package-lock.json" | cut -c1-64)"
 if [[ "$(cat "$APP/console/node_modules/.callikoe-lock" 2>/dev/null)" == "$LOCKSUM" ]]; then
@@ -204,6 +232,11 @@ else
   echo "$LOCKSUM" > "$APP/console/node_modules/.callikoe-lock"
 fi
 if [[ -n "${PBXM_TRUSTED_KEY_FILE:-}" ]]; then install -m 0644 "$PBXM_TRUSTED_KEY_FILE" "$ETC/trusted-key.pem"; fi
+if ((MULTI)); then
+  chmod 755 "$APP/pbx/bin/callikoe-host"
+  ln -sf "$APP/pbx/bin/callikoe-host" /usr/local/sbin/callikoe-host
+  ok "Code installé ; une console par PBX client (callikoe-host)"
+else
 cat > /etc/sudoers.d/pbxmaison <<EOF
 # La console web peut appliquer la configuration système, et rien d'autre
 pbxmaison ALL=(root) NOPASSWD: ${APP}/pbx/bin/pbx-configure
@@ -261,6 +294,7 @@ systemctl enable --now pbxmaison-dns.timer >/dev/null 2>&1 || true
 systemctl enable pbxmaison-console >/dev/null 2>&1
 systemctl restart pbxmaison-console
 ok "Console démarrée"
+fi
 
 # =============================================================================
 step "Réseau et accès web"
@@ -288,7 +322,11 @@ REF='${REF}'
 COMMIT='${COMMIT}'
 EOF
 chmod 644 "$ETC/install.state"
-"$APP/pbx/bin/pbx-configure" nginx
+if ((MULTI)); then
+  "$APP/pbx/bin/callikoe-host" init || die "Préparation du serveur multi-tenant impossible."
+else
+  "$APP/pbx/bin/pbx-configure" nginx
+fi
 systemctl enable nginx >/dev/null 2>&1
 ok "IP publique ${PUBLIC_IP}$( ((BEHIND_NAT)) && echo " (machine derrière un routeur, IP locale ${LOCAL_IP})")"
 ((BEHIND_NAT)) && warn "Derrière une box : rediriger vers ${LOCAL_IP} UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80/443/8822, et désactiver le SIP ALG."
@@ -296,12 +334,13 @@ ok "IP publique ${PUBLIC_IP}$( ((BEHIND_NAT)) && echo " (machine derrière un ro
 # =============================================================================
 step "Sécurité : pare-feu et fail2ban"
 # =============================================================================
+RTP_MAX=20000; ((MULTI)) && RTP_MAX=59999   # multi-tenant : 200 ports par PBX client
 if ((IS_WSL)); then
   ok "Sous WSL : pare-feu de Windows"
 elif [[ "${PBXM_NO_FIREWALL:-0}" == 1 ]]; then
   warn "Pare-feu non configuré (PBXM_NO_FIREWALL=1)"
 elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-  ufw allow 5060/udp >/dev/null; ufw allow 5060:5061/tcp >/dev/null; ufw allow 10000:20000/udp >/dev/null
+  ufw allow 5060/udp >/dev/null; ufw allow 5060:5061/tcp >/dev/null; ufw allow "10000:${RTP_MAX}/udp" >/dev/null
   ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 8822/tcp >/dev/null
   ok "Règles ajoutées au pare-feu ufw existant"
 else
@@ -324,7 +363,7 @@ table inet pbxmaison {
     tcp dport 8822 accept comment "Console d'administration"
     udp dport 5060 accept comment "SIP UDP"
     tcp dport { 5060, 5061 } accept comment "SIP TCP/TLS"
-    udp dport 10000-20000 accept comment "Audio RTP"
+    udp dport 10000-${RTP_MAX} accept comment "Audio RTP"
   }
   chain forward { type filter hook forward priority 0; policy drop; }
   chain output { type filter hook output priority 0; policy accept; }
@@ -334,17 +373,37 @@ EOF
   ok "Pare-feu actif (SSH port ${SSH_PORTS}, SIP, audio, web ; le reste est bloqué)"
 fi
 # Réglages gardés d'une installation à l'autre (modifiables dans la console : Sécurité)
+if ((MULTI)); then
+  : # jail de l'aiguilleur SIP écrite par callikoe-host init (adresses réelles des postes)
+else
 if ! grep -q "sshd" /etc/fail2ban/jail.d/pbxmaison.conf 2>/dev/null; then
   "$APP/pbx/bin/pbx-configure" f2b settings 5 10 60 "" >/dev/null || warn "Réglages fail2ban non écrits"
 fi
 touch /var/log/asterisk/security /var/log/asterisk/messages
 chown asterisk:asterisk /var/log/asterisk/security /var/log/asterisk/messages
+fi
 systemctl restart fail2ban || warn "fail2ban n'a pas redémarré (journalctl -u fail2ban)"
 ok "fail2ban actif (réglages : console › Sécurité)"
 
 # =============================================================================
 step "Assistant de configuration"
 # =============================================================================
+if ((MULTI)); then
+  if [[ -n "$RESTORE_FILE" ]]; then
+    "$APP/pbx/bin/callikoe-host" restaurer "$RESTORE_FILE" || die "Restauration du serveur impossible."
+  else
+    "$APP/pbx/bin/callikoe-host" mettre-a-jour || warn "Certains PBX clients n'ont pas redémarré (callikoe-host liste)"
+  fi
+  echo
+  echo "${G}${B}✔ Serveur multi-tenant prêt en $(( (SECONDS - START) / 60 )) min $(( (SECONDS - START) % 60 )) s${N}"
+  if ((${#WARNINGS[@]})); then echo; for w in "${WARNINGS[@]}"; do echo "  ${Y}⚠${N} $w"; done; fi
+  echo
+  "$APP/pbx/bin/callikoe-host" liste || true
+  echo
+  echo "  Créer un PBX client : colle ici la commande « callikoe-host creer … » donnée par le portail (onglet Serveurs multi-tenant)."
+  echo
+  exit 0
+fi
 if [[ -f "$ETC/pbx.env" ]]; then
   "$APP/pbx/bin/pbx-configure" render
   systemctl restart asterisk 2>/dev/null || true

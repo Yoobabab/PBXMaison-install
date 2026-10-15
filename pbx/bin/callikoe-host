@@ -1,0 +1,518 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  callikoe-host — serveur multi-tenant Callikoe (plusieurs PBX clients sur un seul VPS, tous en SIP 5060)
+#
+#    callikoe-host liste                                  PBX clients du serveur et leur état
+#    callikoe-host creer <nom> <config>                   crée un PBX client à partir de son pbx-config.json
+#                                                         (<config> = fichier, ou le texte base64 donné par le portail)
+#    callikoe-host importer <nom> <sauvegarde.tar.gz>     PBX existant (installé seul) → client de ce serveur
+#    callikoe-host supprimer <nom> --confirmer            supprime un PBX client et toutes ses données
+#    callikoe-host sauvegarder [--enregistrements]        sauvegarde du serveur entier (tous les PBX)
+#    callikoe-host restaurer <sauvegarde-serveur.tar.gz>  restaure le serveur entier (VPS neuf, après installation)
+#    callikoe-host init | mettre-a-jour | dns | aiguilleur   usage interne (installeur, tâches planifiées)
+#
+#  Chaque PBX client a son moteur (callikoe-asterisk@<nom>), sa console (callikoe-console@<nom>), sa base (cx_<nom>),
+#  ses fichiers, ses comptes système ; l'aiguilleur SIP (Kamailio) les sert tous sur le port 5060.
+# =============================================================================
+set -Eeuo pipefail
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+
+APP=/opt/pbxmaison
+CX=/etc/callikoe
+REG="$CX/tenants.json"
+TVAR=/var/lib/callikoe/t
+KDB=/var/lib/callikoe/kamailio/db
+BKDIR=/var/lib/callikoe/backups
+CONF="$APP/pbx/bin/pbx-configure"
+
+if [[ -t 1 ]]; then B=$'\e[1m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; N=$'\e[0m'; else B='' G='' Y='' R='' N=''; fi
+ok()   { echo "  ${G}✔${N} $*"; }
+warn() { echo "  ${Y}⚠${N} $*"; }
+die()  { echo "${R}✖ $*${N}" >&2; exit 1; }
+trap 'die "Erreur ligne $LINENO : $BASH_COMMAND"' ERR
+[[ $EUID -eq 0 ]] || die "callikoe-host doit être lancé en root (sudo)."
+
+valid_slug() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{1,23}$ ]]; }
+reg_json() { node -e "$1" "$REG" "${@:2}"; }
+reg_get() { # reg_get <nom> <champ>
+  node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const t=(r.tenants||[]).find(x=>x.slug===process.argv[2]);if(!t)process.exit(1);process.stdout.write(String(t[process.argv[3]]??""))' "$REG" "$1" "$2"
+}
+reg_slugs() { node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));for(const t of r.tenants||[])console.log(t.slug)' "$REG"; }
+db_name() { echo "cx_${1//-/_}"; }
+
+# ----------------------------------------------------------------------------- Préparation du serveur
+cmd_init() {
+  [[ -f "$CX/install.state" ]] || die "Lance d'abord l'installeur (install.sh --multi-tenant)."
+  set -a; . "$CX/install.state"; set +a
+  install -d -m 0755 "$CX" "$CX/t" /var/lib/callikoe "$TVAR" /var/spool/callikoe /var/log/callikoe
+  install -d -m 0750 "$BKDIR"
+  [[ -f "$REG" ]] || { echo '{"version":1,"tenants":[]}' > "$REG"; chmod 644 "$REG"; }
+
+  # Aiguilleur SIP
+  install -d -o kamailio -g kamailio -m 0755 /var/lib/callikoe/kamailio "$KDB"
+  local listen
+  if [[ -n "${LOCAL_IP:-}" && "${LOCAL_IP}" != "${PUBLIC_IP}" ]]; then
+    listen="listen=udp:${LOCAL_IP}:5060 advertise ${PUBLIC_IP}:5060
+listen=tcp:${LOCAL_IP}:5060 advertise ${PUBLIC_IP}:5060"
+  else
+    listen="listen=udp:${PUBLIC_IP}:5060
+listen=tcp:${PUBLIC_IP}:5060"
+  fi
+  LISTEN="$listen" node -e 'const fs=require("fs");fs.writeFileSync(process.argv[2],fs.readFileSync(process.argv[1],"utf8").replace("@@LISTEN@@",process.env.LISTEN))' \
+    "$APP/pbx/kamailio/kamailio.cfg" /etc/kamailio/kamailio.cfg
+  node "$APP/pbx/lib/kamailio-tables.mjs" "$REG" "$KDB" "$TVAR" >/dev/null
+  chown -R kamailio:kamailio "$KDB"
+  # L'adresse interne 127.0.0.2 (côté PBX clients) existe déjà sur l'interface lo (127.0.0.0/8)
+  kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null 2>&1 || die "Configuration de l'aiguilleur SIP invalide (kamailio -c)."
+  systemctl enable kamailio >/dev/null 2>&1
+  systemctl restart kamailio
+  ok "Aiguilleur SIP actif (5060, IP ${PUBLIC_IP})"
+
+  # Modèles de services : un moteur et une console par PBX client
+  cat > /etc/systemd/system/callikoe-asterisk@.service <<'EOF'
+[Unit]
+Description=Callikoe — moteur téléphonique du PBX %i
+After=network-online.target postgresql.service kamailio.service
+Wants=postgresql.service
+ConditionPathExists=/etc/callikoe/t/%i/asterisk/asterisk.conf
+
+[Service]
+Type=simple
+User=ast-%i
+Group=cx-%i
+UMask=0007
+RuntimeDirectory=callikoe/%i
+RuntimeDirectoryMode=0770
+Environment=ODBCINI=/etc/callikoe/t/%i/odbc.ini
+ExecStart=/usr/sbin/asterisk -f -C /etc/callikoe/t/%i/asterisk/asterisk.conf
+ExecReload=/usr/sbin/asterisk -C /etc/callikoe/t/%i/asterisk/asterisk.conf -rx "core reload"
+ExecStop=/usr/sbin/asterisk -C /etc/callikoe/t/%i/asterisk/asterisk.conf -rx "core stop gracefully"
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  cat > /etc/systemd/system/callikoe-console@.service <<EOF
+[Unit]
+Description=Callikoe — console du PBX %i
+After=network-online.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=cx-%i
+Group=cx-%i
+UMask=0007
+EnvironmentFile=/etc/callikoe/t/%i/secrets.env
+EnvironmentFile=/etc/callikoe/t/%i/console.env
+WorkingDirectory=${APP}/console
+ExecStart=/usr/bin/node ${APP}/console/server.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  cat > /etc/systemd/system/callikoe-dns.service <<EOF
+[Unit]
+Description=Callikoe — mise à jour des adresses des PBX clients
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${APP}/pbx/bin/callikoe-host dns
+EOF
+  cat > /etc/systemd/system/callikoe-dns.timer <<'EOF'
+[Unit]
+Description=Callikoe — mise à jour régulière des adresses des PBX clients
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=6h
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now callikoe-dns.timer >/dev/null 2>&1 || true
+
+  # Web : bloc par défaut (certificats Let's Encrypt), puis un bloc par PBX client
+  install -d /var/www/letsencrypt
+  cat > /etc/nginx/sites-available/callikoe-default <<'EOF'
+# Callikoe — serveur multi-tenant : adresse inconnue → rien ; certificats Let's Encrypt
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    server_tokens off;
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location / { return 404; }
+}
+EOF
+  ln -sf /etc/nginx/sites-available/callikoe-default /etc/nginx/sites-enabled/callikoe-default
+  rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/pbxmaison
+  nginx -t -q && { systemctl is-active --quiet nginx && systemctl reload nginx || systemctl enable --now nginx >/dev/null 2>&1; }
+  ok "Serveur web prêt"
+
+  # fail2ban : les échecs d'authentification sont notés par l'aiguilleur avec l'adresse réelle du poste
+  cat > /etc/fail2ban/filter.d/callikoe-sip.conf <<'EOF'
+[Definition]
+failregex = CALLIKOE-AUTHFAIL <HOST>
+            CALLIKOE-FLOOD <HOST>$
+            CALLIKOE-UNKNOWN <HOST>
+ignoreregex =
+EOF
+  printf '[Definition]\nfailregex = ^CALLIKOE-NEVER-MATCH <HOST>$\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-manual.conf
+  touch /var/log/pbxmaison-manual-ban.log
+  if [[ ! -f /etc/fail2ban/jail.d/callikoe.conf ]]; then
+    cat > /etc/fail2ban/jail.d/callikoe.conf <<'EOF'
+# Callikoe — serveur multi-tenant
+[callikoe-sip]
+enabled  = true
+backend  = systemd
+journalmatch = _SYSTEMD_UNIT=kamailio.service
+filter   = callikoe-sip
+maxretry = 5
+findtime = 10m
+bantime  = 60m
+banaction = %(banaction_allports)s
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled  = true
+backend  = systemd
+
+[callikoe-manual]
+enabled  = true
+backend  = auto
+filter   = callikoe-manual
+logpath  = /var/log/pbxmaison-manual-ban.log
+maxretry = 1
+bantime  = -1
+banaction = %(banaction_allports)s
+ignoreip = 127.0.0.1/8 ::1
+EOF
+  fi
+  systemctl restart fail2ban >/dev/null 2>&1 || warn "fail2ban n'a pas redémarré (journalctl -u fail2ban)"
+  ok "Protection anti-intrusion sur l'aiguilleur SIP"
+}
+
+# ----------------------------------------------------------------------------- Création d'un PBX client
+# tenant_skeleton <nom> <n> [dossier de secrets à reprendre]
+tenant_skeleton() {
+  local slug="$1" n="$2" keep="${3:-}"
+  local etc="$CX/t/$slug" var="$TVAR/$slug" spool="/var/spool/callikoe/$slug" db; db="$(db_name "$slug")"
+  getent group "cx-$slug" >/dev/null || groupadd --system "cx-$slug"
+  id "cx-$slug" >/dev/null 2>&1 || useradd --system --gid "cx-$slug" --home-dir "$var" --no-create-home --shell /usr/sbin/nologin "cx-$slug"
+  id "ast-$slug" >/dev/null 2>&1 || useradd --system --gid "cx-$slug" --home-dir "$var/asterisk" --no-create-home --shell /usr/sbin/nologin "ast-$slug"
+  install -d -o root -g "cx-$slug" -m 0750 "$etc"
+  install -d -o "ast-$slug" -g "cx-$slug" -m 0750 "$etc/asterisk" "$etc/asterisk/keys"
+  install -d -o "cx-$slug" -g "cx-$slug" -m 2770 "$var" "$var/sounds"
+  install -d -o "cx-$slug" -g "cx-$slug" -m 0700 "$var/staging"
+  install -d -o "ast-$slug" -g "cx-$slug" -m 2770 "$var/asterisk" "$spool" "$spool/voicemail" "$spool/voicemail/default" "$spool/monitor" "$spool/monitor/callikoe"
+  install -d -o "ast-$slug" -g "cx-$slug" -m 2770 "/var/log/callikoe/$slug"
+  [[ -f "$var/extensions_routes.conf" ]] || install -o "cx-$slug" -g "cx-$slug" -m 0660 /dev/null "$var/extensions_routes.conf"
+  ln -sfn "$CX/install.state" "$etc/install.state"
+  [[ -f "$CX/trusted-key.pem" ]] && ln -sfn "$CX/trusted-key.pem" "$etc/trusted-key.pem"
+  if [[ -n "$keep" && -f "$keep/secrets.env" ]]; then
+    install -o root -g "cx-$slug" -m 0640 "$keep/secrets.env" "$etc/secrets.env"
+  elif [[ ! -f "$etc/secrets.env" ]]; then
+    ( umask 077; cat > "$etc/secrets.env" <<EOF
+DB_PASSWORD='$(openssl rand -hex 24)'
+AMI_SECRET='$(openssl rand -hex 24)'
+ARI_PASSWORD='$(openssl rand -hex 24)'
+SESSION_SECRET='$(openssl rand -hex 32)'
+EOF
+    )
+    chown root:"cx-$slug" "$etc/secrets.env"; chmod 640 "$etc/secrets.env"
+  fi
+  printf "TENANT_SLUG='%s'\nTENANT_N='%s'\n" "$slug" "$n" > "$etc/tenant.env"; chmod 644 "$etc/tenant.env"
+  local DB_PASSWORD; DB_PASSWORD="$(. "$etc/secrets.env"; echo "$DB_PASSWORD")"
+  cat > "$etc/odbc.ini" <<EOF
+[$db]
+Description=Callikoe ${slug}
+Driver=PostgreSQL Unicode
+Database=$db
+Servername=127.0.0.1
+Port=5432
+UserName=$db
+Password=${DB_PASSWORD}
+EOF
+  chown root:"cx-$slug" "$etc/odbc.ini"; chmod 640 "$etc/odbc.ini"
+  cat > "$etc/console.env" <<EOF
+NODE_ENV=production
+CX_MODE=tenant
+CX_TENANT=$slug
+HOST=127.0.0.1
+PORT=$((9000 + n))
+PBXM_ETC=$etc
+PBXM_VAR=$var
+PBXM_DB_NAME=$db
+PBXM_DB_USER=$db
+PBXM_AMI_PORT=$((7000 + n))
+PBXM_CONFIGURE_CMD=sudo -n ${CONF} --tenant ${slug}
+PBXM_BACKUP_DIR=$var/backups
+PBXM_REC_DIR=$spool/monitor/callikoe
+PBXM_VM_SPOOL=$spool/voicemail
+EOF
+  chmod 644 "$etc/console.env"
+  # Base de données du client (son propre compte : un PBX ne lit pas la base d'un autre)
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -q <<SQL >/dev/null
+DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$db') THEN CREATE ROLE $db LOGIN PASSWORD '${DB_PASSWORD}';
+  ELSE ALTER ROLE $db WITH LOGIN PASSWORD '${DB_PASSWORD}'; END IF;
+END \$\$;
+SQL
+  [[ "$(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='$db'")" == 1 ]] || runuser -u postgres -- createdb -O "$db" "$db"
+  runuser -u postgres -- psql -q -c "REVOKE ALL ON DATABASE $db FROM PUBLIC" >/dev/null
+  local dbm; dbm="$(mktemp -d)"
+  cp -a /usr/share/asterisk/ast-db-manage/. "$dbm/"
+  sed "s#^sqlalchemy.url = .*#sqlalchemy.url = postgresql://${db}:${DB_PASSWORD}@127.0.0.1/${db}#" "$dbm/config.ini.sample" > "$dbm/config.ini"
+  (cd "$dbm" && alembic -c config.ini upgrade head >/dev/null 2>&1) || { rm -rf "$dbm"; die "Création des tables du PBX ${slug} impossible."; }
+  rm -rf "$dbm"
+  # La console de ce client n'a le droit d'agir que sur son propre PBX
+  cat > "/etc/sudoers.d/callikoe-$slug" <<EOF
+cx-$slug ALL=(root) NOPASSWD: ${CONF} --tenant ${slug} *
+EOF
+  chmod 440 "/etc/sudoers.d/callikoe-$slug"
+  visudo -cq -f "/etc/sudoers.d/callikoe-$slug" || { rm -f "/etc/sudoers.d/callikoe-$slug"; die "Règle sudo invalide."; }
+}
+
+# Numéro libre (1 à 250) : ports et plage audio du PBX client
+free_n() {
+  node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const used=new Set((r.tenants||[]).map(t=>t.n));for(let n=1;n<=250;n++)if(!used.has(n)){console.log(n);process.exit(0)}process.exit(1)' "$REG" \
+    || die "250 PBX clients au maximum sur un serveur."
+}
+reg_add() { # reg_add <nom> <n> <fqdn> <nom affiché> <pbx_id>
+  node -e '
+    const fs=require("fs");const [f,slug,n,fqdn,name,id]=process.argv.slice(1);
+    const r=JSON.parse(fs.readFileSync(f,"utf8"));r.tenants=(r.tenants||[]).filter(t=>t.slug!==slug);
+    r.tenants.push({slug,n:Number(n),fqdn,name,pbx_id:id,created_at:new Date().toISOString()});
+    r.tenants.sort((a,b)=>a.n-b.n);fs.writeFileSync(f+".new",JSON.stringify(r,null,2));fs.renameSync(f+".new",f);' "$REG" "$@"
+}
+reg_del() {
+  node -e 'const fs=require("fs");const [f,slug]=process.argv.slice(1);const r=JSON.parse(fs.readFileSync(f,"utf8"));r.tenants=(r.tenants||[]).filter(t=>t.slug!==slug);fs.writeFileSync(f+".new",JSON.stringify(r,null,2));fs.renameSync(f+".new",f)' "$REG" "$1"
+}
+aiguilleur() {
+  node "$APP/pbx/lib/kamailio-tables.mjs" "$REG" "$KDB" "$TVAR" >/dev/null
+  chown -R kamailio:kamailio "$KDB"; local t; for t in dom tru prx; do kamcmd htable.reload "$t" >/dev/null 2>&1 || true; done
+}
+
+# Lit un pbx-config.json (fichier ou base64) et le vérifie ; écrit le fichier dans $2
+read_config() { # read_config <fichier|base64> <destination>
+  local src="$1" dst="$2"
+  if [[ -f "$src" ]]; then cp "$src" "$dst"
+  else printf '%s' "$src" | tr -d ' \n\r' | base64 -d > "$dst" 2>/dev/null || die "Configuration illisible : copie la commande en entier depuis le portail."
+  fi
+  local key="$APP/pbx/portal-public-key.pem"; [[ -f "$CX/trusted-key.pem" ]] && key="$CX/trusted-key.pem"
+  node "$APP/pbx/lib/verify-config.mjs" "$dst" "$key" >/dev/null 2>&1 || {
+    node "$APP/pbx/lib/verify-config.mjs" "$dst" "$key" 2>&1 | sed 's/^/  /' >&2; die "Configuration refusée."; }
+}
+cfg_field() { node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const v=process.argv[2].split(".").reduce((o,k)=>o?.[k],c);process.stdout.write(String(v??""))' "$1" "$2"; }
+
+# Applique la configuration du PBX (licence, adresse, certificat, démarrage) en affichant les étapes
+apply_tenant() { # apply_tenant <nom> <fichier pbx-config.json déjà dans le staging du client>
+  local slug="$1" file="$2" line status msg rc=0
+  while IFS= read -r line; do
+    status="$(node -e 'try{const j=JSON.parse(process.argv[1]);process.stdout.write(j.status+"\t"+j.message)}catch{}' "$line")"
+    [[ -n "$status" ]] || continue
+    msg="${status#*	}"; status="${status%%	*}"
+    case "$status" in ok) ok "$msg" ;; warn) warn "$msg" ;; error) echo "  ${R}✖${N} $msg"; rc=1 ;; esac
+  done < <("$CONF" --tenant "$slug" apply "$file" || true)
+  return $rc
+}
+
+cmd_creer() {
+  local slug="${1:-}" src="${2:-}"
+  valid_slug "$slug" || die "Nom du PBX : 2 à 24 caractères, minuscules, chiffres et tirets (ex. boulangerie-dupont)."
+  [[ -n "$src" ]] || die "Usage : callikoe-host creer <nom> <fichier pbx-config.json ou texte du portail>"
+  [[ -f "$REG" ]] || die "Serveur multi-tenant non initialisé (install.sh --multi-tenant)."
+  reg_get "$slug" slug >/dev/null 2>&1 && die "Le PBX « ${slug} » existe déjà sur ce serveur."
+  local tmp; tmp="$(mktemp)"
+  read_config "$src" "$tmp"
+  local fqdn id name
+  fqdn="$(cfg_field "$tmp" pbx.fqdn)"; id="$(cfg_field "$tmp" pbx.id)"; name="$(cfg_field "$tmp" pbx.name)"
+  node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const [f,id]=process.argv.slice(2);for(const t of r.tenants||[]){if(t.fqdn===f){console.error("adresse");process.exit(1)}if(t.pbx_id===id){console.error("licence");process.exit(2)}}' "$REG" "$fqdn" "$id" \
+    || die "Cette adresse (${fqdn}) ou cette licence est déjà utilisée par un autre PBX du serveur."
+  local n; n="$(free_n)"
+  echo "${B}Création du PBX « ${name} » (${slug}, ${fqdn})${N}"
+  tenant_skeleton "$slug" "$n"
+  reg_add "$slug" "$n" "$fqdn" "$name" "$id"
+  ok "PBX n°${n} : base, comptes et dossiers prêts"
+  local var="$TVAR/$slug"
+  openssl rand -hex 12 > "$var/setup-token"; chown "cx-$slug:cx-$slug" "$var/setup-token"; chmod 600 "$var/setup-token"
+  install -o "cx-$slug" -g "cx-$slug" -m 0600 "$tmp" "$var/staging/pbx-config.json"; rm -f "$tmp"
+  systemctl enable "callikoe-console@$slug" >/dev/null 2>&1
+  systemctl restart "callikoe-console@$slug"
+  apply_tenant "$slug" "$var/staging/pbx-config.json" || warn "Configuration incomplète : voir les messages ci-dessus."
+  aiguilleur
+  echo
+  local url="http://${fqdn}/?jeton=$(cat "$var/setup-token")"
+  [[ -f "/etc/letsencrypt/live/${fqdn}/fullchain.pem" ]] && url="https://${fqdn}:8822/?jeton=$(cat "$var/setup-token")"
+  echo "  ${B}Crée le compte administrateur de ce PBX :${N} ${url}"
+}
+
+cmd_importer() {
+  local slug="${1:-}" src="${2:-}"
+  valid_slug "$slug" || die "Nom du PBX invalide."
+  [[ -f "$src" ]] || die "Sauvegarde introuvable : ${src}"
+  local tmp; tmp="$(mktemp -d)"
+  tar -C "$tmp" -xzf "$src" ./etc/pbx-config.json ./manifest.json 2>/dev/null || { rm -rf "$tmp"; die "Ce fichier n'est pas une sauvegarde Callikoe."; }
+  cmd_creer "$slug" "$tmp/etc/pbx-config.json"
+  rm -rf "$tmp"
+  local var="$TVAR/$slug"
+  install -o "cx-$slug" -g "cx-$slug" -m 0600 "$src" "$var/staging/import.tar.gz"
+  echo "${B}Restauration des données du PBX importé…${N}"
+  local line status msg
+  while IFS= read -r line; do
+    status="$(node -e 'try{const j=JSON.parse(process.argv[1]);process.stdout.write(j.status+"\t"+j.message)}catch{}' "$line")"
+    [[ -n "$status" ]] || continue; msg="${status#*	}"; status="${status%%	*}"
+    case "$status" in ok) ok "$msg" ;; warn) warn "$msg" ;; error) echo "  ${R}✖${N} $msg" ;; esac
+  done < <("$CONF" --tenant "$slug" restore "$var/staging/import.tar.gz" || true)
+  rm -f "$var/staging/import.tar.gz" "$var/setup-token"
+  "$CONF" --tenant "$slug" nginx >/dev/null 2>&1 || true
+  aiguilleur
+  ok "PBX importé : mêmes utilisateurs, comptes de console et réglages qu'avant"
+  echo "  Pense à reprovisionner les téléphones (console › Téléphones) : ils passent maintenant par l'aiguilleur du serveur."
+}
+
+cmd_supprimer() {
+  local slug="${1:-}"
+  valid_slug "$slug" && reg_get "$slug" slug >/dev/null 2>&1 || die "PBX « ${slug} » inconnu."
+  [[ "${2:-}" == "--confirmer" ]] || die "Ajoute --confirmer : toutes les données de ce PBX seront effacées (utilisateurs, messages, enregistrements)."
+  local fqdn db; fqdn="$(reg_get "$slug" fqdn)"; db="$(db_name "$slug")"
+  systemctl disable --now "callikoe-console@$slug" "callikoe-asterisk@$slug" >/dev/null 2>&1 || true
+  rm -f "/etc/nginx/sites-enabled/callikoe-$slug" "/etc/nginx/sites-available/callikoe-$slug" "/etc/sudoers.d/callikoe-$slug"
+  nginx -t -q && systemctl reload nginx || true
+  runuser -u postgres -- dropdb --if-exists "$db" >/dev/null 2>&1 || true
+  runuser -u postgres -- psql -q -c "DROP ROLE IF EXISTS $db" >/dev/null 2>&1 || true
+  rm -rf "$CX/t/$slug" "$TVAR/$slug" "/var/spool/callikoe/$slug" "/var/log/callikoe/$slug"
+  userdel "ast-$slug" >/dev/null 2>&1 || true; userdel "cx-$slug" >/dev/null 2>&1 || true; groupdel "cx-$slug" >/dev/null 2>&1 || true
+  [[ -n "$fqdn" ]] && certbot delete --cert-name "$fqdn" -n >/dev/null 2>&1 || true
+  reg_del "$slug"
+  aiguilleur
+  ok "PBX « ${slug} » supprimé"
+}
+
+cmd_liste() {
+  [[ -f "$REG" ]] || die "Serveur multi-tenant non initialisé."
+  local count; count="$(node -e 'console.log((JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).tenants||[]).length)' "$REG")"
+  echo "  ${B}PBX clients : ${count}${N}"
+  local slug
+  while read -r slug; do
+    [[ -n "$slug" ]] || continue
+    local a c
+    a="$(systemctl is-active "callikoe-asterisk@$slug" 2>/dev/null || true)"; c="$(systemctl is-active "callikoe-console@$slug" 2>/dev/null || true)"
+    printf "  %-3s %-24s %-38s moteur %-8s console %s\n" "$(reg_get "$slug" n)" "$slug" "$(reg_get "$slug" fqdn)" "$a" "$c"
+  done < <(reg_slugs)
+}
+
+# Après une mise à jour du code : modèles réécrits et services relancés pour chaque client
+cmd_mettre_a_jour() {
+  cmd_init >/dev/null
+  local slug rc=0
+  while read -r slug; do
+    [[ -n "$slug" ]] || continue
+    if [[ -f "$CX/t/$slug/pbx.env" ]]; then
+      "$CONF" --tenant "$slug" render >/dev/null 2>&1 || { warn "${slug} : configuration non réécrite"; rc=1; }
+      "$CONF" --tenant "$slug" nginx >/dev/null 2>&1 || true
+      systemctl restart "callikoe-asterisk@$slug" || rc=1
+    fi
+    systemctl restart "callikoe-console@$slug" || rc=1
+  done < <(reg_slugs)
+  aiguilleur
+  return $rc
+}
+
+cmd_dns() {
+  local slug
+  while read -r slug; do [[ -n "$slug" ]] && "$CONF" --tenant "$slug" dns || true; done < <(reg_slugs)
+}
+
+# ----------------------------------------------------------------------------- Sauvegarde du serveur entier
+cmd_sauvegarder() {
+  local rec=""; [[ "${1:-}" == "--enregistrements" ]] && rec="--recordings"
+  [[ -f "$REG" ]] || die "Serveur multi-tenant non initialisé."
+  install -d -m 0750 "$BKDIR"
+  local tmp name slug out file
+  tmp="$(mktemp -d)"; name="callikoe-serveur-$(date +%Y%m%d-%H%M%S).tar.gz"
+  mkdir -p "$tmp/tenants" "$tmp/etc"
+  echo "${B}Sauvegarde du serveur multi-tenant${N}"
+  while read -r slug; do
+    [[ -n "$slug" ]] || continue
+    out="$("$CONF" --tenant "$slug" backup --keep 3 $rec 2>/dev/null | tail -n1)"
+    file="$(node -e 'try{const j=JSON.parse(process.argv[1]);if(j.status==="ok")process.stdout.write(j.message)}catch{}' "$out")"
+    [[ -n "$file" && -f "$TVAR/$slug/backups/$file" ]] || { rm -rf "$tmp"; die "Sauvegarde du PBX ${slug} impossible."; }
+    cp "$TVAR/$slug/backups/$file" "$tmp/tenants/$slug.tar.gz"
+    mkdir -p "$tmp/etc/$slug"; cp -a "$CX/t/$slug/secrets.env" "$CX/t/$slug/tenant.env" "$tmp/etc/$slug/"
+    ok "PBX ${slug}"
+  done < <(reg_slugs)
+  cp -a "$REG" "$tmp/tenants.json"
+  [[ -f "$CX/trusted-key.pem" ]] && cp -a "$CX/trusted-key.pem" "$tmp/"
+  [[ -d /etc/letsencrypt ]] && tar -C / -czf "$tmp/letsencrypt.tar.gz" etc/letsencrypt
+  printf '{"format":"callikoe-serveur-1","created_at":"%s","version":"%s"}\n' "$(date -Is)" "$(cat "$APP/VERSION" 2>/dev/null || echo ?)" > "$tmp/manifest.json"
+  tar -C "$tmp" -czf "$BKDIR/$name" .
+  rm -rf "$tmp"; chmod 640 "$BKDIR/$name"
+  ls -1t "$BKDIR"/callikoe-serveur-*.tar.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
+  ok "Sauvegarde : $BKDIR/$name ($(du -h "$BKDIR/$name" | cut -f1))"
+  echo "  Copie-la hors du serveur (WinSCP, FTP) : elle permet de tout restaurer sur un VPS neuf."
+  echo "$BKDIR/$name" > /var/lib/callikoe/last-backup
+}
+
+cmd_restaurer() {
+  local src="${1:-}"
+  [[ -f "$src" ]] || die "Sauvegarde introuvable : ${src}"
+  [[ -f "$REG" ]] || cmd_init
+  local tmp; tmp="$(mktemp -d)"
+  tar -C "$tmp" -xzf "$src" || { rm -rf "$tmp"; die "Archive illisible."; }
+  grep -q '"callikoe-serveur-1"' "$tmp/manifest.json" 2>/dev/null || { rm -rf "$tmp"; die "Ce fichier n'est pas une sauvegarde de serveur multi-tenant (callikoe-serveur-…)."; }
+  echo "${B}Restauration du serveur multi-tenant${N}"
+  [[ -f "$tmp/letsencrypt.tar.gz" ]] && tar -C / -xzf "$tmp/letsencrypt.tar.gz" && ok "Certificats HTTPS restaurés"
+  [[ -f "$tmp/trusted-key.pem" ]] && install -m 0644 "$tmp/trusted-key.pem" "$CX/trusted-key.pem"
+  local slug n line status msg
+  while read -r slug; do
+    [[ -n "$slug" ]] || continue
+    n="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String((r.tenants||[]).find(t=>t.slug===process.argv[2]).n))' "$tmp/tenants.json" "$slug")"
+    reg_get "$slug" slug >/dev/null 2>&1 && { warn "${slug} existe déjà sur ce serveur : ignoré"; continue; }
+    tenant_skeleton "$slug" "$n" "$tmp/etc/$slug"
+    node -e '
+      const fs=require("fs");const [f,src,slug]=process.argv.slice(1);
+      const r=JSON.parse(fs.readFileSync(f,"utf8"));const s=JSON.parse(fs.readFileSync(src,"utf8"));
+      r.tenants=(r.tenants||[]).filter(t=>t.slug!==slug);r.tenants.push(s.tenants.find(t=>t.slug===slug));
+      r.tenants.sort((a,b)=>a.n-b.n);fs.writeFileSync(f+".new",JSON.stringify(r,null,2));fs.renameSync(f+".new",f);' "$REG" "$tmp/tenants.json" "$slug"
+    install -o "cx-$slug" -g "cx-$slug" -m 0600 "$tmp/tenants/$slug.tar.gz" "$TVAR/$slug/staging/restore.tar.gz"
+    while IFS= read -r line; do
+      status="$(node -e 'try{const j=JSON.parse(process.argv[1]);process.stdout.write(j.status+"\t"+j.message)}catch{}' "$line")"
+      [[ "$status" == error* ]] && { msg="${status#*	}"; echo "  ${R}✖${N} ${slug} : $msg"; }
+    done < <("$CONF" --tenant "$slug" restore "$TVAR/$slug/staging/restore.tar.gz" || true)
+    rm -f "$TVAR/$slug/staging/restore.tar.gz"
+    "$CONF" --tenant "$slug" dns >/dev/null 2>&1 || true
+    "$CONF" --tenant "$slug" nginx >/dev/null 2>&1 || true
+    systemctl enable "callikoe-asterisk@$slug" "callikoe-console@$slug" >/dev/null 2>&1
+    systemctl restart "callikoe-asterisk@$slug" "callikoe-console@$slug" || true
+    ok "PBX ${slug} restauré"
+  done < <(node -e 'for(const t of JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).tenants||[])console.log(t.slug)' "$tmp/tenants.json")
+  rm -rf "$tmp"
+  aiguilleur
+  ok "Serveur restauré"
+}
+
+case "${1:-}" in
+  init) cmd_init ;;
+  liste|list) cmd_liste ;;
+  creer|create) shift; cmd_creer "$@" ;;
+  importer|import) shift; cmd_importer "$@" ;;
+  supprimer|delete) shift; cmd_supprimer "$@" ;;
+  sauvegarder|backup) shift; cmd_sauvegarder "$@" ;;
+  restaurer|restore) shift; cmd_restaurer "$@" ;;
+  mettre-a-jour) cmd_mettre_a_jour ;;
+  dns) cmd_dns ;;
+  aiguilleur) aiguilleur; ok "Tables de l'aiguilleur SIP rechargées" ;;
+  *) sed -n '3,15p' "$0" | sed 's/^#//'; exit 2 ;;
+esac

@@ -45,6 +45,10 @@ export function createDb(cfg) {
       ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS caller_format text NOT NULL DEFAULT 'national';
       ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS did_from text NOT NULL DEFAULT 'request_uri';
       ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS username text;
+      ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS op_proxy text;
+      ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS contact_user text;
+      ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS port integer;
+      ALTER TABLE pbxmaison_trunks ADD COLUMN IF NOT EXISTS transport text;
       CREATE TABLE IF NOT EXISTS pbxmaison_extensions (
         id text PRIMARY KEY,
         name text NOT NULL,

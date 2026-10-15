@@ -7,6 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
+import { CX_MODE, KAMAILIO_URI, VAR as CX_VAR } from "./config.mjs";
+import { runConfigure } from "./admin.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType, modelById } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
@@ -101,7 +103,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       return {
         id: r.id, template: r.template, operator: tpl[r.template]?.label || r.template,
         host: r.host, number: r.number, outbound_cid: r.outbound_cid, username: r.username,
-        proxy: r.outbound_proxy ? r.outbound_proxy.replace(/^sip:/, "").replace(/;lr$/, "") : "",
+        proxy: CX_MODE === "tenant" ? (r.op_proxy || "") : r.outbound_proxy ? r.outbound_proxy.replace(/^sip:/, "").replace(/;lr$/, "") : "",
         codecs: (r.allow || "").split(","), transport: (r.transport || "").replace("transport-", ""),
         cid_format: r.cid_format, dial_format: r.dial_format, caller_format: r.caller_format, dids: trunkDidList(r, countryCode()), extra_dids: r.dids || [],
         status: { code: st?.state || "Unknown", label, cls, expires: st?.expires ?? null },
@@ -147,8 +149,14 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     if (input.dids !== undefined) dids = expandDids(input.dids, cc);
 
     const fromUser = t.outbound.from_user === "auth_id" ? user : t.outbound.from_user === "trunk_number" ? trunkNumber : null;
-    const contactUser = t.outbound.contact_user === "trunk_number" ? trunkNumber : user;
-    const proxyUri = proxy ? `sip:${proxy.host}:${proxy.port};lr` : null;
+    // Serveur multi-tenant : le PBX passe par l'aiguilleur SIP ; le Contact du trunk est un jeton unique (il désigne ce client)
+    const tenant = CX_MODE === "tenant";
+    let contactUser = t.outbound.contact_user === "trunk_number" ? trunkNumber : user;
+    if (tenant) {
+      const old = input.replace ? (await db.query("SELECT contact_user FROM pbxmaison_trunks WHERE id = $1", [name])).rows[0]?.contact_user : null;
+      contactUser = old || `cx${crypto.randomBytes(8).toString("hex")}`;
+    }
+    const proxyUri = tenant ? KAMAILIO_URI : proxy ? `sip:${proxy.host}:${proxy.port};lr` : null;
     const transport = `transport-${t.transport}`;
     const expiration = Math.max(60, t.registration.interval);
 
@@ -176,7 +184,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         [name, transport, `${name}-auth`, t.codecs.join(","), fromUser, host, proxyUri, language(),
           t.outbound.pai ? "yes" : "no", `TRUNK_OPTS=${callerFormat},${t.inbound.did_from}`],
       );
-      await c.query("INSERT INTO ps_endpoint_id_ips (id, endpoint, match) VALUES ($1, $1, $2)",
+      // Appels entrants : reconnus par l'adresse de l'opérateur (et, en multi-tenant, par le jeton « line » du Contact)
+      if (!tenant) await c.query("INSERT INTO ps_endpoint_id_ips (id, endpoint, match) VALUES ($1, $1, $2)",
         [name, proxy ? `${host},${proxy.host}` : host]);
       await c.query(
         `INSERT INTO ps_registrations (id, transport, outbound_auth, server_uri, client_uri, contact_user, outbound_proxy,
@@ -186,16 +195,38 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         [name, transport, `${name}-auth`, `sip:${host}:${port}`, `sip:${user}@${host}:${port}`, contactUser, proxyUri, expiration],
       );
       await c.query(
-        `INSERT INTO pbxmaison_trunks (id, template, label, host, number, outbound_cid, dial_format, cid_format, caller_format, did_from, username, dids)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [name, t.id, t.label, host, trunkNumber, outboundCid, dialFormat, cidFormat, callerFormat, t.inbound.did_from, user, dids || []],
+        `INSERT INTO pbxmaison_trunks (id, template, label, host, number, outbound_cid, dial_format, cid_format, caller_format, did_from, username, dids,
+           op_proxy, contact_user, port, transport)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        [name, t.id, t.label, host, trunkNumber, outboundCid, dialFormat, cidFormat, callerFormat, t.inbound.did_from, user, dids || [],
+          proxy ? `${proxy.host}:${proxy.port}` : null, contactUser, port, t.transport],
       );
     });
     await reload("res_pjsip.so", "res_pjsip_endpoint_identifier_ip.so", "res_pjsip_outbound_registration.so");
+    const published = await publishRoutes();
     const routes = await getRoutes();
     if (routes.outbound_trunk === name) await setRoutes(routes); // numéro présenté éventuellement modifié
     else if (!routes.outbound_trunk) await setRoutes({ ...routes, outbound_trunk: name }); // 1er trunk : trunk par défaut des appels sortants
-    return { id: name };
+    return { id: name, ...(published?.warning ? { warning: published.warning } : {}) };
+  }
+
+  /**
+   * Serveur multi-tenant : publie pour l'aiguilleur SIP les comptes des trunks (Contact), leurs serveurs et les SDA de ce PBX.
+   * Une SDA ou un compte déjà pris par un autre client est refusé par l'aiguilleur : signalé dans warning.
+   */
+  async function publishRoutes() {
+    if (CX_MODE !== "tenant") return null;
+    const rows = (await db.query("SELECT * FROM pbxmaison_trunks")).rows;
+    const data = {
+      trunks: rows.map((r) => ({ contact_user: r.contact_user, host: r.host, port: r.port || 5060, transport: r.transport || "udp", proxy: r.op_proxy || null })),
+      dids: [...new Set(rows.flatMap((r) => trunkDidList(r, countryCode())))],
+    };
+    fs.writeFileSync(path.join(CX_VAR, "kamailio-routes.json.new"), JSON.stringify(data));
+    fs.renameSync(path.join(CX_VAR, "kamailio-routes.json.new"), path.join(CX_VAR, "kamailio-routes.json"));
+    const r = await runConfigure(["kamailio-sync"], { timeout: 30_000 });
+    const res = r.lines[0] || {};
+    const mine = (res.conflicts || []).filter((c) => c.refused === (process.env.CX_TENANT || ""));
+    return mine.length ? { warning: `Déjà utilisé par un autre PBX du serveur : ${mine.map((c) => `${c.what} ${c.key}`).join(", ")}. Les appels correspondants n'arriveront pas ici.` } : { ok: true };
   }
 
   async function deleteTrunk(id) {
@@ -206,6 +237,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       }
     });
     await reload("res_pjsip_outbound_registration.so", "res_pjsip.so");
+    await publishRoutes();
     const routes = await getRoutes();
     if (routes.outbound_trunk === id) await setRoutes({ ...routes, outbound_trunk: "" });
   }
@@ -306,6 +338,25 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
   }
   async function ensureWebEndpoints() {
+    if (CX_MODE === "tenant") {
+      // PBX importé d'un serveur seul : ses trunks passent par l'aiguilleur SIP (jeton de Contact, proxy de l'opérateur gardé à part)
+      const old = await db.query(`SELECT t.id, t.contact_user, r.outbound_proxy, r.server_uri, r.transport FROM pbxmaison_trunks t
+        JOIN ps_registrations r ON r.id = t.id WHERE t.contact_user IS NULL OR r.outbound_proxy IS DISTINCT FROM $1`, [KAMAILIO_URI]);
+      for (const r of old.rows) {
+        const cu = r.contact_user || `cx${crypto.randomBytes(8).toString("hex")}`;
+        const opProxy = r.outbound_proxy && r.outbound_proxy !== KAMAILIO_URI ? r.outbound_proxy.replace(/^sip:/, "").replace(/;lr$/, "") : null;
+        const m = /^sip:[^:;]+(?::(\d+))?/.exec(r.server_uri || "");
+        await db.query(`UPDATE pbxmaison_trunks SET contact_user = $2, op_proxy = COALESCE(op_proxy, $3), port = COALESCE(port, $4), transport = COALESCE(transport, $5) WHERE id = $1`,
+          [r.id, cu, opProxy, Number(m?.[1]) || 5060, String(r.transport || "transport-udp").replace("transport-", "")]);
+        await db.query("UPDATE ps_registrations SET contact_user = $2, outbound_proxy = $3, line = 'yes', endpoint = $1 WHERE id = $1", [r.id, cu, KAMAILIO_URI]);
+        await db.query("UPDATE ps_endpoints SET outbound_proxy = $2 WHERE id = $1", [r.id, KAMAILIO_URI]);
+        await db.query("DELETE FROM ps_endpoint_id_ips WHERE id = $1", [r.id]);
+      }
+      if (old.rowCount) await reload("res_pjsip.so", "res_pjsip_endpoint_identifier_ip.so", "res_pjsip_outbound_registration.so").catch(() => {});
+      await db.query(`UPDATE ps_aors a SET support_path = 'yes' FROM ps_endpoints e WHERE e.aors = a.id AND e.context = 'from-internal' AND e.id !~ '-web$' AND a.support_path IS DISTINCT FROM 'yes'`);
+      await db.query(`UPDATE ps_endpoints SET rewrite_contact = 'no' WHERE context = 'from-internal' AND id !~ '-web$' AND rewrite_contact IS DISTINCT FROM 'no'`);
+      try { await publishRoutes(); } catch { /* l'aiguilleur sera mis à jour au prochain changement */ }
+    }
     // Vidéo (appels vidéo, réunions) : VP8 / H.264, jusqu'à 16 flux vidéo pour les réunions
     await db.query(`UPDATE ps_endpoints SET allow = '${WEB_CODECS}', max_video_streams = 16 WHERE id LIKE '%-web' AND (allow IS DISTINCT FROM '${WEB_CODECS}' OR max_video_streams IS DISTINCT FROM 16)`);
     // Trunks : G.729 retiré (le moteur ne sait pas le convertir, l'appel serait muet côté softphone), A-law en premier
@@ -369,12 +420,14 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const authId = genAuthId();
     await db.tx(async (c) => {
       await c.query("INSERT INTO ps_auths (id, auth_type, username, password) VALUES ($1, 'userpass', $2, $3)", [num, authId, password]);
-      await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency) VALUES ($1, 3, 'yes', 60)", [num]);
+      await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency, support_path) VALUES ($1, 3, 'yes', 60, $2)",
+        [num, CX_MODE === "tenant" ? "yes" : "no"]);
+      // Multi-tenant : le poste arrive par l'aiguilleur (Path) ; son Contact ne doit pas être remplacé par l'adresse de l'aiguilleur
       await c.query(
         `INSERT INTO ps_endpoints (id, aors, auth, context, disallow, allow, callerid, direct_media, rtp_symmetric,
            force_rport, rewrite_contact, dtmf_mode, language, mailboxes)
-         VALUES ($1, $1, $1, 'from-internal', 'all', 'g722,alaw,ulaw', '', 'no', 'yes', 'yes', 'yes', 'rfc4733', $2, $3)`,
-        [num, language(), `${num}@default`],
+         VALUES ($1, $1, $1, 'from-internal', 'all', 'g722,alaw,ulaw', '', 'no', 'yes', 'yes', $4, 'rfc4733', $2, $3)`,
+        [num, language(), `${num}@default`, CX_MODE === "tenant" ? "no" : "yes"],
       );
       await c.query("INSERT INTO pbxmaison_extensions (id, name) VALUES ($1, $2)", [num, displayName(u)]);
       await saveUser(c, u, by);
@@ -779,7 +832,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     // Interception « n'importe quel appel » (code *8) : tous les postes dans le même groupe d'interception
     await db.query("UPDATE ps_endpoints SET call_group = '1', pickup_group = '1' WHERE context = 'from-internal' AND (call_group IS DISTINCT FROM '1' OR pickup_group IS DISTINCT FROM '1')");
     // Sécurité : postes SIP (hors softphone web, qui passe par Nginx en local) limités aux réseaux autorisés
-    if (ext.sipAcl) {
+    // Multi-tenant : tout arrive de l'aiguilleur, les réseaux autorisés se contrôlent au niveau du serveur
+    if (ext.sipAcl && CX_MODE !== "tenant") {
       try {
         await db.query(`UPDATE ps_endpoints SET deny = $1, permit = $2 WHERE context = 'from-internal' AND id !~ '-web$'
           AND (deny IS DISTINCT FROM $1 OR permit IS DISTINCT FROM $2)`, [ext.sipAcl.deny, ext.sipAcl.permit]);
