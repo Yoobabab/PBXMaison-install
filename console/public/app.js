@@ -898,9 +898,32 @@ function wireDest(root) {
   });
 }
 
+// Fiche utilisateur : les modifications de tous les onglets sont gardées ici jusqu'au clic sur « Enregistrer »
+let userDraft = null;   // { id, data, keys?, mods? }
+let userPendingErr = null;
+const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+function deepMerge(a, b) {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = isObj(v) && isObj(out[k]) ? deepMerge(out[k], v) : v;
+  return out;
+}
+const draftGet = (path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), userDraft?.data);
+const draftDirty = () => !!userDraft && (Object.keys(userDraft.data).length > 0 || !!userDraft.keys);
+window.addEventListener("beforeunload", (e) => { if (draftDirty()) { e.preventDefault(); e.returnValue = ""; } });
+// Onglet où se trouve un champ (pour y afficher une erreur renvoyée à l'enregistrement)
+function tabOfField(f = "") {
+  if (/^phone\.(keys|modules)/.test(f)) return "touches";
+  if (f.startsWith("phone")) return "telephone";
+  if (f.startsWith("voicemail")) return "messagerie";
+  if (/^(status|forwarding|options\.(ring_mobile|accept_group_calls))/.test(f)) return "renvois";
+  if (f.startsWith("options")) return "options";
+  return "general";
+}
+
 async function renderUser(id, tab = "general") {
   setNav("ext");
   clearInterval(timer);
+  if (userDraft?.id !== id) userDraft = { id, data: {} };
   const [{ user: u, server }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
   if ((tab === "telephone" || tab === "touches") && !phoneOpts) phoneOpts = await api("GET", "/api/phone-options");
   const users = list.extensions;
@@ -910,9 +933,12 @@ async function renderUser(id, tab = "general") {
     <div class="bar"><div class="grow"><h1>${esc(u.id)} · ${esc(u.name)}</h1>
       <p class="sub" style="margin:0">${statusPill(u)} ${u.registered ? '<span class="pill ok">Téléphone connecté</span>' : '<span class="pill off">Téléphone non connecté</span>'}
       ${u.updated_by ? `<span class="s">· modifié le ${esc(new Date(u.updated_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }))} par ${esc(u.updated_by)}</span>` : ""}</p></div>
-      <a class="btn ghost" href="#/utilisateurs/nouveau?depuis=${esc(u.id)}">Dupliquer</a></div>
+      <a class="btn ghost" href="#/utilisateurs/nouveau?depuis=${esc(u.id)}">Dupliquer</a>
+      <span class="usave"><span id="udirty" class="pill wait" ${draftDirty() ? "" : "hidden"}>Modifications non enregistrées</span>
+        <button type="button" class="btn ghost" id="ucancel" ${draftDirty() ? "" : "hidden"}>Annuler</button>
+        <button type="button" class="btn" id="usave">Enregistrer</button></span></div>
     ${u.forwards.length ? `<div class="note fwsum"><strong>En ce moment :</strong> ${u.forwards.map((f) => esc(f.text)).join(" · ")}</div>` : ""}${tabs}`;
-  const save = `<div class="actions"><button class="btn">Enregistrer</button></div>`;
+  const save = "";   // un seul bouton « Enregistrer », en haut de la fiche, pour tous les onglets
   let body = "";
 
   if (tab === "general") {
@@ -950,8 +976,7 @@ async function renderUser(id, tab = "general") {
         <label class="check"><input type="checkbox" name="options.ring_mobile" ${u.options.ring_mobile ? "checked" : ""}> Faire sonner aussi mon mobile${u.mobile ? ` (${esc(fmtPhone(u.mobile))})` : " (renseigne-le dans Général)"}</label>
         <label class="check"><input type="checkbox" name="options.accept_group_calls" ${u.options.accept_group_calls ? "checked" : ""}> Recevoir les appels des groupes (route entrante « tous les postes »)</label>
       </fieldset>
-      <p class="hint" style="margin:0">Les renvois vers l'extérieur passent par le trunk sortant et présentent le numéro du trunk. International et surtaxés interdits.</p>
-      <div class="actions" style="padding-top:16px"><button class="btn">Enregistrer</button></div></form>`;
+      <p class="hint" style="margin:0">Les renvois vers l'extérieur passent par le trunk sortant et présentent le numéro du trunk. International et surtaxés interdits.</p></form>`;
   } else if (tab === "telephone") {
     const host = server.host || server.fqdn;
     const ph = u.phone, st = ph.settings, o = phoneOpts;
@@ -1009,8 +1034,7 @@ async function renderUser(id, tab = "general") {
       <div class="phv-wrap"><div id="phv"></div><div id="phvpanel" class="phv-panel"></div></div>
       <details class="phv-list"><summary>Vue en liste</summary><div class="keys" id="keys"></div></details>
       <div class="row"><button type="button" class="btn ghost sm" id="addkey">+ Ajouter une touche</button>
-        <button type="button" class="btn ghost sm" id="addall">+ BLF pour tous les utilisateurs</button></div>
-      <div class="actions" style="padding-top:16px"><button class="btn">Enregistrer</button></div></form>`;
+        <button type="button" class="btn ghost sm" id="addall">+ BLF pour tous les utilisateurs</button></div></form>`;
   } else if (tab === "messagerie") {
     const vm = u.voicemail;
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
@@ -1039,17 +1063,54 @@ async function renderUser(id, tab = "general") {
   app.querySelectorAll(".seg input").forEach((i) => i.addEventListener("change", () => app.querySelectorAll(".seg label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked))));
 
   const form = $("#uf");
-  if (form) form.onsubmit = async (e) => {
-    e.preventDefault();
-    const btn = e.submitter; if (btn) btn.disabled = true;
-    const data = formData(form);
+  const markDirty = () => { const on = draftDirty(); $("#udirty").hidden = !on; $("#ucancel").hidden = !on; };
+  if (form) {
+    // Reprendre ce qui a été saisi plus tôt dans cet onglet (sans avoir enregistré)
+    for (const el of form.elements) {
+      if (!el.name) continue;
+      const v = draftGet(el.name);
+      if (v === undefined) continue;
+      if (el.type === "checkbox") el.checked = !!v;
+      else if (el.type === "radio") el.checked = el.value === v;
+      else if (!el.dataset.for || draftGet(el.name.replace(/\.target$/, ".type")) === el.dataset.for) el.value = v;
+    }
+    form.querySelectorAll(".dest select[name$='.type']").forEach((sel) => sel.dispatchEvent(new Event("change")));
+    form.querySelectorAll(".seg label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
+    const keep = () => { userDraft.data = deepMerge(userDraft.data, formData(form)); markDirty(); };
+    form.addEventListener("input", keep);
+    form.addEventListener("change", keep);
+  }
+  const saveAll = async () => {
+    const btn = $("#usave"); btn.disabled = true;
+    if (form) userDraft.data = deepMerge(userDraft.data, formData(form));
+    const data = structuredClone(userDraft.data);
     if (typeof data.dids === "string") data.dids = data.dids.split("\n");
+    if (userDraft.keys) data.phone = { ...(data.phone || {}), keys: userDraft.keys, modules: userDraft.mods.map((k) => ({ keys: k })) };
+    if (!Object.keys(data).length) { flash = { text: "Rien à enregistrer." }; return renderUser(u.id, tab); }
     try {
-      await api("PUT", `/api/extensions/${u.id}`, data);
-      flash = { text: "Enregistré et appliqué." };
+      const r = await api("PUT", `/api/extensions/${u.id}`, data);
+      userDraft = null;
+      // Le téléphone reprend sa configuration tout de suite, sans redémarrer
+      const phoneChanged = data.phone || data.first_name !== undefined || data.last_name !== undefined || data.voicemail;
+      let note = "";
+      if (phoneChanged && (r.user || u).phone?.mac && u.registered) {
+        try { await api("POST", `/api/extensions/${u.id}/phone/notify`, { action: "resync" }); note = " Le téléphone se met à jour (sans redémarrer)."; }
+        catch { note = " Le téléphone n'a pas pu être prévenu : bouton Reprovisionner dans Téléphone IP."; }
+      } else if (phoneChanged && u.phone.mac) note = " Le téléphone n'est pas connecté : il prendra les changements à son prochain démarrage.";
+      flash = { text: `Enregistré et appliqué.${note}` };
       renderUser(u.id, tab);
-    } catch (err) { showFormError(form, err); if (btn) btn.disabled = false; }
+    } catch (err) {
+      btn.disabled = false;
+      const t = tabOfField(err.field);
+      if (t !== tab && err.field) { userPendingErr = err; location.hash = `#/utilisateurs/${u.id}${t === "general" ? "" : "/" + t}`; return; }
+      const f = form || $("#kf");
+      if (f) showFormError(f, err); else { flash = { cls: "bad", text: err.message }; renderUser(u.id, tab); }
+    }
   };
+  $("#usave").onclick = saveAll;
+  $("#ucancel").onclick = () => { if (!confirm("Annuler toutes les modifications non enregistrées ?")) return; userDraft = null; renderUser(u.id, tab); };
+  if (form) form.onsubmit = (e) => { e.preventDefault(); saveAll(); };
+  if (userPendingErr) { const err = userPendingErr; userPendingErr = null; const f = form || $("#kf"); if (f) showFormError(f, err); }
   if (tab === "touches") wireKeys(u, users);
   if (tab === "general") {
     wireAppQr(u);
@@ -1151,8 +1212,18 @@ function wireKeys(u, users) {
   const L = keyLayout(model);
   const expId = Object.entries(o.expansions || {}).find(([, e]) => e.models.some((m) => (u.phone.model || "").startsWith(m)))?.[0] || "";
   const EXP = expId ? o.expansions[expId] : null;
-  let keys = u.phone.keys.map((k) => ({ ...k }));
-  let mods = (u.phone.modules || []).map((m) => (m.keys || []).map((k) => ({ ...k })));
+  let keys = (userDraft?.keys || u.phone.keys).map((k) => ({ ...k }));
+  let mods = (userDraft?.mods || (u.phone.modules || []).map((m) => m.keys || [])).map((m) => m.map((k) => ({ ...k })));
+  // Chaque changement est gardé dans le brouillon de la fiche (enregistré avec le bouton du haut)
+  const clean = (a) => { const c = a.map((k) => ({ ...k })); while (c.length && c.at(-1).type === "none") c.pop(); return c; };
+  const orig = JSON.stringify([clean(u.phone.keys), (u.phone.modules || []).map((m) => clean(m.keys || []))]);
+  const keepKeys = () => {
+    if (!userDraft) return;
+    const now = [clean(keys), mods.map(clean)];
+    if (JSON.stringify(now) === orig) { delete userDraft.keys; delete userDraft.mods; }
+    else { userDraft.keys = now[0]; userDraft.mods = now[1]; }
+    const on = draftDirty(), d = $("#udirty"), c = $("#ucancel"); if (d) d.hidden = !on; if (c) c.hidden = !on;
+  };
   const others = users.filter((x) => x.id !== u.id);
   const box = $("#keys");
   let page = 0, cur = null, showMore = false; // cur = { m: -1 (téléphone) ou n° de module, i }
@@ -1239,11 +1310,11 @@ function wireKeys(u, users) {
       const k2 = { ...K(m, i), [el.dataset.pv]: el.value };
       if (el.dataset.pv === "value" && k2.type === "blf") k2.label = others.find((x) => x.id === el.value)?.name || "";
       setKey(m, i, k2);
-      if (el.tagName === "SELECT") drawAll(); else { drawVisual(); drawList(); }
+      if (el.tagName === "SELECT") drawAll(); else { drawVisual(); drawList(); keepKeys(); }
     }));
     pnl.querySelector("[data-clear]").onclick = () => { setKey(m, i, NONE()); trim(m); drawAll(); };
   };
-  const drawAll = () => { drawVisual(); drawPanel(); drawList(); };
+  const drawAll = () => { drawVisual(); drawPanel(); drawList(); keepKeys(); };
   const draw = drawAll;
   const drawList = () => {
     box.innerHTML = keys.length ? keys.map((k, i) => `<div class="keyrow" data-i="${i}">
@@ -1258,9 +1329,10 @@ function wireKeys(u, users) {
       const i = Number(row.dataset.i);
       row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
         keys[i][el.dataset.f] = el.value;
-        if (el.dataset.f === "label") drawVisual();
+        if (el.dataset.f === "label") { drawVisual(); keepKeys(); }
         if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = keys[i].type === "status" ? "Ne pas déranger" : ""; draw(); }
         if (el.dataset.f === "value" && keys[i].type === "blf") { keys[i].label = others.find((x) => x.id === el.value)?.name || ""; draw(); }
+        keepKeys();
       }));
       row.querySelector("[data-rm]").onclick = () => { keys.splice(i, 1); draw(); };
       row.querySelectorAll("[data-mv]").forEach((b) => b.onclick = () => { const j = i + Number(b.dataset.mv); [keys[i], keys[j]] = [keys[j], keys[i]]; draw(); });
@@ -1273,15 +1345,7 @@ function wireKeys(u, users) {
     draw();
   };
   draw();
-  $("#kf").onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      mods.forEach((_, m) => trim(m));
-      await api("PUT", `/api/extensions/${u.id}`, { phone: { keys, modules: mods.map((k) => ({ keys: k })) } });
-      flash = { text: "Touches enregistrées. Le téléphone les reçoit au prochain provisioning (bouton Reprovisionner dans Téléphone IP)." };
-      renderUser(u.id, "touches");
-    } catch (err) { showFormError(e.target, err); }
-  };
+  $("#kf").onsubmit = (e) => { e.preventDefault(); $("#usave").click(); };
 }
 
 // ---------------------------------------------------------------- Routes

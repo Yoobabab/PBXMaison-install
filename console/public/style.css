@@ -641,3 +641,7 @@ body.no-side .shell{margin-left:0}
 .codec-list .codec-row label.codec-name input{width:auto;margin:0}
 .codec-move{display:flex;gap:4px}
 @media (max-width:520px){.codec-row{grid-template-columns:1fr auto}.codec-rank{grid-column:1/-1}}
+
+/* Fiche utilisateur : un seul « Enregistrer » pour tous les onglets */
+.usave{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.usave .pill[hidden],.usave .btn[hidden]{display:none}
