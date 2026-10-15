@@ -184,7 +184,8 @@ OPACCT() { cat <<EOF
 type = endpoint
 context = op-in
 callerid = Client <0612345678>
-media_address = ${IP}
+media_address = 127.0.0.50
+bind_rtp_to_media_address = yes
 aors = $1
 auth = $1
 disallow = all
@@ -206,6 +207,8 @@ OPNUM() { # appels sortants : le PBX présente son numéro (From), authentifié 
 [$1]
 type = endpoint
 context = op-in
+media_address = 127.0.0.50
+bind_rtp_to_media_address = yes
 aors = $2
 auth = $2
 disallow = all
@@ -248,7 +251,8 @@ bind = $1:5080
 [pbx]
 type = endpoint
 context = answer
-media_address = ${IP}
+media_address = $1
+bind_rtp_to_media_address = yes
 aors = pbx
 outbound_auth = pbx-auth
 outbound_proxy = sip:${IP}:5060\;lr
