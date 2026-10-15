@@ -7,14 +7,14 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
-import { MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
+import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType, modelById } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
 import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, PHONE_TYPES } from "./contacts.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
-import { nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
+import { sees, nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 
 export const EMERGENCY = ["15", "17", "18", "112", "114", "115", "116000", "119", "191", "196", "197"];
 const FORMATS = ["national", "e164", "e164_plus"];
@@ -258,7 +258,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const contacts = reg.get(u.id) || [];
       return {
         id: u.id, name: displayName(u), first_name: u.first_name, last_name: u.last_name, email: u.email,
-        status: u.status, status_label: STATUSES[u.status], disabled: u.options.disabled,
+        status: u.status, status_label: STATUSES[u.status], disabled: u.options.disabled, hidden: !!u.options.hidden, team: u.options.team || "",
         registered: contacts.length > 0, contacts, dids: u.dids, mobile: u.mobile, phone_model: u.phone.model,
         forwards: forwardSummary(u),
       };
@@ -589,6 +589,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   const phoneOptions = () => ({
     models: MODELS, languages: LANGUAGES, date_formats: DATE_FORMATS, time_formats: TIME_FORMATS, timezones: TIMEZONES,
     backlight: BACKLIGHT, screensaver: SCREENSAVER, transfer: TRANSFER, led: LED, transports: TRANSPORTS, key_types: KEY_TYPES,
+    ring_types: RING_TYPES, ringers: RINGERS,
   });
 
   async function phoneConfig(num, server) {
@@ -634,8 +635,12 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   /** Fichier demandé par un téléphone : null si inconnu. */
   async function provisionFile(token, file, server, from) {
     if (token !== (await db.getSetting("prov_token", ""))) return null;
-    if (file === "phonebook.xml") {
-      const users = (await loadUsers()).filter((u) => !u.options.disabled).map((u) => ({ id: u.id, name: displayName(u) }));
+    const pb = /^phonebook(?:-(\d{3}))?\.xml$/.exec(file);
+    if (pb) {
+      // Annuaire du téléphone : collègues visibles par ce poste (masqués et autres groupes de visibilité exclus) + contacts
+      const all = await loadUsers();
+      const viewer = all.find((u) => u.id === pb[1]) || { options: {} };
+      const users = all.filter((u) => u.id !== viewer.id && sees(viewer, u)).map((u) => ({ id: u.id, name: displayName(u) }));
       return { text: yealinkPhonebook(users, await loadContacts()), type: "application/xml" };
     }
     if (/^y0{6}\d{6}\.cfg$/i.test(file)) return { text: "#!version:1.0.0.1\n## Callikoe : tout est dans <mac>.cfg\n" };

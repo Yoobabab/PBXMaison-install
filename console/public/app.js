@@ -117,6 +117,7 @@ const NI = {
   sys: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   soft: '<path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/>',
   out2: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  accounts: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><path d="M16 11.5l1.5 1.5 3-3"/>',
 };
 const nicon = (k, s = 19) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NI[k] || ""}</svg>`;
 const NAV = [
@@ -125,7 +126,7 @@ const NAV = [
     ["#/gestion", "Gestion d'appels", "cf"], ["#/sortants", "Règles sortantes", "out"], ["#/trunks", "Trunks", "trunks"], ["#/codes", "Codes de raccourci", "codes"]]],
   ["Activité", [["#/journal", "Journal des appels", "cdr"], ["#/enregistrements", "Enregistrements", "rec"], ["#/annuaire", "Annuaire", "book"]]],
   ["Administration", [["#/securite", "Sécurité", "sec"], ["#/sauvegardes", "Sauvegardes", "backup"], ["#/mises-a-jour", "Mises à jour", "updates"],
-    ["#/alertes", "Alertes", "alerts"], ["#/licence", "Licence", "licence"], ["#/systeme", "Système", "sys"]]],
+    ["#/comptes", "Comptes", "accounts"], ["#/alertes", "Alertes", "alerts"], ["#/licence", "Licence", "licence"], ["#/systeme", "Système", "sys"]]],
 ];
 const NAV_LABEL = Object.fromEntries(NAV.flatMap(([g, items]) => items.map(([, l, k]) => [k, [g, l]])));
 function setNav(active) {
@@ -360,6 +361,34 @@ function renderLogin(ticket = null) {
       if (r.need_totp) return renderLogin(r.ticket);
       Object.assign(state, { logged_in: true, email: r.email, need_totp: !!r.need_totp_setup }); route();
     } catch (err) { flash = { cls: "bad", text: err.message }; renderLogin(ticket); }
+  };
+}
+
+/** Invitation d'un technicien : mot de passe + double authentification. */
+async function renderInvite(token) {
+  setNav();
+  let inv;
+  try { inv = await api("GET", `/api/invite/${token}`); } catch (e) { app.innerHTML = `<div class="wizard"><div class="flash bad">${esc(e.message)}</div></div>`; return; }
+  app.innerHTML = `<div class="wizard"><h1>Bienvenue${inv.name ? " " + esc(inv.name) : ""}</h1>
+    <p class="sub">Compte <strong>${esc(inv.email)}</strong> · ${esc(inv.role)}. Choisis ton mot de passe et active la double authentification.</p>
+    <div class="panel"><form id="invf" class="grid" novalidate><div class="form-msg full"></div>
+      <label>Mot de passe<input type="password" name="password" autocomplete="new-password" minlength="10"><span class="hint">10 caractères minimum, lettres et chiffres.</span></label>
+      <label>Confirmation<input type="password" name="confirm" autocomplete="new-password"></label>
+      <div class="full"><div class="totp"><div class="totp-qr">${inv.qr}</div><div class="totp-steps"><ol>
+        <li>Dans <strong>Psono</strong> : nouvelle entrée <em>TOTP</em>, scanne ce QR code (ou saisis la clé <code class="mono">${esc(inv.secret.replace(/(.{4})/g, "$1 ").trim())}</code>).</li>
+        <li>Tape le code à 6 chiffres affiché :</li></ol>
+        <label>Code de vérification<input name="totp_code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></label></div></div></div>
+      <div class="actions"><button class="btn">Activer mon compte</button></div></form></div></div>`;
+  $("#invf").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    if (f.password !== f.confirm) return showFormError(e.target, { message: "Les deux mots de passe sont différents.", field: "confirm" });
+    try {
+      const r = await api("POST", `/api/invite/${token}`, { password: f.password, totp_code: f.totp_code });
+      Object.assign(state, { logged_in: true, email: r.email, need_totp: false });
+      $(".wizard .panel").innerHTML = `<div class="pad">${recoveryBox(r.recovery_codes)}<div class="actions" style="margin-top:14px"><a class="btn" href="#/">Ouvrir la console</a></div></div>`;
+      copyButtons();
+    } catch (err) { showFormError(e.target, err); }
   };
 }
 
@@ -691,12 +720,22 @@ async function renderUsers() {
     });
     rows.innerHTML = list.map((x) => `<tr class="click" data-href="#/utilisateurs/${esc(x.id)}">
       <td><strong>${esc(x.id)}</strong></td>
-      <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
+      <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.hidden ? ' <span class="pill off">Masqué</span>' : ""}${x.team ? ` <span class="pill wait" title="Groupe de visibilité">${esc(x.team)}</span>` : ""}${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
       <td>${statusPill(x)}</td>
       <td class="hide-sm">${x.registered ? `<span class="devs">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}<span class="pill ok">Connecté</span></span>` : '<span class="pill off">Non connecté</span>'}</td>
       <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td>
       <td class="acts"><button class="btn ghost sm" data-imp="${esc(x.id)}" title="Ouvrir le softphone web de cet utilisateur">Incarner</button>
-        ${x.registered ? `<button class="btn ghost sm" data-resync="${esc(x.id)}" title="Renvoyer la configuration au téléphone">Reprovisionner</button>` : ""}</td></tr>`).join("");
+        ${x.registered ? `<button class="btn ghost sm" data-resync="${esc(x.id)}" title="Renvoyer la configuration au téléphone">Reprovisionner</button>` : ""}
+        <button class="btn ghost sm" data-udel="${esc(x.id)}" title="Supprimer l'utilisateur">Supprimer</button></td></tr>`).join("");
+    rows.querySelectorAll("[data-udel]").forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation();
+      const id = b.dataset.udel;
+      const imp = await api("GET", `/api/extensions/${id}/impact`).catch(() => null);
+      const n = imp ? Object.values(imp).filter(Array.isArray).reduce((a, x) => a + x.length, 0) : 0;
+      if (!confirm(`Supprimer l'utilisateur ${id} ?\n\nSes identifiants, sa messagerie et ses renvois seront supprimés.${n ? `\nIl est utilisé à ${n} endroit(s) (groupes, renvois, SDA…) : il en sera retiré.` : ""}`)) return;
+      try { await api("DELETE", `/api/extensions/${id}?force=1`); flash = { text: `Utilisateur ${id} supprimé.` }; renderUsers(); }
+      catch (err) { flash = { cls: "bad", text: err.message }; renderUsers(); }
+    });
     wireImpersonate(rows);
     wireResync(rows);
     $("#unone").hidden = list.length > 0;
@@ -769,6 +808,7 @@ async function renderUser(id, tab = "general") {
   const [{ user: u, server }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
   if ((tab === "telephone" || tab === "touches") && !phoneOpts) phoneOpts = await api("GET", "/api/phone-options");
   const users = list.extensions;
+  window.__teams = users.map((x) => x.team).filter(Boolean);
   const fw = u.forwarding;
   const tabs = `<nav class="tabs">${USER_TABS.map(([k, l]) => `<a href="#/utilisateurs/${esc(u.id)}${k === "general" ? "" : "/" + k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
   const head = `<a class="back" href="#/utilisateurs">← Utilisateurs</a>
@@ -849,6 +889,8 @@ async function renderUser(id, tab = "general") {
         <label>Voyant d'alimentation (LED) clignote pour<select name="phone.settings.led">${optList(o.led, st.led)}</select></label>
         <label>Transport SIP<select name="phone.settings.transport">${optList(o.transports, st.transport)}</select>${!server.tls ? '<span class="hint">TLS disponible une fois le certificat obtenu.</span>' : ""}</label>
         <label class="check" style="align-self:end"><input type="checkbox" name="phone.settings.lldp" ${st.lldp ? "checked" : ""}> LLDP activé (détection du VLAN voix)</label>
+        <h3 class="full" style="margin:6px 0 0;font-size:15px">Sonnerie selon le type d'appel <span class="hint">(téléphones Yealink)</span></h3>
+        ${Object.entries(o.ring_types || {}).map(([k, l]) => `<label>${esc(l)}<select name="phone.settings.rings.${k}">${optList(o.ringers, st.rings?.[k] ?? "")}</select></label>`).join("")}
         ${save}</div></form>
       <h3 class="sec pad" style="border-top:1px solid var(--line);margin:0">Identifiants SIP (saisie manuelle ou softphone)</h3>
       <dl class="creds">
@@ -887,6 +929,9 @@ async function renderUser(id, tab = "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label class="check full"><input type="checkbox" name="options.disabled" ${u.options.disabled ? "checked" : ""}> Désactiver l'utilisateur <span class="hint">(ne reçoit plus d'appels, n'appelle plus que les urgences)</span></label>
       <label class="check full"><input type="checkbox" name="options.block_external" ${u.options.block_external ? "checked" : ""}> Interdire les appels externes <span class="hint">(appels internes et urgences toujours possibles)</span></label>
+      <label class="check full"><input type="checkbox" name="options.hidden" ${u.options.hidden ? "checked" : ""}> Masquer cet utilisateur <span class="hint">(absent de l'équipe du softphone, des annuaires des téléphones et du chat ; on peut toujours composer son numéro)</span></label>
+      <label class="full">Groupe de visibilité<input name="options.team" list="teams" value="${esc(u.options.team || "")}" placeholder="Vide = groupe par défaut (ex. Agence Lyon, Société B)"><datalist id="teams">${[...new Set((window.__teams || []))].map((t) => `<option value="${esc(t)}">`).join("")}</datalist>
+        <span class="hint">Les utilisateurs ne voient (softphone, annuaire du téléphone, présence) que ceux de leur groupe. Utile pour plusieurs sociétés ou sites sur le même standard.</span></label>
       <div class="note full">L'audio passe toujours par le PBX (indispensable derrière une box ou un pare-feu).</div>
       ${save}</form>
       <div class="pad" style="border-top:1px solid var(--line)" id="delzone"><h2 style="margin-bottom:8px">Supprimer l'utilisateur</h2>
@@ -1226,6 +1271,8 @@ async function route() {
   try {
     if (!state) state = await api("GET", "/api/state");
     if (!state.configured || !state.has_admin) return renderWizard();
+    const inv = /^#\/invitation\/([\w-]+)$/.exec(location.hash);
+    if (inv && !state.logged_in) return renderInvite(inv[1]);
     if (!state.logged_in) return renderLogin();
     if (!state.email || state.need_totp === undefined) { const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; }
     if (state.need_totp) return renderTotpRequired();
@@ -1240,7 +1287,7 @@ async function route() {
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "routages", m[2] || null);
     else if (h === "#/routes") await renderRoutes();
-    else if ((m = h.match(/^#\/(sortants|passerelles|codes|enregistrements|securite|sauvegardes|mises-a-jour|alertes|licence)(?:\/(.+))?$/))) await renderAdmin(adminHelpers, m[1], m[2] || null);
+    else if ((m = h.match(/^#\/(sortants|passerelles|codes|enregistrements|securite|sauvegardes|mises-a-jour|alertes|licence|comptes)(?:\/(.+))?$/))) await renderAdmin(adminHelpers, m[1], m[2] || null);
     else if (h === "#/appels") await renderCalls();  // accessible depuis le tableau de bord et le journal
     else if (h === "#/journal") await renderCdr();
     else if ((m = h.match(/^#\/annuaire(?:\/(\w+))?$/))) await renderContacts(m[1]);

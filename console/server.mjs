@@ -64,10 +64,20 @@ export async function buildApp({ db, ami } = {}) {
   const userCount = async () => Number((await db.query("SELECT count(*) FROM pbxmaison_users")).rows[0].count);
   const currentUser = (req) => readSession(req.cookies[COOKIE], settings.sessionSecret);
   // Console : session valide ET double authentification faite (sinon seule la mise en place de la double authentification est permise)
+  const ROLES = { admin: "Administrateur", tech: "Technicien", lecture: "Lecture seule" };
   const requireUser = async (req, reply) => {
     const u = currentUser(req);
     if (!u) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
+    // Compte supprimé ou rôle modifié : pris en compte immédiatement
+    const row = (await db.query("SELECT role FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
+    if (!row) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'existe plus." }); }
+    req.role = row.role;
     if (!u.mfa) return reply.code(403).send({ error: "Active d'abord la double authentification.", need_totp_setup: true });
+    if (row.role === "lecture" && req.method !== "GET" && !/^\/api\/(reauth|logout|totp\/)/.test(req.url)) return reply.code(403).send({ error: "Compte en lecture seule : modification impossible." });
+  };
+  const requireAdmin = async (req, reply) => {
+    const r = await requireFreshMfa(req, reply); if (r) return r;
+    if (req.role !== "admin") return reply.code(403).send({ error: "Réservé aux administrateurs." });
   };
   const requireLogin = async (req, reply) => { if (!currentUser(req)) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." }); };
   // Actions sensibles (sécurité, trunks, règles sortantes, restauration, mise à jour) : code de double authentification de moins de 15 min
@@ -98,7 +108,7 @@ export async function buildApp({ db, ami } = {}) {
     [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"]];
   app.addHook("onResponse", async (req, reply) => {
     if (req.method === "GET" || !req.url.startsWith("/api/") || reply.statusCode >= 400) return;
-    if (/^\/api\/(login|logout|reauth|u\/|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
+    if (/^\/api\/(login|logout|reauth|u\/|invite\/|accounts|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
     const u = currentUser(req); if (!u) return;
     const path = req.url.split("?")[0];
     const label = AUDIT_LABEL.find(([re]) => re.test(path))?.[1] || "Console";
@@ -170,7 +180,7 @@ export async function buildApp({ db, ami } = {}) {
     if (step === null) throw new UserError("Code incorrect : tape le code à 6 chiffres affiché par Psono (ou ton application).", "totp_code");
     const email = pbxEnv().PBX_ADMIN_EMAIL.toLowerCase();
     const rec = newRecoveryCodes();
-    await db.query("INSERT INTO pbxmaison_users (email, password_hash, last_login_at, totp_secret, totp_last_step, recovery) VALUES ($1, $2, now(), $3, $4, $5)",
+    await db.query("INSERT INTO pbxmaison_users (email, password_hash, last_login_at, totp_secret, totp_last_step, recovery, role) VALUES ($1, $2, now(), $3, $4, $5, 'admin')",
       [email, hashPassword(req.body.password), pendingSetupTotp, step, JSON.stringify(rec.hashes)]);
     pendingSetupTotp = null;
     consumeToken();
@@ -255,6 +265,68 @@ export async function buildApp({ db, ami } = {}) {
     reply.setCookie(COOKIE, createSession(u.email, settings.sessionSecret, { mfa: true, mfa_at: Date.now() }), cookieOpts(req));
     return { ok: true, recovery_codes: rec.codes };
   });
+  // ---------------------------------------------------------------- Comptes de la console (un par technicien)
+  const inviteLink = (req, token) => `${req.protocol}://${req.headers.host}/#/invitation/${token}`;
+  app.get("/api/accounts", { preHandler: requireUser }, async (req) => ({
+    me: currentUser(req).email, role: req.role, roles: ROLES,
+    accounts: (await db.query(`SELECT email, name, role, invited_by, created_at, last_login_at, totp_secret IS NOT NULL AS totp FROM pbxmaison_users ORDER BY created_at`)).rows,
+    invites: (await db.query("SELECT email, name, role, created_by, expires_at FROM pbxmaison_invites WHERE expires_at > now() ORDER BY expires_at")).rows,
+  }));
+  app.post("/api/accounts", { preHandler: requireAdmin }, async (req) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) throw new UserError("Adresse e-mail invalide.", "email");
+    const role = ROLES[req.body?.role] ? req.body.role : "tech";
+    const name = String(req.body?.name || "").replace(/[\r\n<>]/g, " ").trim().slice(0, 60);
+    if ((await db.query("SELECT 1 FROM pbxmaison_users WHERE email = $1", [email])).rowCount) throw new UserError("Ce compte existe déjà.", "email");
+    const token = crypto.randomBytes(24).toString("base64url");
+    await db.query("DELETE FROM pbxmaison_invites WHERE email = $1", [email]);
+    await db.query("INSERT INTO pbxmaison_invites (token_hash, email, name, role, created_by, expires_at) VALUES ($1, $2, $3, $4, $5, now() + interval '48 hours')",
+      [crypto.createHash("sha256").update(token).digest("hex"), email, name, role, currentUser(req).email]);
+    await audit(req, `Invitation créée pour ${email} (${ROLES[role]})`);
+    return { link: inviteLink(req, token), expires_in_hours: 48 };
+  });
+  app.put("/api/accounts/:email", { preHandler: requireAdmin }, async (req) => {
+    const email = req.params.email.toLowerCase(), role = req.body?.role;
+    if (!ROLES[role]) throw new UserError("Rôle inconnu.");
+    if (email === currentUser(req).email) throw new UserError("Tu ne peux pas changer ton propre rôle.");
+    await db.query("UPDATE pbxmaison_users SET role = $2 WHERE email = $1", [email, role]);
+    await audit(req, `Rôle de ${email} : ${ROLES[role]}`);
+    return { ok: true };
+  });
+  app.delete("/api/accounts/:email", { preHandler: requireAdmin }, async (req) => {
+    const email = req.params.email.toLowerCase();
+    if (email === currentUser(req).email) throw new UserError("Tu ne peux pas supprimer ton propre compte.");
+    const r = await db.query("DELETE FROM pbxmaison_users WHERE email = $1", [email]);
+    await db.query("DELETE FROM pbxmaison_invites WHERE email = $1", [email]);
+    if (r.rowCount) await audit(req, `Compte supprimé : ${email}`);
+    return { ok: true };
+  });
+  // Invitation : le technicien choisit son mot de passe et active sa double authentification
+  const inviteOf = async (token) => (await db.query("SELECT * FROM pbxmaison_invites WHERE token_hash = $1 AND expires_at > now()", [crypto.createHash("sha256").update(String(token || "")).digest("hex")])).rows[0];
+  const pendingInviteTotp = new Map();
+  app.get("/api/invite/:token", async (req) => {
+    const inv = await inviteOf(req.params.token);
+    if (!inv) throw Object.assign(new UserError("Invitation invalide ou expirée : demande-en une nouvelle."), { status: 404 });
+    const secret = pendingInviteTotp.get(req.params.token) || newTotpSecret(); pendingInviteTotp.set(req.params.token, secret);
+    const uri = otpauthUri(secret, inv.email, `Callikoe ${pbxEnv().PBX_NAME || ""}`.trim());
+    return { email: inv.email, name: inv.name, role: ROLES[inv.role], secret, uri, qr: qrSvg(uri) };
+  });
+  app.post("/api/invite/:token", async (req, reply) => {
+    const inv = await inviteOf(req.params.token), secret = pendingInviteTotp.get(req.params.token);
+    if (!inv || !secret) throw Object.assign(new UserError("Invitation invalide ou expirée : demande-en une nouvelle."), { status: 404 });
+    const problem = passwordProblem(req.body?.password);
+    if (problem) throw new UserError(problem, "password");
+    const step = verifyTotp(secret, req.body?.totp_code);
+    if (step === null) throw new UserError("Code incorrect : tape le code à 6 chiffres affiché par Psono (ou ton application).", "totp_code");
+    const rec = newRecoveryCodes();
+    await db.query(`INSERT INTO pbxmaison_users (email, password_hash, last_login_at, totp_secret, totp_last_step, recovery, role, name, invited_by)
+      VALUES ($1, $2, now(), $3, $4, $5, $6, $7, $8)`, [inv.email, hashPassword(req.body.password), secret, step, JSON.stringify(rec.hashes), inv.role, inv.name, inv.created_by]);
+    await db.query("DELETE FROM pbxmaison_invites WHERE email = $1", [inv.email]);
+    pendingInviteTotp.delete(req.params.token);
+    await audit(req, `Compte activé (invité par ${inv.created_by})`, true, "", inv.email);
+    reply.setCookie(COOKIE, createSession(inv.email, settings.sessionSecret, { mfa: true, mfa_at: Date.now() }), cookieOpts(req));
+    return { ok: true, email: inv.email, recovery_codes: rec.codes };
+  });
   app.get("/api/audit", { preHandler: requireUser }, async () => ({
     entries: (await db.query("SELECT at, email, ip, action, ok, detail FROM pbxmaison_audit ORDER BY id DESC LIMIT 200")).rows,
   }));
@@ -262,7 +334,8 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/me", { preHandler: requireLogin }, async (req) => {
     const u = currentUser(req);
     const row = (await db.query("SELECT totp_secret IS NOT NULL AS totp, jsonb_array_length(recovery) AS recovery_left FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
-    return { email: u.email, totp: !!row?.totp, mfa: u.mfa, recovery_left: row?.recovery_left ?? 0 };
+    const role = (await db.query("SELECT role, name FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
+    return { email: u.email, totp: !!row?.totp, mfa: u.mfa, recovery_left: row?.recovery_left ?? 0, role: role?.role || "admin", name: role?.name || "" };
   });
 
   // ---------------------------------------------------------------- Console
@@ -373,7 +446,9 @@ export async function buildApp({ db, ami } = {}) {
   app.post("/api/u/logout", async (req, reply) => { reply.clearCookie(UCOOKIE, { path: "/" }); return { ok: true }; });
   const team = async (self) => {
     const [list, lines] = await Promise.all([pbx.listExtensions(), pbx.lineStates()]);
-    return list.filter((x) => x.id !== self && !x.disabled).map((x) => ({
+    const me = list.find((x) => x.id === self);
+    // Masqués : vus de personne ; groupes de visibilité : on ne voit que son groupe
+    return list.filter((x) => x.id !== self && !x.disabled && !x.hidden && (x.team || "") === (me?.team || "")).map((x) => ({
       id: x.id, name: x.name, first_name: x.first_name, last_name: x.last_name, email: x.email,
       status: x.status, registered: x.registered, line: lines.get(x.id) || "",
       devices: [...new Set(x.contacts.map((c) => c.device?.kind).filter(Boolean))],

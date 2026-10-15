@@ -59,6 +59,9 @@ export const SCREENSAVER = { 60: "1 minute", 300: "5 minutes", 600: "10 minutes"
 export const TRANSFER = { attended: ["Transfert supervisé", 1], blind: ["Transfert aveugle", 2], newcall: ["Nouvel appel", 0] };
 export const LED = { voicemail: "Messages vocaux uniquement", missed: "Appels manqués uniquement", both: "Messages vocaux et appels manqués", off: "Aucun" };
 export const TRANSPORTS = { udp: ["UDP (5060)", 0, 5060], tcp: ["TCP (5060)", 1, 5060], tls: ["TLS chiffré (5061)", 2, 5061] };
+/** Sonnerie selon le type d'appel (en-tête Alert-Info envoyé par le PBX) */
+export const RING_TYPES = { interne: "Appel interne (collègue)", externe: "Appel externe (client)", groupe: "Groupe d'appel", file: "File d'attente", svi: "Via le SVI (standard automatique)" };
+export const RINGERS = { "": "Sonnerie par défaut du téléphone", 1: "Sonnerie 1", 2: "Sonnerie 2", 3: "Sonnerie 3", 4: "Sonnerie 4", 5: "Sonnerie 5", 6: "Sonnerie 6", 7: "Sonnerie 7", 8: "Sonnerie 8" };
 export const KEY_TYPES = { line: "Ligne", blf: "BLF (supervision + interception)", speed: "Numérotation rapide", none: "Aucune" };
 
 export function defaultPhone(tz = "Europe/Paris") {
@@ -67,6 +70,7 @@ export function defaultPhone(tz = "Europe/Paris") {
     settings: {
       language: "fr", date_format: "dd/mm/yyyy", time_format: "24", timezone: TIMEZONES[tz] ? tz : "Europe/Paris",
       backlight: 3600, screensaver: 3600, transfer: "attended", led: "voicemail", lldp: true, transport: "udp",
+      rings: { interne: "", externe: "", groupe: "", file: "", svi: "" },
     },
     keys: [{ type: "line", value: "", label: "" }],
   };
@@ -127,6 +131,8 @@ export function validatePhone(input, current, ctx) {
   st.led = pick(LED, s.led ?? st.led, st.led);
   st.transport = pick(TRANSPORTS, s.transport ?? st.transport, st.transport);
   if (s.lldp !== undefined) st.lldp = !!s.lldp;
+  st.rings = { interne: "", externe: "", groupe: "", file: "", svi: "", ...(st.rings || {}) };
+  if (s.rings) for (const k of Object.keys(RING_TYPES)) if (s.rings[k] !== undefined) st.rings[k] = RINGERS[s.rings[k]] !== undefined ? String(s.rings[k]) : "";
 
   if (input.keys !== undefined) {
     if (!Array.isArray(input.keys)) throw new PhoneError("Touches invalides.", "phone.keys");
@@ -235,7 +241,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("static.auto_provision.reboot_force.enable", 0),
     "",
     "## Annuaire de l'entreprise (collègues + contacts), aussi utilisé pour afficher le nom des appelants",
-    v("remote_phonebook.data.1.url", `${server.prov_url}phonebook.xml`),
+    v("remote_phonebook.data.1.url", `${server.prov_url}phonebook-${user.id}.xml`),
     v("remote_phonebook.data.1.name", "Annuaire"),
     v("features.remote_phonebook.enable", 1),
     v("features.remote_phonebook.flash_time", 300),
@@ -246,6 +252,12 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
       v("phone_setting.backgrounds", `Config:callikoe-v2-${model.screen}.png`),
       "",
     ] : []),
+    "## Sonneries selon le type d'appel",
+    ...Object.keys(RING_TYPES).flatMap((k, i) => [
+      v(`distinctive_ring_tones.alert_info.${i + 1}.text`, `callikoe-${k}`),
+      v(`distinctive_ring_tones.alert_info.${i + 1}.ringer`, st.rings?.[k] || ""),
+    ]),
+    "",
     "## Touches",
   ];
   const n = Math.max(model?.keys || 0, phone.keys.length);

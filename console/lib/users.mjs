@@ -26,7 +26,7 @@ export function defaultUser(id) {
       away: { type: "voicemail", target: "" },
       dnd: { type: "voicemail", target: "" },
     },
-    options: { ring_mobile: false, accept_group_calls: true, disabled: false, block_external: false },
+    options: { ring_mobile: false, accept_group_calls: true, disabled: false, block_external: false, hidden: false, team: "" },
     voicemail: { enabled: true, pin: "", skip_pin: true },
   };
 }
@@ -120,7 +120,8 @@ export function validateUser(input, current, ctx) {
   }
 
   if (input.options) {
-    for (const k of Object.keys(u.options)) if (input.options[k] !== undefined) u.options[k] = !!input.options[k];
+    for (const k of Object.keys(u.options)) if (k !== "team" && input.options[k] !== undefined) u.options[k] = !!input.options[k];
+    if (input.options.team !== undefined) u.options.team = String(input.options.team || "").replace(/[\r\n<>"]/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
   }
   if (input.voicemail) {
     const vm = input.voicemail;
@@ -259,3 +260,7 @@ export const userOpts = (u) => `USER_OPTS=${u.outbound_cid || ""},${u.options.di
 
 /** Membres réellement sonnés par la route entrante « tous les postes ». */
 export const ringsForGroups = (u) => !u.options.disabled && u.status === "available" && u.options.accept_group_calls;
+
+/** Visibilité entre utilisateurs : masqué = vu de personne ; sinon on ne voit que les collègues du même groupe de visibilité. */
+export const sees = (viewer, other) => !!other && !other.options?.hidden && !other.options?.disabled
+  && (viewer?.options?.team || "") === (other.options?.team || "");

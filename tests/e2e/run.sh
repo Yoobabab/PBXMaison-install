@@ -249,6 +249,31 @@ sleep 1
 sudo /usr/sbin/asterisk -rx 'dialplan show 0478123456@phonebook' | grep -q "CALLERID(name)=Jean Dupont Boulangerie Dupont" && pass "Annuaire : nom de l'appelant affiché sur les appels entrants" || fail "phonebook dialplan"
 curl -sS "http://127.0.0.1${PPATH}phonebook.xml" | grep -q "<Name>Claire Bernard (Cabinet Bernard)</Name>" && pass "Annuaire : carnet distant Yealink servi par Nginx" || fail "phonebook.xml"
 curl -sS -b "$UJ" "$API/api/u/contacts" | grep -q "Boulangerie Dupont" && pass "Softphone : annuaire de l'entreprise visible" || fail "contacts softphone"
+# Utilisateur masqué et groupes de visibilité
+api PUT /api/extensions/206 '{"options":{"hidden":true}}' >/dev/null
+curl -sS -b "$UJ" "$API/api/u/team" | grep -q '"id":"206"' && fail "utilisateur masqué visible" || pass "Utilisateur masqué : absent de l'équipe du softphone"
+curl -sS "http://127.0.0.1${PPATH}phonebook-204.xml" | grep -q "<Telephone>206</Telephone>" && fail "masqué dans l'annuaire du téléphone" || pass "Utilisateur masqué : absent de l'annuaire du téléphone"
+api PUT /api/extensions/206 '{"options":{"hidden":false,"team":"Societe B"}}' >/dev/null
+curl -sS -b "$UJ" "$API/api/u/team" | grep -q '"id":"206"' && fail "groupe de visibilité ignoré" || pass "Groupes de visibilité : 204 ne voit pas 206 (autre groupe)"
+api PUT /api/extensions/206 '{"options":{"team":""}}' >/dev/null
+# Sonnerie selon le type d'appel
+sudo /usr/sbin/asterisk -rx 'dialplan show s@pickup-mark' | grep -q "info=callikoe-" && pass "Sonneries : type d'appel envoyé au téléphone (Alert-Info)" || fail "alert-info"
+api PUT /api/extensions/201 '{"phone":{"settings":{"rings":{"externe":"3"}}}}' >/dev/null
+curl -sS "http://127.0.0.1${PPATH}44dbd229fa7b.cfg" | grep -q "^distinctive_ring_tones.alert_info.2.ringer = 3$" && pass "Sonneries : sonnerie 3 pour les appels externes sur le Yealink de 201" || fail "sonnerie externe"
+# Comptes nominatifs (invitation d'un technicien, double authentification, rôles)
+LINK="$(api POST /api/accounts '{"email":"tech@test.invalid","name":"Jean Tech","role":"lecture"}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).link)}catch{console.log("")}})')"
+ITOK="${LINK##*/}"
+[[ -n "$ITOK" && "$ITOK" != "$LINK" ]] && pass "Comptes : lien d'invitation créé" || fail "invitation : $LINK"
+ISEC="$(curl -sS "$API/api/invite/$ITOK" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).secret))')"
+TJAR="$(mktemp)"
+ICODE="$(node -e 'import(process.argv[1]).then((a) => console.log(a.totpCode(process.argv[2], Math.floor(Date.now() / 30000))))' "$PWD/../../console/lib/auth.mjs" "$ISEC")"
+curl -sS -c "$TJAR" -X POST "$API/api/invite/$ITOK" -H "content-type: application/json" -d "{\"password\":\"TechPass2026\",\"totp_code\":\"$ICODE\"}" | grep -q '"recovery_codes"' && pass "Comptes : le technicien active son compte (mot de passe + double authentification)" || fail "activation invitation"
+curl -sS -b "$TJAR" "$API/api/trunks" | grep -q '"id":"dstny"' && curl -sS -b "$TJAR" -X PUT "$API/api/routes" -H "content-type: application/json" -d '{"inbound":[]}' | grep -q "lecture seule" \
+  && pass "Comptes : rôle « lecture seule » consulte sans pouvoir modifier" || fail "rôle lecture seule"
+raw_api GET /api/audit | grep -q "tech@test.invalid" && pass "Journal : les actions sont attribuées à chaque compte" || fail "audit par compte"
+api DELETE /api/accounts/tech%40test.invalid >/dev/null
+curl -sS -b "$TJAR" "$API/api/trunks" | grep -q "n'existe plus" && pass "Comptes : compte supprimé, accès coupé immédiatement" || fail "suppression de compte"
+
 
 # Chat entre collègues : envoi par 204, réception en temps réel par 205 (SSE à travers Nginx)
 J5="$(mktemp)"

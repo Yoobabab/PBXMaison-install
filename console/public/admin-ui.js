@@ -520,6 +520,39 @@ async function gatewaySetup(id) {
   H.app.querySelectorAll("[data-show]").forEach((b) => b.addEventListener("click", () => { const x = b.previousElementSibling; x.textContent = x.textContent.startsWith("•") ? x.dataset.v : "••••••••••"; }));
 }
 
+// ================================================================ Comptes de la console
+async function pageAccounts() {
+  H.setNav("accounts");
+  const d = await H.api("GET", "/api/accounts");
+  const admin = d.role === "admin";
+  H.app.innerHTML = head("Comptes", "Un compte par personne : chacun se connecte avec son adresse, son mot de passe et sa double authentification, et le journal indique qui a fait quoi.") +
+    `${admin ? `<form id="acf" class="panel" novalidate style="margin-bottom:16px"><div class="ph"><h2>Inviter un collègue</h2></div><div class="pad stack"><div class="form-msg"></div>
+      <div class="cx-g3"><label>E-mail<input name="email" type="email" placeholder="prenom.nom@irt-network.fr"></label><label>Nom<input name="name" placeholder="Prénom Nom"></label>
+      <label>Rôle<select name="role">${Object.entries(d.roles).map(([k, l]) => `<option value="${k}" ${k === "tech" ? "selected" : ""}>${H.esc(l)}</option>`).join("")}</select></label></div>
+      <p class="hint" style="margin:0"><b>Administrateur</b> : tout, y compris les comptes. <b>Technicien</b> : tout sauf la gestion des comptes. <b>Lecture seule</b> : consulter sans rien modifier.</p>
+      <div id="aclink"></div><div class="actions"><button class="btn">Créer le lien d'invitation</button></div></div></form>` : ""}
+    <div class="panel"><div class="ph"><h2>Comptes</h2><span class="s">${d.accounts.length}</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Compte</th><th>Rôle</th><th>Double authentification</th><th>Dernière connexion</th><th></th></tr></thead><tbody>
+      ${d.accounts.map((a) => `<tr><td><b>${H.esc(a.name || a.email)}</b>${a.name ? `<div class="s">${H.esc(a.email)}</div>` : ""}${a.invited_by ? `<div class="s">invité par ${H.esc(a.invited_by)}</div>` : ""}</td>
+        <td>${admin && a.email !== d.me ? `<select data-role="${H.esc(a.email)}">${Object.entries(d.roles).map(([k, l]) => `<option value="${k}" ${k === a.role ? "selected" : ""}>${H.esc(l)}</option>`).join("")}</select>` : H.esc(d.roles[a.role] || a.role)}</td>
+        <td>${a.totp ? pill("ok", "Activée") : pill("wait", "À activer")}</td><td>${fmtDT(a.last_login_at)}</td>
+        <td class="acts">${admin && a.email !== d.me ? `<button class="btn ghost sm" data-del="${H.esc(a.email)}">Supprimer</button>` : a.email === d.me ? '<span class="s">toi</span>' : ""}</td></tr>`).join("")}
+      ${d.invites.map((i) => `<tr><td><b>${H.esc(i.name || i.email)}</b><div class="s">${H.esc(i.email)}</div></td><td>${H.esc(d.roles[i.role])}</td><td colspan="2">${pill("off", "Invitation en attente")} <span class="s">expire ${fmtDT(i.expires_at)}</span></td><td></td></tr>`).join("")}
+      </tbody></table></div></div>`;
+  const f = H.$("#acf");
+  if (f) onSubmit(f, async (v) => {
+    const r = await H.api("POST", "/api/accounts", v);
+    H.$("#aclink").innerHTML = `<div class="note">Envoie ce lien à ${H.esc(v.email)} (valable ${r.expires_in_hours} h, une seule fois) :<div class="cx-copy" style="margin-top:8px"><code>${H.esc(r.link)}</code><button type="button" class="btn ghost sm" data-copy="${H.esc(r.link)}">Copier</button></div></div>`;
+    H.copyButtons(H.app);
+  });
+  H.app.querySelectorAll("[data-role]").forEach((sel) => sel.onchange = async () => { try { await H.api("PUT", `/api/accounts/${encodeURIComponent(sel.dataset.role)}`, { role: sel.value }); ok("Rôle modifié."); } catch (e) { H.setFlash({ cls: "bad", text: e.message }); } pageAccounts(); });
+  H.app.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.classList.add("danger"); b.textContent = "Confirmer"; return; }
+    try { await H.api("DELETE", `/api/accounts/${encodeURIComponent(b.dataset.del)}`); ok("Compte supprimé : l'accès est coupé immédiatement."); } catch (e) { H.setFlash({ cls: "bad", text: e.message }); }
+    pageAccounts();
+  });
+}
+
 /** Point d'entrée : page = sortants | securite | enregistrements | codes | sauvegardes | mises-a-jour | alertes | licence | passerelles */
 export async function renderAdmin(helpers, page, sub) {
   H = helpers;
@@ -533,5 +566,6 @@ export async function renderAdmin(helpers, page, sub) {
     case "alertes": return pageAlerts();
     case "licence": return pageLicense();
     case "passerelles": return pageGateways(sub);
+    case "comptes": return pageAccounts();
   }
 }

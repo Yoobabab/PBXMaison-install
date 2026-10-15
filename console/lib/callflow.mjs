@@ -484,7 +484,7 @@ export function buildCallflowDialplan(m) {
     const d = o.data;
     L.push(`; ---- Groupe ${o.number} ${nameOf(o)}`, `exten => ${o.number},1,NoOp(Groupe ${o.number} ${nameOf(o)})`);
     hopGuard(L);
-    L.push(" same => n,Set(CDR(dest_kind)=group)");
+    L.push(" same => n,Set(CDR(dest_kind)=group)", " same => n,Set(__RINGTYPE=groupe)");
     const tails = officeGate(L, o, m);
     if (d.cid_prefix) L.push(` same => n,Set(CALLERID(name)=${d.cid_prefix} \${CALLERID(name)})`);
     const ring = ringers(d.members, m.users);
@@ -514,7 +514,7 @@ export function buildCallflowDialplan(m) {
     const d = o.data;
     L.push(`; ---- File d'attente ${o.number} ${nameOf(o)}`, `exten => ${o.number},1,NoOp(File ${o.number} ${nameOf(o)})`);
     hopGuard(L);
-    L.push(" same => n,Set(CDR(dest_kind)=queue)");
+    L.push(" same => n,Set(CDR(dest_kind)=queue)", " same => n,Set(__RINGTYPE=file)");
     const tails = officeGate(L, o, m);
     L.push(" same => n,Answer()");
     const g = d.greeting && find(m.objects, "prompt", d.greeting);
@@ -550,7 +550,7 @@ export function buildCallflowDialplan(m) {
   for (const o of byKind(m.objects, "ivr")) {
     const d = o.data;
     const p = d.prompt && find(m.objects, "prompt", d.prompt);
-    L.push("", `[ivr-${o.number}]`, "exten => s,1,Answer()", " same => n,Set(CDR(dest_kind)=ivr)", " same => n,Set(TRIES=0)", " same => n,Set(TIMEOUT(digit)=2)");
+    L.push("", `[ivr-${o.number}]`, "exten => s,1,Answer()", " same => n,Set(CDR(dest_kind)=ivr)", " same => n,Set(__RINGTYPE=svi)", " same => n,Set(TRIES=0)", " same => n,Set(TIMEOUT(digit)=2)");
     L.push(` same => n(menu),${p?.data?.file ? `Background(${promptPath(m.soundsDir, p)})` : "Wait(1)"}`, ` same => n,WaitExten(${d.timeout})`);
     for (const [k, dest] of Object.entries(d.options)) {
       L.push(`exten => ${k},1,NoOp(SVI ${o.number} : touche ${k})`);
@@ -638,6 +638,7 @@ function stepLines(st, m, tag) {
       const g = find(m.objects, "group", st.target);
       if (!g) { add("NoOp(Groupe supprimé)"); break; }
       const d = g.data, time = st.time || d.ring_time;
+      add("Set(__RINGTYPE=groupe)");
       if (d.cid_prefix) add(`ExecIf($["\${CID_PFX}" = ""]?Set(CALLERID(name)=${d.cid_prefix} \${CALLERID(name)}))`), add("Set(CID_PFX=1)");
       if (d.strategy === "page") { const r = ringers(d.members, m.users); if (r.length) { add(`Page(${r.map(devices).join("&")},db(page-headers^s^1)i,${time})`); add("Goto(end)"); } break; }
       if (d.strategy === "rotate") {
