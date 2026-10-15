@@ -202,12 +202,29 @@ function progressList(steps) {
 
 function wizApply() {
   app.innerHTML = wizardFrame(3, `<div class="panel"><div class="ph"><h2>Installation en cours</h2><span class="spin"></span></div><div id="prog"><div class="pad hint">Démarrage…</div></div></div>`);
+  let fails = 0, last = null;
+  // Adresse HTTPS obtenue pendant l'installation : l'assistant continue là-bas (même jeton)
+  const httpsUrl = (steps) => {
+    const m = /https:\/\/([A-Za-z0-9.-]+)/.exec((steps || []).find((x) => x.step === "certificat" && x.status === "ok")?.message || "");
+    return m && location.protocol === "http:" ? `https://${m[1]}/?jeton=${encodeURIComponent(setupToken())}` : null;
+  };
   const poll = async () => {
     let p;
-    try { p = await api("GET", "/api/setup/progress"); } catch (e) { return; }
+    try { p = await api("GET", "/api/setup/progress"); fails = 0; } catch (e) {
+      // Le serveur web a pu basculer en HTTPS (certificat obtenu) : proposer d'y continuer
+      if (++fails === 6) {
+        const u = httpsUrl(last?.steps) || (wiz.check?.pbx?.fqdn ? `https://${wiz.check.pbx.fqdn}/?jeton=${encodeURIComponent(setupToken())}` : null);
+        $("#prog").insertAdjacentHTML("beforeend", `<div class="pad" id="lost" style="border-top:1px solid var(--line)"><p style="margin-top:0"><strong>La page ne reçoit plus l'avancement.</strong> Le serveur web vient probablement de passer en HTTPS : l'installation continue de son côté.</p>
+          ${u ? `<a class="btn" href="${esc(u)}">Continuer en HTTPS</a>` : `<button class="btn" onclick="location.reload()">Recharger la page</button>`}</div>`);
+      }
+      return;
+    }
+    last = p;
     $("#prog").innerHTML = p.steps.length ? progressList(p.steps) : `<div class="pad hint">Démarrage…</div>`;
     if (!p.running && p.ok !== null) {
       clearInterval(timer);
+      const u = p.ok && httpsUrl(p.steps);
+      if (u) { $("#prog").insertAdjacentHTML("beforeend", `<div class="pad hint" style="border-top:1px solid var(--line)">Passage en HTTPS…</div>`); setTimeout(() => location.assign(u), 1500); return; }
       if (p.ok) { state.configured = true; wiz.step = state.has_admin ? 5 : 4; setTimeout(renderWizard, 800); }
       else {
         $(".ph").innerHTML = `<h2>L'installation a échoué</h2><span class="pill bad">Erreur</span>`;

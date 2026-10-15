@@ -51,6 +51,13 @@ server {
     server_name _;
     server_tokens off;
     location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    # L'assistant ouvert en HTTP suit la fin de l'installation, puis bascule lui-même en HTTPS
+    location = /api/setup/progress {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto http;
+    }
     location / { return 301 https://${fqdn}\$request_uri; }
 }
 server {
@@ -73,6 +80,15 @@ server {
         proxy_set_header Host \$host;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+    }
+    location = /api/backups/upload {
+        client_max_body_size 4g;
+        proxy_request_buffering off;
+        proxy_read_timeout 600s;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
     }
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -102,6 +118,15 @@ server {
         proxy_set_header Host $host;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+    }
+    location = /api/backups/upload {
+        client_max_body_size 4g;
+        proxy_request_buffering off;
+        proxy_read_timeout 600s;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto http;
     }
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -197,7 +222,7 @@ cmd_apply() {
     dns_ok=1
     json certificat run "Demande du certificat HTTPS pour ${PBX_FQDN}…"
     nginx_write "" 0
-    if certbot certonly --webroot -w /var/www/letsencrypt -d "$PBX_FQDN" -m "$PBX_ADMIN_EMAIL" --agree-tos -n -q; then
+    if timeout 180 certbot certonly --webroot -w /var/www/letsencrypt -d "$PBX_FQDN" -m "$PBX_ADMIN_EMAIL" --agree-tos -n -q; then
       install -d /etc/letsencrypt/renewal-hooks/deploy
       cat > /etc/letsencrypt/renewal-hooks/deploy/pbxmaison <<EOF
 #!/bin/sh
