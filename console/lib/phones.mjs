@@ -274,8 +274,8 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     "",
     ...(model?.screen && server.assets_url ? [
       "## Fond d'écran Callikoe",
-      v("wallpaper_upload.url", `${server.assets_url}callikoe-v2-${model.screen}.png`),
-      v("phone_setting.backgrounds", `Config:callikoe-v2-${model.screen}.png`),
+      v("wallpaper_upload.url", `${server.assets_url}callikoe-v3-${model.screen}.png`),
+      v("phone_setting.backgrounds", `Config:callikoe-v3-${model.screen}.png`),
       "",
     ] : []),
     "## Sonneries selon le type d'appel",
