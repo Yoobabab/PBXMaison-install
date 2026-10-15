@@ -13,6 +13,9 @@
 #    pbx-configure restore <fichier> restaure une archive (base, sons, messagerie, enregistrements)
 #    pbx-configure update [ref] | update-status   mise à jour de Callikoe (relance l'installeur en arrière-plan)
 #
+#  Serveur multi-tenant : pbx-configure --tenant <client> <commande> agit sur le PBX de ce client seulement
+#  (ses fichiers, son moteur, sa base, son adresse web). Chaque console client n'a le droit (sudo) que pour son nom.
+#
 #  Sortie : une ligne JSON par étape {"step":…, "status":"ok|warn|error|run", "message":…}
 #  pour que la console affiche la progression.
 # =============================================================================
@@ -20,17 +23,56 @@ set -Eeuo pipefail
 export PATH="/usr/sbin:/usr/bin:/sbin:/bin"   # Node.js du système, pas une autre version installée ailleurs
 
 APP=/opt/pbxmaison
-ETC=/etc/pbxmaison
-VAR=/var/lib/pbxmaison
+TENANT=""
+if [[ "${1:-}" == "--tenant" ]]; then
+  TENANT="${2:-}"; shift 2
+  [[ "$TENANT" =~ ^[a-z0-9][a-z0-9-]{1,30}$ && -f "/etc/callikoe/t/$TENANT/tenant.env" ]] || { echo '{"step":"verification","status":"error","message":"Client inconnu."}'; exit 1; }
+fi
+if [[ -n "$TENANT" ]]; then
+  # PBX d'un client sur le serveur multi-tenant
+  ETC="/etc/callikoe/t/$TENANT"
+  VAR="/var/lib/callikoe/t/$TENANT"
+  TENANT_N="$(. "$ETC/tenant.env"; echo "$TENANT_N")"
+  AST_ETC="$ETC/asterisk"
+  AST_SPOOL="/var/spool/callikoe/$TENANT"
+  AST_UNIT="callikoe-asterisk@$TENANT"
+  CONSOLE_UNIT="callikoe-console@$TENANT"
+  DB_NAME="cx_${TENANT//-/_}"
+  NGINX_SITE="callikoe-$TENANT"
+  F2B_SIP_JAIL="callikoe-sip"
+  F2B_JAIL=/etc/fail2ban/jail.d/callikoe.conf
+  AST_OWNER="ast-$TENANT:cx-$TENANT"
+  CONSOLE_USER="cx-$TENANT"
+  export AST_USER="ast-$TENANT" AST_GROUP="cx-$TENANT"
+  export CX_MODE=tenant AST_ETC AST_SPOOL CX_VAR="$VAR" AST_VARLIB="$VAR/asterisk" AST_RUN="/run/callikoe/$TENANT" AST_LOG="/var/log/callikoe/$TENANT" \
+    SIP_INT_PORT=$((6000 + TENANT_N)) AMI_PORT=$((7000 + TENANT_N)) HTTP_PORT=$((8100 + TENANT_N)) CONSOLE_PORT=$((9000 + TENANT_N)) \
+    RTP_START=$((10000 + (TENANT_N - 1) * 200)) RTP_END=$((10000 + (TENANT_N - 1) * 200 + 199)) ODBC_DSN="$DB_NAME" DB_USER="$DB_NAME"
+else
+  ETC=/etc/pbxmaison
+  VAR=/var/lib/pbxmaison
+  AST_ETC=/etc/asterisk
+  AST_SPOOL=/var/spool/asterisk
+  AST_UNIT=asterisk
+  CONSOLE_UNIT=pbxmaison-console
+  DB_NAME=asterisk
+  NGINX_SITE=pbxmaison
+  F2B_SIP_JAIL=asterisk
+  F2B_JAIL=/etc/fail2ban/jail.d/pbxmaison.conf
+  AST_OWNER="asterisk:asterisk"
+  CONSOLE_USER=pbxmaison
+fi
+AST=(/usr/sbin/asterisk -C "$AST_ETC/asterisk.conf")
 STAGING="$VAR/staging"
 TRUSTED_KEY="$APP/pbx/portal-public-key.pem"
+[[ -f /etc/callikoe/trusted-key.pem ]] && TRUSTED_KEY=/etc/callikoe/trusted-key.pem
 [[ -f "$ETC/trusted-key.pem" ]] && TRUSTED_KEY="$ETC/trusted-key.pem"
+tenant_refuse() { [[ -z "$TENANT" ]] || { echo "{\"ok\":false,\"error\":\"$1\"}"; exit 1; }; }
 
 json() { # json <étape> <statut> <message>
   node -e 'process.stdout.write(JSON.stringify({step:process.argv[1],status:process.argv[2],message:process.argv[3]})+"\n")' "$1" "$2" "$3"
 }
 fail() { json "$1" error "$2"; exit 1; }
-trap 'json erreur error "Erreur inattendue ligne $LINENO : $BASH_COMMAND (voir journalctl -u pbxmaison-console)"' ERR
+trap 'json erreur error "Erreur inattendue ligne $LINENO : $BASH_COMMAND (voir journalctl -u ${CONSOLE_UNIT:-pbxmaison-console})"' ERR
 
 [[ $EUID -eq 0 ]] || { echo "pbx-configure doit être lancé en root" >&2; exit 2; }
 set -a; . "$ETC/secrets.env"; . "$ETC/install.state"; set +a
@@ -38,6 +80,7 @@ set -a; . "$ETC/secrets.env"; . "$ETC/install.state"; set +a
 # Port de la console d'administration (HTTPS) : séparé du 443 public (softphone, appli, téléphones)
 ADMIN_PORT=8822
 nginx_write() {
+  [[ -n "$TENANT" ]] && { nginx_write_tenant "$@"; return; }
   local fqdn="${1:-}" tls="${2:-0}"
   install -d /var/www/letsencrypt
   {
@@ -167,6 +210,108 @@ EOF
   if systemctl is-active --quiet nginx; then systemctl reload nginx; else systemctl enable --now nginx >/dev/null 2>&1; fi
 }
 
+# Serveur multi-tenant : un bloc par adresse de client (le serveur garde le bloc par défaut, port 80 et certificats)
+nginx_write_tenant() {
+  local fqdn="${1:-}" tls="${2:-0}" site="/etc/nginx/sites-available/$NGINX_SITE"
+  if [[ -z "$fqdn" ]]; then set -a; . "$ETC/pbx.env" 2>/dev/null || true; set +a; fqdn="${PBX_FQDN:-}"; fi
+  [[ -n "$fqdn" ]] || { rm -f "/etc/nginx/sites-enabled/$NGINX_SITE"; return 0; }
+  local cport=$CONSOLE_PORT hport=$HTTP_PORT
+  local proxy="        proxy_pass http://127.0.0.1:${cport};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;"
+  local ws="    location = /ws {
+        proxy_pass http://127.0.0.1:${hport}/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \"upgrade\";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }"
+  {
+    echo "# Callikoe — PBX du client ${TENANT} (${fqdn}), écrit par pbx-configure"
+    if [[ "$tls" == 1 ]]; then
+      local ssl="    ssl_certificate /etc/letsencrypt/live/${fqdn}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${fqdn}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security \"max-age=31536000\" always;
+    server_tokens off;"
+      cat <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${fqdn};
+    server_tokens off;
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location = /api/setup/progress {
+        proxy_pass http://127.0.0.1:${cport};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto http;
+    }
+    location ~ ^/(softphone|prov/|app/) { return 301 https://${fqdn}\$request_uri; }
+    location / { return 301 https://${fqdn}:${ADMIN_PORT}\$request_uri; }
+}
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${fqdn};
+${ssl}
+    client_max_body_size 2m;
+${ws}
+    location ~ ^/(softphone(\.js|\.css)?\$|style\.css\$|vendor/|phone/|prov/|app/|api/u/|api/health\$) {
+${proxy}
+    }
+    location / { return 302 https://${fqdn}/softphone; }
+}
+server {
+    listen ${ADMIN_PORT} ssl http2;
+    listen [::]:${ADMIN_PORT} ssl http2;
+    server_name ${fqdn};
+${ssl}
+    client_max_body_size 2m;
+    error_page 497 https://\$host:${ADMIN_PORT}\$request_uri;
+${ws}
+    location = /api/backups/upload {
+        client_max_body_size 4g;
+        proxy_request_buffering off;
+        proxy_read_timeout 600s;
+        proxy_pass http://127.0.0.1:${cport};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+    location / {
+${proxy}
+    }
+}
+EOF
+    else
+      cat <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${fqdn};
+    server_tokens off;
+    client_max_body_size 2m;
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+${ws}
+    location / {
+${proxy/https;/http;}
+    }
+}
+EOF
+    fi
+  } > "$site"
+  ln -sf "$site" "/etc/nginx/sites-enabled/$NGINX_SITE"
+  nginx -t -q
+  if systemctl is-active --quiet nginx; then systemctl reload nginx; else systemctl enable --now nginx >/dev/null 2>&1; fi
+}
+
 # ---------------------------------------------------------------------------
 # Adresses gérées <nom>.callikoe.fr : créées et mises à jour par le service DNS Callikoe
 DNS_API="${PBXM_DNS_API:-https://api.callikoe.fr}"
@@ -184,15 +329,15 @@ dns_register() {
 
 # Écrit /etc/asterisk à partir des modèles (variables de pbx.env, secrets.env, install.state)
 render_asterisk() {
-  install -d -o asterisk -g asterisk -m 0750 /etc/asterisk /etc/asterisk/keys
-  node "$APP/pbx/lib/render-asterisk.mjs" "$APP/pbx/asterisk" /etc/asterisk
+  install -d -o "${AST_OWNER%%:*}" -g "${AST_OWNER##*:}" -m 0750 "$AST_ETC" "$AST_ETC/keys"
+  node "$APP/pbx/lib/render-asterisk.mjs" "$APP/pbx/asterisk" "$AST_ETC"
   local ind=us
   case "$PBX_COUNTRY" in FR|MC|LU) ind=fr ;; BE) ind=be ;; CH) ind=ch ;; esac
-  sed "s/^country=.*/country=${ind}/" /usr/share/asterisk/indications.conf.sample > /etc/asterisk/indications.conf
-  cp /usr/share/asterisk/musiconhold.conf.sample /etc/asterisk/musiconhold.conf
+  sed "s/^country=.*/country=${ind}/" /usr/share/asterisk/indications.conf.sample > "$AST_ETC/indications.conf"
+  cp /usr/share/asterisk/musiconhold.conf.sample "$AST_ETC/musiconhold.conf"
   # Musiques d'attente des files (console : Gestion d'appels › Files d'attente)
-  printf '\n#tryinclude /var/lib/pbxmaison/musiconhold_callikoe.conf\n' >> /etc/asterisk/musiconhold.conf
-  chown -R asterisk:asterisk /etc/asterisk
+  printf '\n#tryinclude %s/musiconhold_callikoe.conf\n' "$VAR" >> "$AST_ETC/musiconhold.conf"
+  chown -R "$AST_OWNER" "$AST_ETC"
 }
 
 cmd_apply() {
@@ -223,7 +368,7 @@ cmd_apply() {
   json asterisk ok "Configuration écrite (IP publique ${PUBLIC_IP}, langue ${PBX_LANGUAGE})"
 
   # 3. Fuseau horaire
-  if [[ "${IS_WSL:-0}" != 1 ]]; then timedatectl set-timezone "$PBX_TIMEZONE" 2>/dev/null || true; fi
+  if [[ "${IS_WSL:-0}" != 1 && -z "$TENANT" ]]; then timedatectl set-timezone "$PBX_TIMEZONE" 2>/dev/null || true; fi
 
   # 4. DNS et certificat
   local dns_ip="" dns_ok=0 tls=0
@@ -242,7 +387,11 @@ cmd_apply() {
     dns_ok=1
     json certificat run "Demande du certificat HTTPS pour ${PBX_FQDN}…"
     nginx_write "" 0
-    if timeout 180 certbot certonly --webroot -w /var/www/letsencrypt -d "$PBX_FQDN" -m "$PBX_ADMIN_EMAIL" --agree-tos -n -q; then
+    if [[ -n "$TENANT" ]] && timeout 180 certbot certonly --webroot -w /var/www/letsencrypt -d "$PBX_FQDN" -m "$PBX_ADMIN_EMAIL" --agree-tos -n -q; then
+      # Serveur multi-tenant : le SIP chiffré est géré par l'aiguilleur ; le certificat sert au web
+      tls=1
+      json certificat ok "Certificat obtenu : https://${PBX_FQDN}:${ADMIN_PORT} (console)"
+    elif [[ -z "$TENANT" ]] && timeout 180 certbot certonly --webroot -w /var/www/letsencrypt -d "$PBX_FQDN" -m "$PBX_ADMIN_EMAIL" --agree-tos -n -q; then
       install -d /etc/letsencrypt/renewal-hooks/deploy
       cat > /etc/letsencrypt/renewal-hooks/deploy/pbxmaison <<EOF
 #!/bin/sh
@@ -280,12 +429,14 @@ EOF
 
   # 5. Démarrage d'Asterisk
   json demarrage run "Démarrage du moteur téléphonique…"
-  systemctl enable asterisk >/dev/null 2>&1
-  systemctl restart asterisk
-  for _ in $(seq 1 30); do /usr/sbin/asterisk -rx "core show version" >/dev/null 2>&1 && break; sleep 1; done
-  /usr/sbin/asterisk -rx "core show version" >/dev/null 2>&1 || fail demarrage "Asterisk ne démarre pas (journalctl -u asterisk)."
+  systemctl enable "$AST_UNIT" >/dev/null 2>&1
+  systemctl restart "$AST_UNIT"
+  for _ in $(seq 1 30); do "${AST[@]}" -rx "core show version" >/dev/null 2>&1 && break; sleep 1; done
+  "${AST[@]}" -rx "core show version" >/dev/null 2>&1 || fail demarrage "Asterisk ne démarre pas (journalctl -u ${AST_UNIT})."
   local transports
-  transports="$(/usr/sbin/asterisk -rx "pjsip show transports" | awk '/^Transport:/ && $2 !~ /^</ {print $2}' | paste -sd' ' -)"
+  transports="$("${AST[@]}" -rx "pjsip show transports" | awk '/^Transport:/ && $2 !~ /^</ {print $2}' | paste -sd' ' -)"
+  # Serveur multi-tenant : l'aiguilleur SIP apprend l'adresse de ce PBX
+  [[ -n "$TENANT" ]] && kamailio_sync >/dev/null 2>&1 || true
   json demarrage ok "Moteur démarré · transports : ${transports:-aucun}"
 
   # 6. Code d'installation pour le portail
@@ -306,8 +457,16 @@ EOF
   json termine ok "$(cat "$ETC/activation.txt")"
 }
 
+# ----------------------------------------------------------------------------- Aiguilleur SIP (multi-tenant)
+# Reconstruit les tables de Kamailio (adresses des PBX, comptes des trunks, SDA) et les recharge sans coupure
+kamailio_sync() {
+  local out
+  out="$(node "$APP/pbx/lib/kamailio-tables.mjs" /etc/callikoe/tenants.json /var/lib/callikoe/kamailio/db /var/lib/callikoe/t)"
+  "$APP/pbx/bin/callikoe-kamreload" >/dev/null 2>&1 || true
+  echo "$out"
+}
+
 # ----------------------------------------------------------------------------- Anti-intrusion
-F2B_JAIL=/etc/fail2ban/jail.d/pbxmaison.conf
 valid_ip() { [[ "$1" =~ ^[0-9a-fA-F:.]{3,45}(/[0-9]{1,3})?$ ]]; }
 f2b_banned() { # f2b_banned <jail> → IP séparées par des espaces
   fail2ban-client status "$1" 2>/dev/null | sed -n 's/.*Banned IP list:[[:space:]]*//p' | tr -s ' \t' ' ' || true
@@ -353,7 +512,7 @@ cmd_f2b() {
     status)
       local auto manual active=0
       systemctl is-active --quiet fail2ban && active=1
-      auto="$(f2b_banned asterisk)"; manual="$(f2b_banned callikoe-manual)"
+      auto="$(f2b_banned "$F2B_SIP_JAIL")"; manual="$(f2b_banned callikoe-manual)"
       F2B_ACTIVE="$active" F2B_AUTO="$auto" F2B_MANUAL="$manual" node -e '
         const sp = (s) => (s || "").trim().split(/\s+/).filter(Boolean);
         process.stdout.write(JSON.stringify({ ok: true, active: process.env.F2B_ACTIVE === "1", auto: sp(process.env.F2B_AUTO), manual: sp(process.env.F2B_MANUAL) }) + "\n");' ;;
@@ -363,6 +522,7 @@ cmd_f2b() {
     unban) valid_ip "${2:-}" || { echo '{"ok":false,"error":"Adresse invalide"}'; exit 1; }
            fail2ban-client unban "$2" >/dev/null 2>&1 || true; echo '{"ok":true}' ;;
     settings)
+      tenant_refuse "Sur un serveur multi-tenant, la protection anti-intrusion se règle pour tout le serveur."
       [[ "${2:-}" =~ ^[0-9]+$ && "${3:-}" =~ ^[0-9]+$ && "${4:-}" =~ ^[0-9]+$ ]] || { echo '{"ok":false,"error":"Réglages invalides"}'; exit 1; }
       local ip; IFS=',' read -ra list <<< "${5:-}"
       for ip in "${list[@]}"; do [[ -z "$ip" ]] || valid_ip "$ip" || { echo '{"ok":false,"error":"Adresse invalide"}'; exit 1; }; done
@@ -381,23 +541,23 @@ cmd_backup() {
     case "$1" in --recordings) rec=1 ;; --no-voicemail) vm=0 ;; --keep) keep="${2:-7}"; shift ;; esac; shift
   done
   [[ "$keep" =~ ^[0-9]+$ ]] || keep=7
-  install -d -m 2750 -o root -g pbxmaison "$BK_DIR"
+  install -d -m 2750 -o root -g "$CONSOLE_USER" "$BK_DIR"
   local name tmp
   name="callikoe-$(date +%Y%m%d-%H%M%S).tar.gz"
   tmp="$(mktemp -d)"
   json base run "Export de la base de données…"
-  runuser -u postgres -- pg_dump --clean --if-exists asterisk > "$tmp/database.sql" || { rm -rf "$tmp"; fail base "Export de la base impossible."; }
+  runuser -u postgres -- pg_dump --clean --if-exists --no-owner "$DB_NAME" > "$tmp/database.sql" || { rm -rf "$tmp"; fail base "Export de la base impossible."; }
   json base ok "Base exportée"
   mkdir -p "$tmp/etc" "$tmp/var"
-  for f in pbx.env pbx-config.json activation.txt setup.state install.state; do [[ -f "$ETC/$f" ]] && cp -a "$ETC/$f" "$tmp/etc/"; done
-  tar -C "$VAR" --exclude=./backups --exclude=./staging -cf - . | tar -C "$tmp/var" -xf -
-  ((vm)) && [[ -d /var/spool/asterisk/voicemail ]] && cp -a /var/spool/asterisk/voicemail "$tmp/voicemail"
-  ((rec)) && [[ -d /var/spool/asterisk/monitor/callikoe ]] && cp -a /var/spool/asterisk/monitor/callikoe "$tmp/recordings"
+  for f in pbx.env pbx-config.json activation.txt setup.state install.state; do [[ -f "$ETC/$f" ]] && cp -aL "$ETC/$f" "$tmp/etc/"; done
+  tar -C "$VAR" --exclude=./backups --exclude=./staging --exclude=./asterisk -cf - . | tar -C "$tmp/var" -xf -
+  ((vm)) && [[ -d "$AST_SPOOL/voicemail" ]] && cp -a "$AST_SPOOL/voicemail" "$tmp/voicemail"
+  ((rec)) && [[ -d "$AST_SPOOL/monitor/callikoe" ]] && cp -a "$AST_SPOOL/monitor/callikoe" "$tmp/recordings"
   printf '{"format":1,"created_at":"%s","version":"%s","commit":"%s","voicemail":%s,"recordings":%s}\n' \
     "$(date -Is)" "$(cat "$APP/VERSION" 2>/dev/null || echo ?)" "${COMMIT:-}" "$( ((vm)) && echo true || echo false)" "$( ((rec)) && echo true || echo false)" > "$tmp/manifest.json"
   tar -C "$tmp" -czf "$BK_DIR/$name" .
   rm -rf "$tmp"
-  chown root:pbxmaison "$BK_DIR/$name"; chmod 640 "$BK_DIR/$name"
+  chown root:"$CONSOLE_USER" "$BK_DIR/$name"; chmod 640 "$BK_DIR/$name"
   # Conservation : les N plus récentes
   ls -1t "$BK_DIR"/callikoe-*.tar.gz 2>/dev/null | tail -n +"$((keep + 1))" | xargs -r rm -f
   json termine ok "$name"
@@ -416,27 +576,31 @@ cmd_restore() {
   fi
   json verification ok "Sauvegarde valide"
   json base run "Restauration de la base de données…"
-  systemctl stop asterisk 2>/dev/null || true
-  runuser -u postgres -- psql -q -v ON_ERROR_STOP=0 asterisk < "$tmp/database.sql" >/dev/null 2>&1 || true
+  systemctl stop "$AST_UNIT" 2>/dev/null || true
+  runuser -u postgres -- psql -q -v ON_ERROR_STOP=0 "$DB_NAME" < "$tmp/database.sql" >/dev/null 2>&1 || true
+  # Les tables restaurées appartiennent au compte de base de ce PBX
+  runuser -u postgres -- psql -q -d "$DB_NAME" -c "DO \$\$ DECLARE r record; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP EXECUTE format('ALTER TABLE public.%I OWNER TO %I', r.tablename, '${ODBC_DSN:-asterisk}'); END LOOP; END \$\$;" >/dev/null 2>&1 || true
   json base ok "Base restaurée"
   json fichiers run "Restauration des fichiers…"
   [[ -d "$tmp/var" ]] && cp -a "$tmp/var/." "$VAR/"
   for f in pbx.env pbx-config.json activation.txt setup.state; do [[ -f "$tmp/etc/$f" ]] && cp -a "$tmp/etc/$f" "$ETC/$f"; done
-  if [[ -d "$tmp/voicemail" ]]; then rm -rf /var/spool/asterisk/voicemail; cp -a "$tmp/voicemail" /var/spool/asterisk/voicemail; fi
-  if [[ -d "$tmp/recordings" ]]; then install -d -o asterisk -g asterisk -m 2770 /var/spool/asterisk/monitor; cp -a "$tmp/recordings/." /var/spool/asterisk/monitor/callikoe/; fi
-  chown -R asterisk:asterisk /var/spool/asterisk/voicemail /var/spool/asterisk/monitor 2>/dev/null || true
+  if [[ -d "$tmp/voicemail" ]]; then rm -rf "$AST_SPOOL/voicemail"; cp -a "$tmp/voicemail" "$AST_SPOOL/voicemail"; fi
+  if [[ -d "$tmp/recordings" ]]; then install -d -o "${AST_OWNER%%:*}" -g "${AST_OWNER##*:}" -m 2770 "$AST_SPOOL/monitor"; cp -a "$tmp/recordings/." "$AST_SPOOL/monitor/callikoe/"; fi
+  chown -R "$AST_OWNER" "$AST_SPOOL/voicemail" "$AST_SPOOL/monitor" 2>/dev/null || true
+  [[ -n "$TENANT" ]] && { chown -R "$CONSOLE_USER:${AST_OWNER##*:}" "$VAR" 2>/dev/null || true; chown -R "$AST_OWNER" "$VAR/asterisk" 2>/dev/null || true; }
   rm -rf "$tmp"
   json fichiers ok "Fichiers restaurés"
   if [[ -f "$ETC/pbx.env" ]]; then set -a; . "$ETC/pbx.env"; set +a; render_asterisk; fi
-  systemctl start asterisk 2>/dev/null || true
+  systemctl start "$AST_UNIT" 2>/dev/null || true
   # La console redémarre juste après avoir répondu (elle régénère alors le plan de numérotation)
-  systemd-run --on-active=3 --unit="pbxmaison-restart-$$" systemctl restart pbxmaison-console >/dev/null 2>&1 || true
+  systemd-run --on-active=3 --unit="pbxmaison-restart-$$" systemctl restart "$CONSOLE_UNIT" >/dev/null 2>&1 || true
   json termine ok "Restauration terminée : la console redémarre."
 }
 
 # ----------------------------------------------------------------------------- Mise à jour
 UPD_LOG=/var/log/pbxmaison-update.log
 cmd_update() {
+  tenant_refuse "Sur un serveur multi-tenant, la mise à jour se fait pour tout le serveur (commande d'installation sur le VPS)."
   local ref="${1:-${REF:-main}}" repo="${REPO:-Yoobabab/PBXMaison-install}"
   [[ "$ref" =~ ^[A-Za-z0-9._/-]{1,80}$ && "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo '{"ok":false,"error":"Version invalide"}'; exit 1; }
   if systemctl is-active --quiet pbxmaison-update 2>/dev/null; then echo '{"ok":true,"running":true}'; exit 0; fi
@@ -448,22 +612,27 @@ cmd_update() {
 # Capture réseau des appels (SIP + audio RTP) au format pcap, lisible dans Wireshark
 CAPDIR="$VAR/captures"
 cmd_capture() {
-  install -d -o pbxmaison -g pbxmaison -m 0750 "$CAPDIR"
+  install -d -o "$CONSOLE_USER" -g "$CONSOLE_USER" -m 0750 "$CAPDIR"
   case "${1:-status}" in
     start)
       local secs="${2:-60}" mode="${3:-sip}" filter name
       [[ "$secs" =~ ^[0-9]+$ ]] && ((secs >= 5 && secs <= 600)) || { echo '{"ok":false,"error":"Durée : entre 5 et 600 secondes."}'; exit 1; }
       pgrep -f "tcpdump.*$CAPDIR" >/dev/null && { echo '{"ok":false,"error":"Une capture est déjà en cours."}'; exit 1; }
       command -v tcpdump >/dev/null || apt-get install -y -q --no-install-recommends tcpdump >/dev/null 2>&1 || { echo '{"ok":false,"error":"tcpdump introuvable."}'; exit 1; }
-      filter="port 5060 or port 5061"
-      [[ "$mode" == all ]] && filter="port 5060 or port 5061 or (udp portrange 10000-20000)"
+      if [[ -n "$TENANT" ]]; then
+        filter="port ${SIP_INT_PORT}"
+        [[ "$mode" == all ]] && filter="$filter or (udp portrange ${RTP_START}-${RTP_END})"
+      else
+        filter="port 5060 or port 5061"
+        [[ "$mode" == all ]] && filter="port 5060 or port 5061 or (udp portrange 10000-20000)"
+      fi
       name="capture-$(date +%Y%m%d-%H%M%S)-${mode}.pcap"
       # Détachée : la console récupère la main tout de suite ; fichier rendu lisible par la console à la fin
-      setsid bash -c "timeout $secs tcpdump -i any -n -s 0 -c 500000 -Z root -w '$CAPDIR/$name' $filter >/dev/null 2>&1; chown pbxmaison:pbxmaison '$CAPDIR/$name'; chmod 640 '$CAPDIR/$name'" </dev/null >/dev/null 2>&1 &
+      setsid bash -c "timeout $secs tcpdump -i any -n -s 0 -c 500000 -Z root -w '$CAPDIR/$name' $filter >/dev/null 2>&1; chown $CONSOLE_USER:$CONSOLE_USER '$CAPDIR/$name'; chmod 640 '$CAPDIR/$name'" </dev/null >/dev/null 2>&1 &
       # Garde 20 captures au plus
       { ls -1t "$CAPDIR"/capture-*.pcap 2>/dev/null | tail -n +21 | xargs -r rm -f; } || true
       echo "{\"ok\":true,\"file\":\"$name\",\"seconds\":$secs}" ;;
-    stop) pkill -INT -f "tcpdump.*$CAPDIR" || true; sleep 1; chown pbxmaison:pbxmaison "$CAPDIR"/*.pcap 2>/dev/null || true; echo '{"ok":true}' ;;
+    stop) pkill -INT -f "tcpdump.*$CAPDIR" || true; sleep 1; chown "$CONSOLE_USER:$CONSOLE_USER" "$CAPDIR"/*.pcap 2>/dev/null || true; echo '{"ok":true}' ;;
     status) if pgrep -f "tcpdump.*$CAPDIR" >/dev/null; then echo '{"running":true}'; else echo '{"running":false}'; fi ;;
     *) echo '{"ok":false,"error":"Action inconnue."}'; exit 1 ;;
   esac
@@ -499,12 +668,13 @@ case "${1:-}" in
   apply) shift; cmd_apply "$@" ;;
   firewall-check) cmd_firewall_check ;;
   restart-services)
-    systemctl restart asterisk && json services ok "Moteur téléphonique redémarré"
-    systemctl restart fail2ban 2>/dev/null || true
+    systemctl restart "$AST_UNIT" && json services ok "Moteur téléphonique redémarré"
+    [[ -z "$TENANT" ]] && { systemctl restart fail2ban 2>/dev/null || true; }
     systemctl reload nginx 2>/dev/null || true
-    systemd-run --on-active=2 --unit="pbxmaison-restart-$$" systemctl restart pbxmaison-console >/dev/null 2>&1 || true
+    systemd-run --on-active=2 --unit="pbxmaison-restart-$$" systemctl restart "$CONSOLE_UNIT" >/dev/null 2>&1 || true
     json termine ok "Services redémarrés : la console revient dans quelques secondes" ;;
   reboot)
+    [[ -z "$TENANT" ]] || { json termine error "Sur un serveur multi-tenant, le redémarrage du serveur coupe tous les clients : il se fait depuis le VPS."; exit 1; }
     systemd-run --on-active=5 --unit="pbxmaison-reboot-$$" systemctl reboot >/dev/null 2>&1
     json termine ok "Redémarrage du serveur dans 5 secondes" ;;
   f2b) shift; cmd_f2b "$@" ;;
@@ -526,7 +696,8 @@ case "${1:-}" in
           rc=0; res="$(node "$APP/pbx/lib/license-token.mjs" "$src" "$TRUSTED_KEY" "$ETC/pbx.env")" || rc=$?; rm -f "$src"
           echo "$res"; ((rc == 0)) || exit 1
           set -a; . "$ETC/pbx.env"; set +a; render_asterisk >/dev/null 2>&1 || true
-          /usr/sbin/asterisk -rx "dialplan reload" >/dev/null 2>&1 || true ;;
+          "${AST[@]}" -rx "dialplan reload" >/dev/null 2>&1 || true ;;
+  kamailio-sync) [[ -n "$TENANT" ]] || { echo '{"ok":true}'; exit 0; }; kamailio_sync ;;
   render) [[ -f "$ETC/pbx.env" ]] || { echo "PBX pas encore configuré" >&2; exit 1; }
           set -a; . "$ETC/pbx.env"; set +a; render_asterisk ;;
   nginx) set -a; . "$ETC/pbx.env" 2>/dev/null || true; set +a

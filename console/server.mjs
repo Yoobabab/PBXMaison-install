@@ -21,6 +21,8 @@ import { migrateChat, createChat } from "./lib/chat.mjs";
 import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { createAdminService } from "./lib/admin.mjs";
+import { CX_MODE, CX_TENANT } from "./lib/config.mjs";
+import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
 
 if (!settings.sessionSecret) { console.error("SESSION_SECRET manquant"); process.exit(1); }
@@ -70,8 +72,10 @@ export async function buildApp({ db, ami } = {}) {
   const requireUser = async (req, reply) => {
     const u = currentUser(req);
     if (!u) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
-    // Compte supprimé ou rôle modifié : pris en compte immédiatement
-    const row = (await db.query("SELECT role FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
+    // Compte supprimé ou rôle modifié : pris en compte immédiatement (compte du serveur multi-tenant : rôle publié par la console du serveur)
+    const hr = u.hub ? hubRole(u.email) : null;
+    if (u.hub && (CX_MODE !== "tenant" || !hr)) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'a plus accès au serveur." }); }
+    const row = u.hub ? { role: HUB_TO_PBX_ROLE[hr] } : (await db.query("SELECT role FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     if (!row) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'existe plus." }); }
     req.role = row.role;
     if (!u.mfa) return reply.code(403).send({ error: "Active d'abord la double authentification.", need_totp_setup: true });
@@ -93,6 +97,7 @@ export async function buildApp({ db, ami } = {}) {
     db.query("INSERT INTO pbxmaison_audit (email, ip, action, ok, detail) VALUES ($1, $2, $3, $4, $5)", [email, String(req.ip || ""), action, ok, String(detail).slice(0, 300)]).catch(() => {});
   // Assistant : jeton d'installation tant qu'aucun administrateur n'existe, session ensuite
   const requireSetup = async (req, reply) => {
+    if (CX_MODE === "tenant") return reply.code(403).send({ error: "Sur le serveur multi-tenant, ce PBX se configure depuis la console du serveur." });
     if (currentUser(req)) return;
     const token = req.headers["x-setup-token"];
     if ((await userCount()) === 0 && tokenValid(token)) return;
@@ -127,7 +132,9 @@ export async function buildApp({ db, ami } = {}) {
     const env = pbxEnv();
     return {
       configured: isConfigured(),
-      has_admin: (await userCount()) > 0,
+      // Serveur multi-tenant : pas de compte à créer ici (comptes IRT de la console du serveur, comptes clients invités)
+      has_admin: CX_MODE === "tenant" || (await userCount()) > 0,
+      tenant: CX_MODE === "tenant", hub_url: CX_MODE === "tenant" ? (hubInfo().url || "") : "",
       setup_token_present: !!setupToken(),
       logged_in: !!currentUser(req),
       pbx: env.PBX_ID ? { name: env.PBX_NAME, fqdn: env.PBX_FQDN } : null,
@@ -333,8 +340,25 @@ export async function buildApp({ db, ami } = {}) {
     entries: (await db.query("SELECT at, email, ip, action, ok, detail FROM pbxmaison_audit ORDER BY id DESC LIMIT 200")).rows,
   }));
   app.post("/api/logout", async (req, reply) => { reply.clearCookie(COOKIE, { path: "/" }); return { ok: true }; });
+  // Serveur multi-tenant : arrivée depuis la console du serveur (ticket signé, valable 60 s, pour ce PBX seulement)
+  app.get("/api/sso", async (req, reply) => {
+    const key = CX_MODE === "tenant" ? readHubPublicKey() : null;
+    const t = key ? verifyTicket(req.query?.t, key, CX_TENANT) : null;
+    if (!t || hubRole(t.email) !== t.role) {
+      await audit(req, "Ouverture depuis la console du serveur refusée (lien expiré ou invalide)", false, "", t?.email || "");
+      return reply.code(403).type("text/html; charset=utf-8").send(`<!doctype html><meta charset="utf-8"><p style="font-family:sans-serif">Lien expiré ou invalide : rouvre ce PBX depuis la console du serveur.</p>`);
+    }
+    await audit(req, "Connexion depuis la console du serveur", true, t.role, t.email);
+    reply.setCookie(COOKIE, createSession(t.email, settings.sessionSecret, { mfa: true, mfa_at: Date.now(), hub: true }), cookieOpts(req));
+    return reply.redirect("/");
+  });
   app.get("/api/me", { preHandler: requireLogin }, async (req) => {
     const u = currentUser(req);
+    if (u.hub) {
+      const hr = hubRole(u.email);
+      return { email: u.email, totp: true, mfa: true, recovery_left: 8, role: HUB_TO_PBX_ROLE[hr] || "lecture", name: "", hub: true,
+        hub_url: hubInfo().url || "", current: CX_TENANT, pbx_list: tenantList() };
+    }
     const row = (await db.query("SELECT totp_secret IS NOT NULL AS totp, jsonb_array_length(recovery) AS recovery_left FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     const role = (await db.query("SELECT role, name FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     return { email: u.email, totp: !!row?.totp, mfa: u.mfa, recovery_left: row?.recovery_left ?? 0, role: role?.role || "admin", name: role?.name || "" };

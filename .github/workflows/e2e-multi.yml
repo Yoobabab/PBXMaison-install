@@ -1,0 +1,76 @@
+# Installe un serveur multi-tenant Callikoe sur une machine vierge Ubuntu 24.04 et teste deux PBX clients :
+# isolation, postes et trunks via l'aiguilleur SIP (5060), sauvegarde et restauration du serveur entier.
+name: Test du serveur multi-tenant
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, multi-tenant]
+    paths-ignore:
+      - "**.md"
+      - packaging/**
+      - .github/workflows/build-asterisk.yml
+
+permissions:
+  contents: write
+
+jobs:
+  multi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Libérer les ports du runner
+        run: |
+          sudo systemctl stop mysql 2>/dev/null || true
+          sudo ss -lntup | grep -E ':(80|443|5060|5432) ' || true
+      - name: Installation multi-tenant + deux PBX clients
+        timeout-minutes: 35
+        env:
+          PBXM_REF: ${{ github.sha }}
+        run: bash tests/e2e/multi.sh
+      - name: Résultat (lisible via l'API)
+        if: always()
+        shell: bash
+        run: |
+          f=tests/e2e/multi-result.txt
+          if [[ -f $f ]]; then msg="$(sed -e 's/%/%25/g' "$f" | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Résultat multi-tenant::${msg}"
+            tailmsg="$(tail -n 25 "$f" | cut -c1-160 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Fin du résultat::${tailmsg}"; fi
+      - name: Diagnostics (aiguilleur, SIP)
+        if: always()
+        shell: bash
+        run: |
+          f=tests/e2e/multi-diag.txt
+          [[ -f $f ]] || exit 0
+          split -C 3500 "$f" diag-part-
+          for p in diag-part-*; do msg="$(sed -e 's/%/%25/g' "$p" | awk '{printf "%s%%0A", $0}')"; echo "::warning title=Diagnostic ${p#diag-part-}::${msg}"; done
+      - name: Diagnostics complets (branche e2e-diag, lisible sans les journaux d'Actions)
+        if: failure() || cancelled()
+        shell: bash
+        run: |
+          mkdir -p /tmp/diag && cd /tmp/diag
+          for f in multi-result.txt multi-diag.txt install.out creer-a.out creer-b.out rs.out; do [[ -f $GITHUB_WORKSPACE/tests/e2e/$f ]] && cp "$GITHUB_WORKSPACE/tests/e2e/$f" . ; done
+          for c in clia clib; do sudo tail -n 400 /var/log/callikoe/$c/sipdebug > sip-$c.txt 2>/dev/null || true; done
+          sudo tail -n 300 $GITHUB_WORKSPACE/tests/e2e/multi-lab/op/log/messages > op.txt 2>/dev/null || true
+          sudo journalctl -u kamailio --no-pager -n 200 > kamailio.txt 2>/dev/null || true
+          sudo pkill tcpdump || true; sleep 1
+          sudo tcpdump -r /tmp/multi-sip.pcap -nn -A 2>/dev/null | grep -v -E "^\s*$" | grep -v -E "OPTIONS sip|CSeq: [0-9]+ OPTIONS" > sip-capture.txt || true
+          sudo chown -R "$(id -u)" . ; ls -la
+          git init -q -b e2e-diag && git add -A && git -c user.name=ci -c user.email=ci@invalid commit -qm "diag ${GITHUB_SHA}" 
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-diag
+      - name: Journaux en cas d'échec
+        if: failure() || cancelled()
+        shell: bash
+        run: |
+          {
+            echo "== install"; grep -v -E '\.{10}' tests/e2e/install.out 2>/dev/null | tail -n 25 || true
+            for f in tests/e2e/creer-a.out tests/e2e/creer-b.out tests/e2e/rs.out; do echo "== $f"; tail -n 15 "$f" 2>/dev/null || true; done
+            echo "== kamailio"; sudo journalctl -u kamailio -n 30 --no-pager 2>&1 || true
+            for c in clia clib; do
+              echo "== asterisk $c"; sudo journalctl -u callikoe-asterisk@$c -n 15 --no-pager 2>&1 || true
+              echo "== console $c"; sudo journalctl -u callikoe-console@$c -n 15 --no-pager 2>&1 || true
+              echo "== messages $c"; sudo tail -n 15 /var/log/callikoe/$c/messages 2>&1 || true
+            done
+          } | cut -c1-200 > logs.txt || true
+          msg="$(sed -e 's/%/%25/g' logs.txt | awk '{printf "%s%%0A", $0}')"
+          echo "::error title=Journaux::${msg}"

@@ -39,7 +39,7 @@ export function readSession(token, secret) {
   if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
   try {
     const d = JSON.parse(Buffer.from(payload, "base64url").toString());
-    return d.exp > Date.now() ? { email: d.email, mfa: !!d.mfa, mfa_at: d.mfa_at || 0 } : null;
+    return d.exp > Date.now() ? { email: d.email, mfa: !!d.mfa, mfa_at: d.mfa_at || 0, ...(d.hub ? { hub: true } : {}) } : null;
   } catch { return null; }
 }
 

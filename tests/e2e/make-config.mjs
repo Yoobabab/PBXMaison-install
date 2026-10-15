@@ -9,6 +9,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 const dir = process.argv[2] || ".";
+// Serveur multi-tenant : plusieurs configurations signées avec la même clé (adresse et fichier en arguments)
+const FQDN = process.argv[3] || "e2e.pbxmaison.invalid";
+const OUTFILE = process.argv[4] || "pbx-config.json";
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const canonical = (v) => JSON.stringify((function sort(x) {
   return Array.isArray(x) ? x.map(sort) : x && typeof x === "object"
@@ -24,20 +27,35 @@ function licenseKey() {
   return ["PBXM", ...body.match(/.{4}/g), sum].join("-");
 }
 
-const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
+const privFile = path.join(dir, "test-key-private.pem");
+let privateKey, publicKey;
+if (fs.existsSync(privFile)) {
+  privateKey = crypto.createPrivateKey(fs.readFileSync(privFile));
+  publicKey = crypto.createPublicKey(privateKey);
+} else {
+  ({ privateKey, publicKey } = crypto.generateKeyPairSync("ed25519"));
+  fs.writeFileSync(privFile, privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+}
 const cfg = {
   version: 1,
   pbx: {
-    id: crypto.randomUUID(), name: "PBX de test", company: "Test automatique", fqdn: "e2e.pbxmaison.invalid",
+    id: crypto.randomUUID(), name: "PBX de test", company: "Test automatique", fqdn: FQDN,
     phone: "+33412345678", country: "FR", country_code: "33", timezone: "Europe/Paris", language: "fr",
   },
   admin: { email: "admin@test.invalid", password: "set_on_first_login" },
   license: { key: licenseKey(), edition: "pro", simultaneous_calls: 4, expires_at: new Date(Date.now() + 30 * 86400000).toISOString() },
   issued_at: new Date().toISOString(),
 };
+// Configuration de serveur multi-tenant (console du serveur) : node make-config.mjs <dossier> <fqdn> <fichier> --serveur
+if (process.argv.includes("--serveur")) {
+  cfg.kind = "server";
+  cfg.pbx = { id: cfg.pbx.id, name: "Serveur de test", company: "Serveur multi-tenant", fqdn: FQDN };
+  cfg.admin = { email: "irt-admin@test.invalid" };
+  cfg.license = { ...cfg.license, edition: "server", simultaneous_calls: 0 };
+}
 cfg.signature = crypto.sign(null, Buffer.from(canonical(cfg)), privateKey).toString("base64");
 fs.writeFileSync(path.join(dir, "test-key.pem"), publicKey.export({ type: "spki", format: "pem" }));
-fs.writeFileSync(path.join(dir, "pbx-config.json"), JSON.stringify(cfg, null, 2));
+fs.writeFileSync(path.join(dir, OUTFILE), JSON.stringify(cfg, null, 2));
 // Clé de licence « changement d'édition » (comme le portail : Pro 4 appels → Entreprise 8 appels)
 const lic = { pbx_id: cfg.pbx.id, key: cfg.license.key, edition: "enterprise", simultaneous_calls: 8, expires_at: new Date(Date.now() + 400 * 86400000).toISOString(), issued_at: new Date().toISOString() };
 lic.signature = crypto.sign(null, Buffer.from(canonical(lic)), privateKey).toString("base64");
