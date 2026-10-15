@@ -59,13 +59,18 @@ async function pageOutbound(sub) {
         <div class="actions">${editing.id ? '<button type="button" class="btn ghost" id="odel">Supprimer</button>' : ""}<a class="btn ghost" href="#/sortants">Annuler</a><button class="btn">Enregistrer</button></div>
       </form></div>`;
   } else {
-    body = `${d.rules.length ? `<div class="panel"><div class="ad-list" id="olist">${d.rules.map((r, i) => `<div class="ad-row" draggable="true" data-id="${r.id}">
+    const catchAll = d.rules.some((r) => !r.prefixes.length && !r.extensions.length && !r.lengths.length);
+    const dt = d.trunks.find((t) => t.id === d.default_trunk);
+    body = `${!d.default_trunk && !catchAll ? `<div class="flash bad">Aucun trunk par défaut : les appels qui ne correspondent à aucune règle ne peuvent pas sortir. Choisis-en un ci-dessous.</div>` : ""}
+      ${dt && dt.status.code !== "Registered" ? `<div class="flash warn">Le trunk par défaut « ${H.esc(dt.id)} » n'est pas enregistré chez l'opérateur (${H.esc(dt.status.label)}) : vérifie ses identifiants dans Trunks.</div>` : ""}
+      <form id="dtf" class="panel ad-inline pad" style="margin-bottom:16px;border-bottom:1px solid var(--line)"><label class="grow">Trunk par défaut (appels qui ne correspondent à aucune règle)<select name="trunk">${trunkOpt(d.default_trunk)}</select></label><button class="btn">Enregistrer</button></form>
+      ${d.rules.length ? `<div class="panel"><div class="ad-list" id="olist">${d.rules.map((r, i) => `<div class="ad-row" draggable="true" data-id="${r.id}">
         <span class="ad-drag" title="Glisser pour changer l'ordre">${ic(I.drag)}</span><span class="ad-num">${i + 1}</span>
         <div class="grow"><a href="#/sortants/${r.id}" class="ad-title">${H.esc(r.name)}</a><div class="s">${H.esc(r.summary)}</div></div>
         <div class="ad-chain">${r.routes.map((rt, k) => `<span class="ad-chip ${d.trunks.find((t) => t.id === rt.trunk)?.status.code === "Registered" ? "ok" : "bad"}" title="Route ${k + 1}">${H.esc(rt.trunk)}</span>`).join('<span class="ad-arrow">→</span>')}</div>
         <span class="ad-acts"><button class="ghost-ic" data-mv="-1" title="Monter">${ic(I.up)}</button><button class="ghost-ic" data-mv="1" title="Descendre">${ic(I.down)}</button><a class="ghost-ic" href="#/sortants/${r.id}" title="Modifier">${ic(I.edit)}</a></span>
       </div>`).join("")}</div></div>` : `<div class="panel"><div class="empty">${ic(I.up2, 34)}<p><strong>Aucune règle sortante.</strong></p><p>Tous les appels sortent par le trunk par défaut${d.default_trunk ? ` (<b>${H.esc(d.default_trunk)}</b>)` : ""}. Ajoute une règle pour choisir un trunk selon le numéro ou le poste, avec des routes de secours.</p></div></div>`}
-      <div class="note" style="margin-top:16px">Les règles sont testées dans l'ordre : la première qui correspond est utilisée. Sans règle correspondante, l'appel part par le trunk par défaut (<a href="#/routes">Routes</a>). Les numéros d'urgence passent toujours, sans règle.</div>`;
+      <div class="note" style="margin-top:16px">Les règles sont testées dans l'ordre : la première qui correspond est utilisée. Sans règle correspondante, l'appel part par le trunk par défaut choisi ci-dessus. Les numéros d'urgence passent toujours, sans règle.</div>`;
   }
   H.app.innerHTML = head("Règles sortantes", "Choisis par quel trunk partent les appels et quel numéro est présenté.", editing ? "" : `<a class="btn" href="#/sortants/nouvelle">${ic(I.plus, 16)} Nouvelle règle</a>`) + body;
   if (editing) {
@@ -80,7 +85,10 @@ async function pageOutbound(sub) {
       if (e.target.dataset.sure !== "1") { e.target.dataset.sure = "1"; e.target.textContent = "Confirmer la suppression"; e.target.classList.add("danger"); return; }
       await H.api("DELETE", `/api/outbound/${editing.id}`); ok("Règle supprimée."); location.hash = "#/sortants";
     });
-  } else if (d.rules.length) {
+  } else {
+    onSubmit(H.$("#dtf"), async (v) => { await H.api("PUT", "/api/routes", { inbound: d.inbound || [], outbound_trunk: v.trunk }); ok("Trunk par défaut enregistré."); pageOutbound(); });
+  }
+  if (!editing && d.rules.length) {
     const list = H.$("#olist");
     const save = async () => { await H.api("PUT", "/api/outbound-order", { ids: [...list.children].map((x) => x.dataset.id) }); pageOutbound(); };
     list.addEventListener("click", (e) => {

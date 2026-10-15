@@ -66,7 +66,7 @@ export function createAdminService({ db, ami, pbx }) {
     return {
       rules: rules.map((r) => ({ ...r, summary: describeRule(r), extensions_text: rangesText(r.extensions), lengths_text: rangesText(r.lengths), prefixes_text: r.prefixes.join(",") })),
       trunks: trunks.map((t) => ({ id: t.id, operator: t.operator, number: t.number, outbound_cid: t.outbound_cid, status: t.status })),
-      default_trunk: routes.outbound_trunk, cid_modes: CID_MODES,
+      default_trunk: routes.outbound_trunk, inbound: routes.inbound, cid_modes: CID_MODES,
     };
   }
   async function saveOutbound(id, input) {

@@ -192,6 +192,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await reload("res_pjsip.so", "res_pjsip_endpoint_identifier_ip.so", "res_pjsip_outbound_registration.so");
     const routes = await getRoutes();
     if (routes.outbound_trunk === name) await setRoutes(routes); // numéro présenté éventuellement modifié
+    else if (!routes.outbound_trunk) await setRoutes({ ...routes, outbound_trunk: name }); // 1er trunk : trunk par défaut des appels sortants
     return { id: name };
   }
 
