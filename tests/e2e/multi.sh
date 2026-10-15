@@ -124,7 +124,7 @@ done
 JAR="$LAB/jar-a"
 R="$(curl -sS -b "$JAR" -X POST http://127.0.0.1:9001/api/accounts -H 'content-type: application/json' -d '{"email":"client@boulangerie.invalid","name":"Client","role":"client"}')"
 [[ "$R" == *invitation* || "$R" == *'"path"'* || "$R" == *'"ok":true'* ]] && pass "cli a : invitation d'un compte client (accès restreint) depuis la console du PBX" || echo "   (invitation client : $R)" >> "$OUT"
-sudo cat /var/lib/callikoe/kamailio/db/tru | sed 's/^/   tru /' | sed -E 's/cx[0-9a-f]{16}/cx…/' >> "$OUT"
+sudo cat /var/lib/callikoe/kamailio/db/tru | sed 's/^/   tru /' >> "$OUT"
 [[ "$(sudo grep -c 'sip\\:127.0.0.1\\:6001' /var/lib/callikoe/kamailio/db/tru)" -ge 2 && "$(sudo grep -c 'sip\\:127.0.0.1\\:6002' /var/lib/callikoe/kamailio/db/tru)" -ge 2 ]] \
   && pass "Aiguilleur : compte de trunk et SDA de chaque client publiés" || fail "table tru incomplète"
 
@@ -353,7 +353,7 @@ NRTP="$(grep -cE '> [0-9.]+\.310[0-9]{2}:' "$LAB/rtp-all.txt" || true)"
 { echo "== RTP pendant l'appel entrant A (flux : nombre de paquets)"; awk '{print $5, $6, $7}' "$LAB/rtp-all.txt" | sort | uniq -c | sort -rn | head -20; } >> "$PWD/multi-diag.txt" 2>/dev/null || true
 (( NRTP > 50 )) && pass "Son de l'opérateur reçu par le poste de cli a (${NRTP} paquets RTP, directs, sans passer par l'aiguilleur)" || { echo "   (RTP vers le poste A : ${NRTP} paquets ; compteur du poste : $(glob pa RTPRX))" >> "$OUT"; fail "son entrant"; }
 reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null; sleep 9
-[[ "$(glob pb RANG)" == 201 && "$(glob pa RANG)" == none ]] && pass "Entrant sur le trunk de cli b → poste 201 de cli b uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; fail "entrant B"; }
+[[ "$(glob pb RANG)" == 201 && "$(glob pa RANG)" == none ]] && pass "Entrant sur le trunk de cli b → poste 201 de cli b uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clib; fail "entrant B"; }
 # Appel « pirate » vers la SDA de A, sans le jeton du trunk : refusé
 reset; labx px "channel originate PJSIP/0465001540@pbx extension s@wait" >/dev/null 2>&1 || true; sleep 6
 [[ "$(glob pa RANG)" == none ]] && pass "Appel vers la SDA de cli a sans le jeton de son trunk : refusé" || fail "appel pirate arrivé chez A"
