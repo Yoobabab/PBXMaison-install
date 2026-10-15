@@ -265,6 +265,8 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("static.auto_provision.pnp_enable", 0),
     // Reprovisionner sans redémarrer : le poste applique la config à chaud (seuls les réglages réseau imposent un redémarrage)
     v("static.auto_provision.reboot_force.enable", 0),
+    // Message « Reprovisionner » (check-sync) : relire la config sans redémarrer
+    v("sip.notify_reboot_enable", 0),
     "",
     "## Annuaire de l'entreprise (collègues + contacts), aussi utilisé pour afficher le nom des appelants",
     v("remote_phonebook.data.1.url", `${server.prov_url}phonebook-${user.id}.xml`),
