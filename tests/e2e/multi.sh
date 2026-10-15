@@ -222,12 +222,15 @@ exten => s,1,Answer()
  same => n,Hangup()'
 # Traces SIP (lues seulement en cas d'échec)
 for c in clia clib; do astx $c "logger add channel sipdebug notice,warning,error,verbose" >/dev/null; astx $c "core set verbose 3" >/dev/null; astx $c "pjsip set logger on" >/dev/null; done
-sipdump() { # sipdump <PBX client> : échanges SIP vus par son moteur
-  echo "== SIP vu par $1" >> "$OUT"
-  sudo grep -E "<--- |---> |^(REGISTER|INVITE|SIP/2.0|Via|Route|Path|Contact|To|From|Supported|Require|Authorization|WWW-Authenticate|Unsupported)" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | cut -c1-200 | head -n 70 >> "$OUT" || true
-  sudo grep -iE "WARNING|ERROR|NOTICE" "/var/log/callikoe/$1/messages" 2>/dev/null | tail -n 10 | cut -c1-200 >> "$OUT" || true
-  { echo "-- tables chargées"; sudo kamcmd htable.dump dom 2>&1 | head -12; sudo ls -la /run/kamailio; systemctl cat kamailio | grep -E "^(Exec|User|Protect|ReadWrite|Environment)"; sudo journalctl -u kamailio --no-pager | grep -iE "htable|db_text|dbt_|error" | tail -8; sudo ls -la /var/lib/callikoe/kamailio/db; sudo cat /var/lib/callikoe/kamailio/db/dom; } >> "$OUT" 2>&1 || true
-  sudo journalctl -u kamailio --no-pager | grep -E "CALLIKOE|ERROR|WARN" | grep -v reparse_on_dns | tail -n 10 | cut -c1-200 >> "$OUT" || true
+sipdump() { # sipdump <PBX client> : diagnostics dans multi-diag.txt (publiés à part)
+  local D="$PWD/multi-diag.txt"
+  { echo "== tables de l'aiguilleur"; sudo kamcmd htable.dump dom 2>&1 | head -12
+    sudo ls -la /run/kamailio 2>&1; systemctl cat kamailio 2>/dev/null | grep -E "^(Exec|User|Protect|ReadWrite|Environment)"
+    sudo journalctl -u kamailio --no-pager | grep -iE "htable|db_text|dbt_|error|CALLIKOE" | grep -v reparse_on | tail -n 12 | cut -c1-220
+    echo "== SIP vu par $1"
+    sudo grep -E "^(REGISTER|SIP/2.0|Route|Path|To|Supported)|Transmitting|Received" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | cut -c1-160 | head -n 30
+    sudo grep -E "WARNING|ERROR" "/var/log/callikoe/$1/messages" 2>/dev/null | grep -v pjsip_wizard | tail -n 8 | cut -c1-200
+  } >> "$D" 2>&1 || true
 }
 mkast pa "$(PHONE 127.0.0.11 a.e2e.invalid "${AUTH[a]}" "${PW[a]}")" "$ANSWER" 31000
 mkast pb "$(PHONE 127.0.0.12 b.e2e.invalid "${AUTH[b]}" "${PW[b]}")" "$ANSWER" 31100

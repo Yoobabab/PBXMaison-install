@@ -7,3 +7,4 @@ tests/e2e/cfg-*.json
 tests/e2e/multi-result.txt
 tests/e2e/test-key*.pem
 tests/e2e/license-token.txt
+tests/e2e/multi-diag.txt

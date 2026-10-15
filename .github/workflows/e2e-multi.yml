@@ -33,6 +33,14 @@ jobs:
           f=tests/e2e/multi-result.txt
           if [[ -f $f ]]; then msg="$(sed -e 's/%/%25/g' "$f" | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Résultat multi-tenant::${msg}"
             tailmsg="$(tail -n 25 "$f" | cut -c1-160 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"; echo "::notice title=Fin du résultat::${tailmsg}"; fi
+      - name: Diagnostics (aiguilleur, SIP)
+        if: always()
+        shell: bash
+        run: |
+          f=tests/e2e/multi-diag.txt
+          [[ -f $f ]] || exit 0
+          split -C 3500 "$f" diag-part-
+          for p in diag-part-*; do msg="$(sed -e 's/%/%25/g' "$p" | awk '{printf "%s%%0A", $0}')"; echo "::warning title=Diagnostic ${p#diag-part-}::${msg}"; done
       - name: Journaux en cas d'échec
         if: failure() || cancelled()
         shell: bash
