@@ -184,6 +184,7 @@ OPACCT() { cat <<EOF
 type = endpoint
 context = op-in
 callerid = Client <0612345678>
+media_address = ${IP}
 aors = $1
 auth = $1
 disallow = all
@@ -247,6 +248,7 @@ bind = $1:5080
 [pbx]
 type = endpoint
 context = answer
+media_address = ${IP}
 aors = pbx
 outbound_auth = pbx-auth
 outbound_proxy = sip:${IP}:5060\;lr
@@ -343,7 +345,7 @@ reset; labx op "channel originate PJSIP/accta extension s@play" >/dev/null; slee
 sleep 5.5
 astx clia "rtp set debug off" >/dev/null 2>&1 || true
 [[ "$(glob pa RANG)" == 201 && "$(glob pb RANG)" == none ]] && pass "Entrant sur le trunk de cli a → poste 201 de cli a uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clia; fail "entrant A"; }
-NRTP="$(grep -cE '> 127\.0\.0\.11\.31[0-9]{3}:' "$LAB/rtp-all.txt" || true)"
+NRTP="$(grep -cE '> [0-9.]+\.310[0-9]{2}:' "$LAB/rtp-all.txt" || true)"
 { echo "== RTP pendant l'appel entrant A (flux : nombre de paquets)"; awk '{print $5, $6, $7}' "$LAB/rtp-all.txt" | sort | uniq -c | sort -rn | head -20; } >> "$PWD/multi-diag.txt" 2>/dev/null || true
 (( NRTP > 50 )) && pass "Son de l'opérateur reçu par le poste de cli a (${NRTP} paquets RTP, directs, sans passer par l'aiguilleur)" || { echo "   (RTP vers le poste A : ${NRTP} paquets ; compteur du poste : $(glob pa RTPRX))" >> "$OUT"; fail "son entrant"; }
 reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null; sleep 9
