@@ -83,7 +83,6 @@ Group=cx-%i
 UMask=0007
 RuntimeDirectory=callikoe/%i
 RuntimeDirectoryMode=0770
-Environment=ODBCINI=/etc/callikoe/t/%i/odbc.ini
 ExecStart=/usr/sbin/asterisk -f -C /etc/callikoe/t/%i/asterisk/asterisk.conf
 ExecReload=/usr/sbin/asterisk -C /etc/callikoe/t/%i/asterisk/asterisk.conf -rx "core reload"
 ExecStop=/usr/sbin/asterisk -C /etc/callikoe/t/%i/asterisk/asterisk.conf -rx "core stop gracefully"
@@ -234,17 +233,7 @@ EOF
   fi
   printf "TENANT_SLUG='%s'\nTENANT_N='%s'\n" "$slug" "$n" > "$etc/tenant.env"; chmod 644 "$etc/tenant.env"
   local DB_PASSWORD; DB_PASSWORD="$(. "$etc/secrets.env"; echo "$DB_PASSWORD")"
-  cat > "$etc/odbc.ini" <<EOF
-[$db]
-Description=Callikoe ${slug}
-Driver=PostgreSQL Unicode
-Database=$db
-Servername=127.0.0.1
-Port=5432
-UserName=$db
-Password=${DB_PASSWORD}
-EOF
-  chown root:"cx-$slug" "$etc/odbc.ini"; chmod 640 "$etc/odbc.ini"
+  rm -f "$etc/odbc.ini"; odbc_sync
   cat > "$etc/console.env" <<EOF
 NODE_ENV=production
 CX_MODE=tenant
@@ -284,6 +273,18 @@ EOF
   visudo -cq -f "/etc/sudoers.d/callikoe-$slug" || { rm -f "/etc/sudoers.d/callikoe-$slug"; die "Règle sudo invalide."; }
 }
 
+# Sources ODBC de tous les PBX clients dans /etc/odbc.ini (sans mot de passe : Asterisk le donne à la connexion,
+# depuis son res_odbc.conf lisible par lui seul ; chaque base n'accepte que son propre compte)
+odbc_sync() {
+  local d s
+  { echo "; Callikoe — écrit par callikoe-host (une source par PBX client, sans mot de passe)"
+    for d in "$CX"/t/*/; do
+      s="$(basename "$d")"; valid_slug "$s" && [[ -f "$d/tenant.env" ]] || continue
+      printf '[%s]\nDescription=Callikoe %s\nDriver=PostgreSQL Unicode\nDatabase=%s\nServername=127.0.0.1\nPort=5432\n\n' "$(db_name "$s")" "$s" "$(db_name "$s")"
+    done; } > /etc/odbc.ini.new
+  chmod 644 /etc/odbc.ini.new; mv /etc/odbc.ini.new /etc/odbc.ini
+}
+
 # Numéro libre (1 à 250) : ports et plage audio du PBX client
 free_n() {
   node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const used=new Set((r.tenants||[]).map(t=>t.n));for(let n=1;n<=250;n++)if(!used.has(n)){console.log(n);process.exit(0)}process.exit(1)' "$REG" \
@@ -301,7 +302,10 @@ reg_del() {
 }
 aiguilleur() {
   node "$APP/pbx/lib/kamailio-tables.mjs" "$REG" "$KDB" "$TVAR" >/dev/null
-  chown -R kamailio:kamailio "$KDB"; local t; for t in dom tru prx; do kamcmd htable.reload "$t" >/dev/null 2>&1 || true; done
+  chown -R kamailio:kamailio "$KDB"
+  local t; for t in dom tru prx; do
+    kamcmd htable.reload "$t" >/dev/null 2>&1 || { warn "Rechargement de l'aiguilleur impossible ($t) : redémarrage"; systemctl restart kamailio; return 0; }
+  done
 }
 
 # Lit un pbx-config.json (fichier ou base64) et le vérifie ; écrit le fichier dans $2
@@ -393,6 +397,7 @@ cmd_supprimer() {
   runuser -u postgres -- dropdb --if-exists "$db" >/dev/null 2>&1 || true
   runuser -u postgres -- psql -q -c "DROP ROLE IF EXISTS $db" >/dev/null 2>&1 || true
   rm -rf "$CX/t/$slug" "$TVAR/$slug" "/var/spool/callikoe/$slug" "/var/log/callikoe/$slug"
+  odbc_sync
   userdel "ast-$slug" >/dev/null 2>&1 || true; userdel "cx-$slug" >/dev/null 2>&1 || true; groupdel "cx-$slug" >/dev/null 2>&1 || true
   [[ -n "$fqdn" ]] && certbot delete --cert-name "$fqdn" -n >/dev/null 2>&1 || true
   reg_del "$slug"

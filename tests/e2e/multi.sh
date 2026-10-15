@@ -226,6 +226,7 @@ sipdump() { # sipdump <PBX client> : échanges SIP vus par son moteur
   echo "== SIP vu par $1" >> "$OUT"
   sudo grep -E "<--- |---> |^(REGISTER|INVITE|SIP/2.0|Via|Route|Path|Contact|To|From|Supported|Require|Authorization|WWW-Authenticate|Unsupported)" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | cut -c1-200 | head -n 70 >> "$OUT" || true
   sudo grep -iE "WARNING|ERROR|NOTICE" "/var/log/callikoe/$1/messages" 2>/dev/null | tail -n 10 | cut -c1-200 >> "$OUT" || true
+  { echo "-- tables chargées"; sudo kamcmd htable.dump dom 2>&1 | grep -E "name|value|error" | head -8; sudo ls -la /var/lib/callikoe/kamailio/db; sudo cat /var/lib/callikoe/kamailio/db/dom; } >> "$OUT" 2>&1 || true
   sudo journalctl -u kamailio --no-pager | grep -E "CALLIKOE|ERROR|WARN" | grep -v reparse_on_dns | tail -n 10 | cut -c1-200 >> "$OUT" || true
 }
 mkast pa "$(PHONE 127.0.0.11 a.e2e.invalid "${AUTH[a]}" "${PW[a]}")" "$ANSWER" 31000
