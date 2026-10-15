@@ -132,6 +132,15 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       if (!hostOk(ph)) throw new UserError("Proxy invalide.", "proxy");
       proxy = { host: ph, port: Number(pp) || port };
     } else if (input.proxy === "") proxy = null;
+    // Codecs choisis (ordre = priorité puis secours) ; sinon ceux conseillés pour l'opérateur
+    const CODECS_OK = ["alaw", "ulaw", "g722", "gsm"];
+    let codecs = t.codecs.filter((c) => CODECS_OK.includes(c));
+    if (input.codecs !== undefined && String(input.codecs).trim() !== "") {
+      const list = (Array.isArray(input.codecs) ? input.codecs : String(input.codecs).split(",")).map((c) => String(c).trim().toLowerCase()).filter(Boolean);
+      if (!list.length || list.some((c) => !CODECS_OK.includes(c)) || new Set(list).size !== list.length) throw new UserError("Codecs invalides : coche au moins un codec.", "codecs");
+      codecs = list;
+    }
+    if (!codecs.length) codecs = ["alaw", "ulaw"];
     const cidFormat = input.cid_format || t.outbound.cid_format;
     const dialFormat = input.dial_format || t.outbound.dial_format;
     const callerFormat = input.caller_format || t.inbound.caller_format;
@@ -183,7 +192,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
            outbound_proxy, direct_media, rtp_symmetric, force_rport, rewrite_contact, dtmf_mode, language,
            send_pai, trust_id_inbound, set_var)
          VALUES ($1, $2, $1, $3, 'from-trunk', 'all', $4, $5, $6, $7, 'no', 'yes', 'yes', 'yes', 'rfc4733', $8, $9, 'yes', $10)`,
-        [name, transport, `${name}-auth`, t.codecs.join(","), fromUser, host, proxyUri, language(),
+        [name, transport, `${name}-auth`, codecs.join(","), fromUser, host, proxyUri, language(),
           t.outbound.pai ? "yes" : "no", `TRUNK_OPTS=${callerFormat},${t.inbound.did_from}`],
       );
       // Appels entrants : reconnus par l'adresse de l'opérateur (et, en multi-tenant, par le jeton « line » du Contact)

@@ -628,3 +628,16 @@ body.no-side .shell{margin-left:0}
 .pbxsw-list a small{color:var(--muted);font-size:12px}
 .pbxsw-list a:hover,.pbxsw-list a.on{background:var(--accent-soft)}
 .pbxsw-all{font-size:13px;padding:6px 9px;border-top:1px solid var(--line)}
+
+/* Trunk : codecs par ordre de priorité */
+.lbl{display:block;font-weight:600;font-size:14px;margin-bottom:6px}
+.codec-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.codec-row{display:grid;grid-template-columns:92px 1fr auto;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--line);background:var(--panel)}
+.codec-row:first-child{border-top:0}
+.codec-row:not(.on){opacity:.6}
+.codec-rank{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.codec-row.on .codec-rank{color:var(--accent)}
+.codec-list .codec-row label.codec-name{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;font-weight:500;margin:0;text-align:left}
+.codec-list .codec-row label.codec-name input{width:auto;margin:0}
+.codec-move{display:flex;gap:4px}
+@media (max-width:520px){.codec-row{grid-template-columns:1fr auto}.codec-rank{grid-column:1/-1}}

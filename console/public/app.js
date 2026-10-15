@@ -6,6 +6,8 @@ const app = $("#app");
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+// Codecs proposés pour les trunks (G.729 absent : le moteur ne sait pas le convertir, l'appel serait muet)
+const TRUNK_CODECS = { alaw: "G.711 A-law (standard en Europe)", ulaw: "G.711 µ-law", g722: "G.722 (voix HD)", gsm: "GSM (faible débit)" };
 const FORMAT_LABELS = { national: "National (0412345678)", e164: "E.164 sans + (33412345678)", e164_plus: "E.164 avec + (+33412345678)", keep: "Inchangé" };
 const fmtPhone = (n) => /^\+33\d{9}$/.test(n || "") ? ("0" + n.slice(3)).replace(/(\d{2})(?=\d)/g, "$1 ")
   : /^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "—");
@@ -562,7 +564,7 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
   if (id && !existing) { app.innerHTML = `<div class="panel empty">Trunk introuvable. <a href="#/trunks">Retour</a></div>`; return; }
   const v = draft || (existing ? { name: existing.id, template: existing.template, number: existing.number, username: existing.username,
     host: existing.host, proxy: existing.proxy, cid_format: existing.cid_format, dial_format: existing.dial_format, caller_format: existing.caller_format,
-    dids: compactDids(existing.extra_dids || existing.dids).join("\n") } : { template: "" });
+    dids: compactDids(existing.extra_dids || existing.dids).join("\n"), codecs: (existing.codecs || []).filter(Boolean).join(",") } : { template: "" });
   const field = (name, label, input, hint, cls = "") => `<label class="${cls} ${errorField === name ? "has-err" : ""}">${label}${input}
     ${errorField === name ? `<span class="err">${esc(errorMsg)}</span>` : hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
   const opts = (list, cur) => list.map(([val, lab]) => `<option value="${esc(val)}" ${String(val) === String(cur ?? "") ? "selected" : ""}>${esc(lab)}</option>`).join("");
@@ -581,6 +583,10 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
       ${field("host", "Serveur (registrar)", `<input name="host" value="${esc(v.host || "")}" autocapitalize="off" placeholder="sip.operateur.fr">`, "<span id='hosthint'></span>")}
       ${field("proxy", "Proxy sortant", `<input name="proxy" value="${esc(v.proxy ?? "")}" autocapitalize="off" placeholder="aucun">`, "<span id='proxyhint'>Facultatif : serveur ou serveur:port.</span>")}
       ${field("dids", "SDA de ce trunk", `<textarea name="dids" rows="4" placeholder="04 65 00 15 30&#10;04 65 00 15 40 - 04 65 00 15 49">${esc(v.dids || "")}</textarea>`, "Un numéro ou une tranche par ligne (ex. 04 65 00 15 40 - 04 65 00 15 49). Ils sont ensuite proposés dans les fiches utilisateurs et les règles entrantes.", "full")}
+      <div class="full ${errorField === "codecs" ? "has-err" : ""}"><span class="lbl">Codecs (ordre de priorité)</span>
+        <input type="hidden" name="codecs" value="${esc(v.codecs || "")}">
+        <div class="codec-list" id="codecs"></div>
+        ${errorField === "codecs" ? `<span class="err">${esc(errorMsg)}</span>` : `<span class="hint">Le premier coché est proposé en priorité à l'opérateur, puis les suivants en secours. Flèches pour changer l'ordre.</span>`}</div>
       <details ${v.cid_format || v.dial_format || v.caller_format ? "open" : ""}><summary>Formats des numéros (avancé)</summary><div class="inner">
         ${field("cid_format", "Numéro présenté", fmt("cid_format", v.cid_format), "Envoyé à l'opérateur.")}
         ${field("dial_format", "Numéros composés", fmt("dial_format", v.dial_format), "Envoyés à l'opérateur.")}
@@ -596,9 +602,11 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
     if (!t) { info.hidden = true; return; }
     info.hidden = false;
     info.innerHTML = `<span>Transport <b>${t.transport.toUpperCase()}</b></span><span>Port <b>${t.registrar.port}</b></span>
-      <span>Codecs <b>${t.codecs.join(" → ")}</b></span><span>Ré-enregistrement <b>${t.registration.interval} s</b></span>
+      <span>Codecs conseillés <b>${t.codecs.join(" → ")}</b></span><span>Ré-enregistrement <b>${t.registration.interval} s</b></span>
       ${t.verified ? "" : `<span style="color:var(--warn)">Réglages à valider par un appel test</span>`}`;
     if (prefill) {
+      form.codecs.value = t.codecs.join(",");
+      drawCodecs();
       form.host.value = t.registrar.host || "";
       form.proxy.value = t.proxy ? `${t.proxy.host}:${t.proxy.port}` : "";
       if (!existing && !form.name.value) form.name.value = t.id === "generique" ? "" : t.id;
@@ -622,6 +630,28 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
     } catch (err) { renderTrunkForm(id, err.field, err.message, { ...f, name: f.name || existing?.id }); }
   });
   form.template.addEventListener("change", () => applyTemplate(true));
+  // Codecs : liste ordonnée (cochés = utilisés, dans l'ordre), comme l'ordre des règles sortantes
+  function drawCodecs() {
+    const on = form.codecs.value.split(",").map((x) => x.trim()).filter((x) => TRUNK_CODECS[x]);
+    const order = [...on, ...Object.keys(TRUNK_CODECS).filter((c) => !on.includes(c))];
+    const box = $("#codecs");
+    box.innerHTML = order.map((c, i) => `<div class="codec-row ${on.includes(c) ? "on" : ""}" data-c="${c}">
+        <span class="codec-rank">${on.includes(c) ? (on.indexOf(c) === 0 ? "Priorité" : `Secours ${on.indexOf(c)}`) : "—"}</span>
+        <label class="codec-name"><input type="checkbox" ${on.includes(c) ? "checked" : ""}> ${esc(TRUNK_CODECS[c])}</label>
+        <span class="codec-move">${on.includes(c) ? `<button type="button" class="btn ghost sm" data-up="${c}" ${on.indexOf(c) === 0 ? "disabled" : ""} aria-label="Monter">↑</button><button type="button" class="btn ghost sm" data-down="${c}" ${on.indexOf(c) === on.length - 1 ? "disabled" : ""} aria-label="Descendre">↓</button>` : ""}</span>
+      </div>`).join("");
+    const save = (list) => { form.codecs.value = list.join(","); drawCodecs(); };
+    const checked = () => [...box.querySelectorAll(".codec-row")].filter((r) => r.querySelector("input").checked).map((r) => r.dataset.c);
+    box.querySelectorAll("input[type=checkbox]").forEach((cb) => cb.onchange = () => save(checked()));
+    box.querySelectorAll("[data-up],[data-down]").forEach((b) => b.onclick = () => {
+      const list = checked(), c = b.dataset.up || b.dataset.down, i = list.indexOf(c), j = b.dataset.up ? i - 1 : i + 1;
+      if (j < 0 || j >= list.length) return;
+      [list[i], list[j]] = [list[j], list[i]];
+      save(list);
+    });
+  }
+  if (!form.codecs.value) { const t0 = templates.find((x) => x.id === form.template.value); if (t0) form.codecs.value = t0.codecs.join(","); }
+  drawCodecs();
   if (v.template) applyTemplate(!existing && !draft);
 
 }
