@@ -253,6 +253,25 @@ export async function buildApp({ db } = {}) {
     return runHost(["reactiver", req.params.slug], `Réactivation du PBX ${req.params.slug}`, req);
   });
 
+  // ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP, adresses bloquées)
+  const IP_RE = /^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$/;
+  app.get("/api/telephonie", { preHandler: requireUser }, async (req) => {
+    const min = Math.min(1440, Math.max(5, Number(req.query?.minutes) || 60));
+    const out = await new Promise((res) => execFile(HOST_CMD[0], [...HOST_CMD.slice(1), "journal", String(min)], { timeout: 40_000, maxBuffer: 32 << 20 }, (e, o) => res(String(o || ""))));
+    let d; try { d = JSON.parse(out.trim().split("\n").pop()); } catch { throw new UserError("Journal de la téléphonie illisible : réessaie dans un instant."); }
+    return { ...d, client_ip: req.ip };
+  });
+  for (const action of ["debloquer", "bloquer"]) {
+    app.post(`/api/telephonie/${action}`, { preHandler: requireRole("super", "admin") }, async (req) => {
+      const ip = String(req.body?.ip || "").trim();
+      if (!IP_RE.test(ip)) throw new UserError("Adresse IP invalide.", "ip");
+      const r = await new Promise((res) => execFile(HOST_CMD[0], [...HOST_CMD.slice(1), action, ip], { timeout: 30_000 }, (e, o, err) => res({ ok: !e, text: String(o || err || "").replace(/\x1b\[[0-9;]*m/g, "").trim() })));
+      await audit(req, `${action === "bloquer" ? "Blocage" : "Déblocage"} de l'adresse ${ip}`, r.ok, r.ok ? "" : r.text.slice(0, 200));
+      if (!r.ok) throw new UserError(r.text.replace(/^✖\s*/, "") || "Action impossible.");
+      return { ok: true };
+    });
+  }
+
   // ---------------------------------------------------------------- Clé de signature (licences des PBX créés sur ce serveur)
   let signKey = null;
   const loadSignKey = () => { try { signKey = crypto.createPrivateKey(fs.readFileSync(SIGN_KEY)); } catch { signKey = null; } return signKey; };

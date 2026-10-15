@@ -349,6 +349,16 @@ sleep 8
 regd px && fail "poste pirate enregistré chez cli b avec les identifiants de cli a" || pass "Poste de cli a refusé par cli b (identifiants d'un autre PBX)"
 sudo journalctl -u kamailio --no-pager | grep -q "CALLIKOE-AUTHFAIL 127.0.0.13" && pass "Échec noté avec l'adresse réelle du poste pirate (fail2ban)" || { sudo journalctl -u kamailio -n 30 --no-pager | cut -c1-200 >> "$OUT"; fail "AUTHFAIL absent"; }
 labx px "module unload res_pjsip_outbound_registration.so" >/dev/null 2>&1 || true
+# Console du serveur › Téléphonie : l'échec y apparaît en clair, avec le PBX concerné
+R="$(hapi GET '/api/telephonie?minutes=60')"
+echo "$R" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit(d.events.some(e=>e.kind==="auth"&&e.ip==="127.0.0.13"&&/poste 201/.test(e.text))?0:1)' \
+  && pass "Console du serveur › Téléphonie : mot de passe refusé affiché (poste 201, adresse réelle)" || { echo "$R" | cut -c1-600 >> "$OUT"; fail "journal téléphonie"; }
+hapi POST /api/telephonie/bloquer '{"ip":"203.0.113.7"}' >/dev/null
+R="$(hapi GET '/api/telephonie?minutes=15')"
+if [[ "$R" == *'"ip":"203.0.113.7","jail":"callikoe-manual"'* ]]; then
+  hapi POST /api/telephonie/debloquer '{"ip":"203.0.113.7"}' >/dev/null
+  [[ "$(hapi GET '/api/telephonie?minutes=15')" != *'"ip":"203.0.113.7","jail"'* ]] && pass "Téléphonie : bloquer puis débloquer une adresse depuis la console du serveur" || fail "déblocage"
+else echo "$R" | cut -c1-400 >> "$OUT"; fail "blocage manuel"; fi
 
 opreg() { labx op "pjsip show contacts" | grep -q "$1/"; }
 waitfor 60 opreg accta && waitfor 60 opreg acctb && pass "Trunks des deux clients enregistrés chez l'opérateur (via l'aiguilleur)" || { labx op "pjsip show contacts" >> "$OUT"; astx clia "pjsip show registrations" >> "$OUT"; sipdump clia; fail "trunks non enregistrés"; }

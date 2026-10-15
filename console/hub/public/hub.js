@@ -32,6 +32,7 @@ const ICONS = {
   trunk: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="17" r="1"/>',
   lic: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
+  sip: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
 };
 const icon = (k, s = 18) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ""}</svg>`;
@@ -42,7 +43,7 @@ function setNav(active, label = "") {
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
   const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []),
-    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
+    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/telephonie", "Téléphonie", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   $("#nav").innerHTML = on ? `<div class="ng">${items.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`).join("")}</div>` : "";
   $("#user").innerHTML = on ? `<div class="sf-user"><span class="sf-av">${esc(state.user.email.charAt(0).toUpperCase())}</span>
     <span class="sf-mail" title="${esc(state.user.email)} · ${esc(state.user.role_label)}">${esc(state.user.email)}</span>
@@ -481,6 +482,93 @@ async function renderAudit() {
     </tbody></table></div></div>`;
 }
 
+// ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP)
+const SIP_KINDS = { erreur: ["bad", "Erreur"], auth: ["wait", "Mot de passe refusé"], refus: ["off", "Adresse inconnue"], robot: ["off", "Robot / fraude"], flood: ["wait", "Trop de messages"] };
+let sipMin = 60, sipFilter = "", sipKind = "", sipTimer = null;
+async function renderTelephonie() {
+  setNav("sip", "Téléphonie");
+  clearInterval(sipTimer);
+  app.innerHTML = `<div class="bar"><div class="grow"><h1>Téléphonie</h1>
+      <p class="sub" style="margin:0">Ce que l'aiguilleur SIP du serveur a refusé ou n'a pas pu transmettre, et les adresses bloquées. Utile quand un téléphone ou un trunk n'arrive pas à s'enregistrer.</p></div>
+      <label>Période<select id="sipmin">${[[15, "15 dernières minutes"], [60, "Dernière heure"], [360, "6 dernières heures"], [1440, "24 dernières heures"]].map(([v, l]) => `<option value="${v}" ${v === sipMin ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <button class="btn ghost" id="siprefresh">Actualiser</button></div>
+    <div id="sipbody"><div class="empty"><span class="spin"></span></div></div>`;
+  $("#sipmin").onchange = (e) => { sipMin = Number(e.target.value); load(); };
+  $("#siprefresh").onclick = () => load();
+  async function load() {
+    let d;
+    try { d = await api("GET", `/api/telephonie?minutes=${sipMin}`); }
+    catch (e) { $("#sipbody").innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+    if (location.hash !== "#/telephonie") return;
+    draw(d);
+  }
+  function draw(d) {
+    const c = d.counts || {};
+    const blocked = new Map();
+    for (const b of d.banned) { const x = blocked.get(b.ip) || { ip: b.ip, why: [] }; x.why.push(b.label); blocked.set(b.ip, x); }
+    for (const ip of d.ignored) { const x = blocked.get(ip) || { ip, why: [] }; x.why.push("Ignorée 1 minute par l'anti-flood"); blocked.set(ip, x); }
+    const mine = d.client_ip && blocked.has(d.client_ip);
+    const act = (ip, isBlocked) => can("super", "admin") ? (isBlocked ? `<button class="btn ghost sm" data-unban="${esc(ip)}">Débloquer</button>`
+      : `<button class="btn ghost sm" data-ban="${esc(ip)}">Bloquer</button>`) : "";
+    const q = sipFilter.trim().toLowerCase();
+    const ev = d.events.filter((e) => (!sipKind || e.kind === sipKind) && (!q || e.ip.includes(q) || e.text.toLowerCase().includes(q)));
+    $("#sipbody").innerHTML = `
+      ${mine ? `<div class="flash bad">Ton adresse actuelle (${esc(d.client_ip)}) est bloquée pour la téléphonie : tes téléphones ne peuvent pas s'enregistrer. ${can("super", "admin") ? `<button class="btn sm" data-unban="${esc(d.client_ip)}">Débloquer mon adresse</button>` : ""}</div>` : ""}
+      <div class="kpis">
+        ${kpi("sip", "Erreurs", c.erreur || 0, "demandes non transmises aux PBX", c.erreur ? "warn" : "good")}
+        ${kpi("key", "Mots de passe refusés", c.auth || 0, "postes ou trunks mal configurés", c.auth ? "warn" : "")}
+        ${kpi("phone", "Adresses inconnues", c.refus || 0, "appareils réglés sur une adresse qui n'existe pas ici")}
+        ${kpi("call", "Robots refusés", c.robot || 0, "tentatives d'appels frauduleux bloquées")}
+        ${kpi("lic", "Adresses bloquées", blocked.size, d.client_ip ? `ton adresse : <span class="mono">${esc(d.client_ip)}</span>` : "", mine ? "warn" : "")}
+      </div>
+      <div class="panel"><div class="ph"><h2>Adresses bloquées</h2><span class="s">${blocked.size}</span></div>
+        ${blocked.size ? `<div class="table-wrap"><table><thead><tr><th>Adresse</th><th>Raison</th><th></th></tr></thead><tbody>
+          ${[...blocked.values()].map((b) => `<tr><td class="mono">${esc(b.ip)}${b.ip === d.client_ip ? ' <span class="pill bad">toi</span>' : ""}</td><td>${b.why.map(esc).join("<br>")}</td><td class="acts">${act(b.ip, true)}</td></tr>`).join("")}
+          </tbody></table></div>` : `<div class="empty">Aucune adresse bloquée.</div>`}
+        ${can("super", "admin") ? `<form id="banf" class="pad" style="border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end" novalidate>
+          <label style="flex:1;min-width:200px">Bloquer une adresse définitivement<input name="ip" placeholder="203.0.113.7" autocomplete="off"></label>
+          <button class="btn ghost">Bloquer</button><div class="form-near" style="flex-basis:100%"></div></form>` : ""}</div>
+      ${d.by_ip.length ? `<div class="panel"><div class="ph"><h2>Adresses les plus actives</h2><span class="s">sur la période</span></div><div class="table-wrap"><table>
+        <thead><tr><th>Adresse</th><th>Événements</th><th>Types</th><th>État</th><th></th></tr></thead><tbody>
+        ${d.by_ip.slice(0, 15).map((x) => `<tr><td class="mono"><a href="#" data-ip="${esc(x.ip)}">${esc(x.ip)}</a>${x.ip === d.client_ip ? ' <span class="pill ok">toi</span>' : ""}</td><td>${x.count}</td>
+          <td>${Object.entries(x.kinds).map(([k, n]) => `<span class="pill ${(SIP_KINDS[k] || ["off"])[0]}">${esc((SIP_KINDS[k] || [k, k])[1])} × ${n}</span>`).join(" ")}</td>
+          <td>${x.banned || x.ignored ? '<span class="pill bad">Bloquée</span>' : '<span class="pill off">Libre</span>'}</td><td class="acts">${act(x.ip, x.banned || x.ignored)}</td></tr>`).join("")}
+        </tbody></table></div></div>` : ""}
+      <div class="panel"><div class="ph"><h2>Événements</h2><span class="s">${d.total > d.events.length ? `${d.events.length} plus récents sur ${d.total}` : d.total}</span></div>
+        <div class="pad" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;border-bottom:1px solid var(--line)">
+          <label style="flex:1;min-width:200px">Rechercher<input id="sipq" type="search" placeholder="Adresse IP, numéro de poste, PBX…" value="${esc(sipFilter)}" autocomplete="off"></label>
+          <label>Type<select id="sipk"><option value="">Tous</option>${Object.entries(SIP_KINDS).map(([k, [, l]]) => `<option value="${k}" ${k === sipKind ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+        ${ev.length ? `<div class="sipev">
+          ${ev.slice(0, 300).map((e) => `<div class="sipev-row"><div class="sipev-meta"><span class="s">${e.at ? new Date(e.at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
+            <span class="pill ${(SIP_KINDS[e.kind] || ["off"])[0]}">${esc((SIP_KINDS[e.kind] || [e.kind, e.kind])[1])}</span>
+            ${e.ip ? `<a href="#" class="mono" data-ip="${esc(e.ip)}">${esc(e.ip)}</a>` : ""}</div><div>${esc(e.text)}</div></div>`).join("")}
+          </div>` : `<div class="empty">${d.total ? "Aucun événement ne correspond." : "Rien à signaler sur la période : aucun refus ni erreur."}</div>`}
+      </div>`;
+    $("#sipq").oninput = (e) => { sipFilter = e.target.value; const pos = e.target.selectionStart; draw(d); const i = $("#sipq"); i.focus(); i.setSelectionRange(pos, pos); };
+    $("#sipk").onchange = (e) => { sipKind = e.target.value; draw(d); };
+    app.querySelectorAll("[data-ip]").forEach((a) => a.onclick = (e) => { e.preventDefault(); sipFilter = a.dataset.ip; draw(d); $("#sipq").scrollIntoView({ block: "center" }); });
+    const act2 = async (path, ip, b) => {
+      b.disabled = true;
+      try { await api("POST", path, { ip }); load(); }
+      catch (err) { b.disabled = false; $("#sipbody").insertAdjacentHTML("afterbegin", `<div class="flash bad">${esc(err.message)}</div>`); }
+    };
+    app.querySelectorAll("[data-unban]").forEach((b) => b.onclick = () => act2("/api/telephonie/debloquer", b.dataset.unban, b));
+    app.querySelectorAll("[data-ban]").forEach((b) => b.onclick = () => {
+      if (!confirm(`Bloquer définitivement ${b.dataset.ban} ? Plus aucun appareil à cette adresse ne pourra joindre les PBX du serveur.`)) return;
+      act2("/api/telephonie/bloquer", b.dataset.ban, b);
+    });
+    const bf = $("#banf");
+    if (bf) bindForm(bf, async (f) => {
+      const ip = String(f.ip || "").trim();
+      if (ip === d.client_ip) throw Object.assign(new Error("C'est ton adresse actuelle : tu bloquerais tes propres téléphones."), { field: "ip" });
+      await api("POST", "/api/telephonie/bloquer", { ip });
+      load();
+    });
+  }
+  await load();
+  sipTimer = setInterval(() => { if (location.hash === "#/telephonie" && !document.hidden && !document.activeElement?.closest?.("#sipbody")) load(); else if (location.hash !== "#/telephonie") clearInterval(sipTimer); }, 30_000);
+}
+
 // ---------------------------------------------------------------- Routage
 async function loadState() { Object.assign(state, await api("GET", "/api/state")); }
 function route() {
@@ -494,6 +582,7 @@ function route() {
   if (h === "#/comptes" && can("super")) return renderAccounts();
   if (h === "#/cle" && can("super")) return renderSigning();
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
+  if (h === "#/telephonie") return renderTelephonie();
   return renderList();
 }
 window.addEventListener("hashchange", route);

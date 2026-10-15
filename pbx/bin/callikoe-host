@@ -10,6 +10,8 @@
 #    callikoe-host sauvegarder [--enregistrements]        sauvegarde du serveur entier (tous les PBX)
 #    callikoe-host restaurer <sauvegarde-serveur.tar.gz>  restaure le serveur entier (VPS neuf, après installation)
 #    callikoe-host console                                adresse de la console du serveur (et lien de 1re connexion)
+#    callikoe-host journal [minutes]                      journal de la téléphonie (refus, erreurs, adresses bloquées), JSON
+#    callikoe-host debloquer <ip> | bloquer <ip>          débloque une adresse / la bloque définitivement
 #    callikoe-host init | mettre-a-jour | dns | aiguilleur   usage interne (installeur, tâches planifiées)
 #
 #  Chaque PBX client a son moteur (callikoe-asterisk@<nom>), sa console (callikoe-console@<nom>), sa base (cx_<nom>),
@@ -275,7 +277,7 @@ SQL
   runuser -u postgres -- psql -q -c "REVOKE ALL ON DATABASE callikoe_hub FROM PUBLIC" >/dev/null
   # La console du serveur ne peut lancer que la création et la suppression de PBX
   cat > /etc/sudoers.d/callikoe-hub <<EOF
-callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *
+callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host journal *, ${APP}/pbx/bin/callikoe-host debloquer *, ${APP}/pbx/bin/callikoe-host bloquer *, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *
 EOF
   chmod 440 /etc/sudoers.d/callikoe-hub
   visudo -cq -f /etc/sudoers.d/callikoe-hub || { rm -f /etc/sudoers.d/callikoe-hub; die "Règle sudo invalide (console du serveur)."; }
@@ -619,6 +621,27 @@ cmd_etat() {
   printf ']}\n'
 }
 
+# Journal de la téléphonie (console du serveur) : refus, erreurs, adresses bloquées ou ignorées (JSON)
+cmd_journal() {
+  local min="${1:-60}"
+  [[ "$min" =~ ^[0-9]+$ ]] && ((min >= 1 && min <= 1440)) || die "Durée invalide (1 à 1440 minutes)."
+  node "$APP/pbx/lib/sip-journal.mjs" "$REG" "$min"
+}
+valid_ip_any() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ || "$1" =~ ^[0-9a-fA-F:]{2,39}$ ]]; }
+# Débloquer une adresse (fail2ban + anti-flood de l'aiguilleur) ou la bloquer définitivement
+cmd_debloquer() {
+  local ip="${1:-}"; valid_ip_any "$ip" || die "Adresse IP invalide."
+  fail2ban-client unban "$ip" >/dev/null 2>&1 || true
+  kamcmd -s unix:/run/kamailio/kamailio_ctl htable.delete ban "$ip" >/dev/null 2>&1 || true
+  ok "Adresse ${ip} débloquée"
+}
+cmd_bloquer() {
+  local ip="${1:-}"; valid_ip_any "$ip" || die "Adresse IP invalide."
+  [[ "$ip" == "${PUBLIC_IP:-}" || "$ip" == 127.* ]] && die "Impossible de bloquer l'adresse du serveur lui-même."
+  fail2ban-client set callikoe-manual banip "$ip" >/dev/null || die "Blocage impossible (protection anti-intrusion arrêtée ?)."
+  ok "Adresse ${ip} bloquée (permanent)"
+}
+
 # Désactiver un PBX (abonnement suspendu…) : moteur et console arrêtés, appels refusés par l'aiguilleur ; données gardées
 cmd_suspendre() {
   local slug="${1:-}"; valid_slug "$slug" && reg_get "$slug" slug >/dev/null 2>&1 || die "PBX « ${slug} » inconnu."
@@ -780,6 +803,9 @@ case "${1:-}" in
   init) cmd_init ;;
   liste|list) cmd_liste ;;
   etat) cmd_etat ;;
+  journal) shift; cmd_journal "$@" ;;
+  debloquer) shift; cmd_debloquer "$@" ;;
+  bloquer) shift; cmd_bloquer "$@" ;;
   suspendre) shift; cmd_suspendre "$@" ;;
   reactiver) shift; cmd_reactiver "$@" ;;
   creer|create) shift; cmd_creer "$@" ;;
