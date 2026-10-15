@@ -11,7 +11,7 @@ test("validation et contextes", () => {
   const d = buildSecurityDialplan(s);
   assert.match(d, /\[blocked-in\]\nexten => 0612345678,1,Return\(\)\nexten => _0899\.,1,Return\(\)/);
   assert.match(d, /exten => _0041\.,1,Return\(\)/);
-  assert.deepEqual(securityGlobals(s), ["SEC_BLOCK_PREMIUM = 1", "SEC_BLOCK_ANON = 0", "SEC_MAX_USER_CALLS = 3", "SEC_MAX_DURATION = 60"]);
+  assert.deepEqual(securityGlobals(s), ["SEC_BLOCK_PREMIUM = 1", "SEC_BLOCK_ANON = 0", "SEC_MAX_USER_CALLS = 3", "SEC_MAX_DURATION = 60", "SEC_MAX_PER_HOUR = 100", "SEC_MAX_INTL_DAY = 20"]);
   assert.throws(() => validateSecurity({ console_allow: "300.1.1.1" }), /IP invalide/);
   assert.throws(() => validateSecurity({ in_block: ["abc"] }), /invalide/);
   assert.throws(() => validateSecurity({ max_user_calls: 99 }), /entre 0 et 50/);

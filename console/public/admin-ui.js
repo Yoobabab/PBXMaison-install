@@ -114,13 +114,13 @@ async function pageOutbound(sub) {
 async function pageSecurity(sub = "apercu") {
   H.setNav("sec");
   const { settings: s, f2b, countries } = await H.api("GET", "/api/security");
-  const T = [["apercu", "Vue d'ensemble"], ["ip", "Adresses IP"], ["numeros", "Numéros bloqués"], ["pays", "International"], ["regles", "Règles d'appel"], ["console", "Accès à la console"]];
+  const T = [["apercu", "Vue d'ensemble"], ["ip", "Adresses IP"], ["numeros", "Numéros bloqués"], ["pays", "International"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"]];
   const banned = [...(f2b.manual || []).map((ip) => ({ ip, manual: true })), ...(f2b.auto || []).map((ip) => ({ ip, manual: false }))];
   let body = "";
   if (sub === "apercu") {
-    const score = [s.block_premium, s.intl.length < 10, s.max_user_calls > 0, s.max_duration > 0, f2b.active, s.console_allow.length > 0].filter(Boolean).length;
+    const score = [s.block_premium, s.intl.length < 10, s.max_user_calls > 0, s.max_duration > 0, f2b.active, s.console_allow.length > 0, s.max_per_hour > 0, s.max_intl_day > 0].filter(Boolean).length;
     body = `<div class="kpis">
-      ${kpi("shield", "Niveau de protection", `${score}<small>/6</small>`, score >= 5 ? "Très bon" : score >= 3 ? "Correct" : "À renforcer", score >= 5 ? "good" : score >= 3 ? "" : "warn")}
+      ${kpi("shield", "Niveau de protection", `${score}<small>/8</small>`, score >= 7 ? "Très bon" : score >= 5 ? "Correct" : "À renforcer", score >= 7 ? "good" : score >= 5 ? "" : "warn")}
       ${kpi("ban", "Adresses bloquées", banned.length, f2b.ok ? (f2b.active ? "Protection anti-intrusion active" : "Protection arrêtée !") : "Protection injoignable", f2b.ok && f2b.active ? "" : "warn")}
       ${kpi("phone", "Numéros bloqués", s.in_block.length + s.out_block.length, `${s.in_block.length} entrants · ${s.out_block.length} sortants`)}
       ${kpi("globe", "Pays autorisés", s.intl.length, s.intl.length ? s.intl.slice(0, 4).map((c) => "+" + c).join(" ") + (s.intl.length > 4 ? "…" : "") : "International bloqué")}
@@ -129,6 +129,10 @@ async function pageSecurity(sub = "apercu") {
       ${[[f2b.active, "Protection anti-intrusion (fail2ban)", `${s.f2b.maxretry} échecs en ${s.f2b.findtime} min → blocage ${s.f2b.bantime} min`, "ip"],
         [s.block_premium, "Numéros surtaxés bloqués (089x, 118xxx)", "Évite les appels coûteux et la fraude", "regles"],
         [s.intl.length < 10, "International limité aux pays choisis", s.intl.length ? `${s.intl.length} pays autorisés` : "Aucun pays : tout l'international est bloqué", "pays"],
+        [s.max_per_hour > 0, "Plafond anti-fraude : appels externes par heure", s.max_per_hour ? `${s.max_per_hour} par heure pour tout le standard, au-delà tout est refusé et une alerte est créée` : "Pas de plafond", "regles"],
+        [s.max_intl_day > 0, "Plafond d'appels internationaux par jour", s.max_intl_day ? `${s.max_intl_day} par jour` : "Pas de plafond", "regles"],
+        [true, "Renvois vers l'extérieur limités aux numéros nationaux", "Jamais vers l'international, un surtaxé ou un numéro court, même par un compte piraté", ""],
+        [(s.sip_allow || []).length > 0, "Postes SIP limités à certains réseaux", (s.sip_allow || []).length ? s.sip_allow.join(", ") : "Les téléphones peuvent se connecter depuis Internet (mot de passe fort)", "console"],
         [s.max_user_calls > 0, "Appels externes simultanés limités par utilisateur", s.max_user_calls ? `${s.max_user_calls} au maximum` : "Pas de limite", "regles"],
         [s.max_duration > 0, "Durée maximale d'un appel externe", s.max_duration ? `${s.max_duration} minutes` : "Pas de limite", "regles"],
         [s.console_allow.length > 0, "Accès à la console limité par adresse IP", s.console_allow.length ? s.console_allow.join(", ") : "Accessible depuis n'importe quelle adresse (avec mot de passe)", "console"],
@@ -172,15 +176,28 @@ async function pageSecurity(sub = "apercu") {
   } else if (sub === "regles") {
     body = `<form id="rgf" novalidate class="panel"><div class="ph"><h2>Règles d'appel</h2></div><div class="pad stack"><div class="form-msg"></div>
       ${sw("block_premium", s.block_premium, "Bloquer les numéros surtaxés", "089x et renseignements 118xxx")}
+      <div class="cx-g3"><label>Plafond : appels externes par heure (tout le standard)<input type="number" name="max_per_hour" min="0" max="10000" value="${s.max_per_hour ?? 100}"><span class="hint">Au-delà, tout appel externe est refusé jusqu'à l'heure suivante et une alerte est créée. 0 = pas de plafond.</span></label>
+      <label>Plafond : appels internationaux par jour<input type="number" name="max_intl_day" min="0" max="10000" value="${s.max_intl_day ?? 20}"><span class="hint">La fraude passe presque toujours par l'international. 0 = pas de plafond.</span></label></div>
       <div class="cx-g3"><label>Appels externes simultanés par utilisateur<input type="number" name="max_user_calls" min="0" max="50" value="${s.max_user_calls}"><span class="hint">0 = pas de limite. 2 laisse faire un transfert supervisé.</span></label>
       <label>Durée maximale d'un appel externe (min)<input type="number" name="max_duration" min="0" max="1440" value="${s.max_duration}"><span class="hint">0 = pas de limite. Coupe les appels oubliés ou frauduleux.</span></label></div>
       <div class="note">Rappel : la licence limite aussi le nombre total d'appels externes simultanés. Les numéros d'urgence ne sont jamais bloqués ni limités.</div>
       <div class="actions"><button class="btn">Enregistrer</button></div></div></form>`;
   } else if (sub === "console") {
-    body = `<form id="ccf" novalidate class="panel"><div class="ph"><h2>Accès à la console d'administration</h2></div><div class="pad stack"><div class="form-msg"></div>
-      <label>Adresses autorisées<textarea name="console_allow" rows="5" class="mono" placeholder="Vide = accessible de partout (avec mot de passe)&#10;192.168.1.0/24&#10;203.0.113.5">${H.esc(s.console_allow.join("\n"))}</textarea></label>
-      <span class="hint">Le softphone web, l'application mobile et le provisioning des téléphones restent accessibles depuis partout. Ton adresse doit faire partie de la liste, sinon l'enregistrement est refusé pour ne pas te bloquer.</span>
-      <div class="actions"><button class="btn">Enregistrer</button></div></div></form>`;
+    const ca = s.console_allow.length > 0, sa = (s.sip_allow || []).length > 0;
+    body = `<form id="ccf" novalidate class="stack"><div class="form-msg"></div>
+      <div class="panel"><div class="ph"><h2>Console d'administration</h2></div><div class="pad stack">
+        <label class="check"><input type="radio" name="ca_mode" value="all" ${ca ? "" : "checked"}> Accessible depuis partout (identifiant + mot de passe)</label>
+        <label class="check"><input type="radio" name="ca_mode" value="list" ${ca ? "checked" : ""}> Seulement depuis ces adresses IP</label>
+        <label data-for="ca">Adresses autorisées<textarea name="console_allow" rows="4" class="mono" placeholder="203.0.113.5&#10;192.168.1.0/24">${H.esc(s.console_allow.join("\n"))}</textarea>
+          <span class="hint">IP fixe des bureaux, du technicien… Une par ligne. Ton adresse actuelle doit y être, sinon l'enregistrement est refusé pour ne pas te bloquer. Le softphone web, l'appli mobile et le provisioning des téléphones restent accessibles.</span></label>
+      </div></div>
+      <div class="panel"><div class="ph"><h2>Téléphones et applis SIP</h2></div><div class="pad stack">
+        <label class="check"><input type="radio" name="sa_mode" value="all" ${sa ? "" : "checked"}> Peuvent se connecter depuis partout (télétravail, mobiles)</label>
+        <label class="check"><input type="radio" name="sa_mode" value="list" ${sa ? "checked" : ""}> Seulement depuis ces réseaux (le plus sûr)</label>
+        <label data-for="sa">Réseaux autorisés<textarea name="sip_allow" rows="4" class="mono" placeholder="IP publique des bureaux, ex. 203.0.113.5&#10;192.168.1.0/24">${H.esc((s.sip_allow || []).join("\n"))}</textarea>
+          <span class="hint">Un téléphone, une base DECT ou une appli qui se connecte d'ailleurs est refusé, même avec le bon mot de passe. Mets l'IP publique de chaque site (et le réseau local si le PBX est sur place). Le softphone web n'est pas concerné ; l'appli mobile hors des bureaux ne fonctionnera plus.</span></label>
+      </div></div>
+      <div class="actions"><button class="btn">Enregistrer</button></div></form>`;
   }
   H.app.innerHTML = head("Sécurité", "Protège le standard contre les intrusions, la fraude et les appels indésirables.") + tabs("#/securite", sub, T) + `<div class="cx-body">${body}</div>`;
   const save = async (v, msg = "Réglages de sécurité enregistrés.") => {
@@ -193,8 +210,13 @@ async function pageSecurity(sub = "apercu") {
   H.app.querySelectorAll("[data-unban]").forEach((b) => b.addEventListener("click", async () => { await H.api("POST", "/api/security/unban", { ip: b.dataset.unban }); ok("Adresse débloquée."); pageSecurity(sub); }));
   H.$("#f2bf") && onSubmit(H.$("#f2bf"), (v) => save({ f2b: v.f2b, whitelist: lines(v.whitelist) }));
   H.$("#numf") && onSubmit(H.$("#numf"), (v) => save({ in_block: parseNums(v.in_block), out_block: parseNums(v.out_block), block_anonymous: v.block_anonymous }));
-  H.$("#rgf") && onSubmit(H.$("#rgf"), (v) => save(v));
-  H.$("#ccf") && onSubmit(H.$("#ccf"), (v) => save({ console_allow: lines(v.console_allow) }));
+  H.$("#rgf") && onSubmit(H.$("#rgf"), (v) => save({ ...v, max_per_hour: Number(v.max_per_hour), max_intl_day: Number(v.max_intl_day), max_user_calls: Number(v.max_user_calls), max_duration: Number(v.max_duration) }));
+  const ccf = H.$("#ccf");
+  if (ccf) {
+    const sync = () => { ccf.querySelector('[data-for="ca"]').hidden = ccf.elements.ca_mode.value !== "list"; ccf.querySelector('[data-for="sa"]').hidden = ccf.elements.sa_mode.value !== "list"; };
+    ccf.addEventListener("change", sync); sync();
+    onSubmit(ccf, (v) => save({ console_allow: v.ca_mode === "list" ? lines(v.console_allow) : [], sip_allow: v.sa_mode === "list" ? lines(v.sip_allow) : [] }));
+  }
   const intf = H.$("#intf");
   if (intf) {
     const count = () => { H.$("#ncount").textContent = intf.querySelectorAll(".cx-cty input:checked").length; };

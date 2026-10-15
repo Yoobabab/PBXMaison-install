@@ -10,7 +10,7 @@ import { spawn, execFile } from "node:child_process";
 import { APP_DIR, CONFIGURE_CMD, VAR, installState, pbxEnv, isConfigured } from "./config.mjs";
 import { UserError, displayName } from "./users.mjs";
 import { validateRule, describeRule, buildOutboundDialplan, rangesText, CID_MODES } from "./outbound.mjs";
-import { defaultSecurity, validateSecurity, buildSecurityDialplan, securityGlobals, ipAllowed, checkIp, COUNTRIES } from "./security.mjs";
+import { defaultSecurity, validateSecurity, buildSecurityDialplan, securityGlobals, sipAcl, ipAllowed, checkIp, COUNTRIES } from "./security.mjs";
 import { defaultShortcodes, validateShortcodes, buildShortcodesDialplan, shortcodesList } from "./shortcodes.mjs";
 import { defaultRecording, validateRecording, recordingGlobals, recordingPath, purgeRecordings, recordingUsage, REC_DIR } from "./recording.mjs";
 import { defaultBackup, validateBackup, publicBackup, backupDue, listBackups, backupPath, uploadBackup, BACKUP_DIR, SCHEDULES, PROTOCOLS } from "./backup.mjs";
@@ -200,6 +200,7 @@ export function createAdminService({ db, ami, pbx }) {
     return {
       globals: [...securityGlobals(sec), ...recordingGlobals(rec, announce)],
       dialplan: buildOutboundDialplan(valid, trunks) + buildSecurityDialplan(sec) + buildShortcodesDialplan(codes),
+      sipAcl: sipAcl(sec),
     };
   }
 
@@ -367,6 +368,23 @@ export function createAdminService({ db, ami, pbx }) {
       const reg = await pbx.registrations();
       state.gateways = gws.filter((g) => g.ports.length).map((g) => ({ id: g.id, name: g.name, online: g.ports.some((p) => (reg.get(p.user) || []).length) }));
     } catch { /* idem */ }
+    // Plafond anti-fraude atteint (noté par Asterisk) + ménage des compteurs de plus de 2 jours
+    try {
+      const out = (await ami.command("database show callikoe_fraud")).join("\n");
+      const m = /\/callikoe_fraud\/last\s*:\s*(\d+)\|([^|\s]*)\|(\S*)/.exec(out);
+      if (m && prev.fraudLast !== undefined && m[1] !== prev.fraudLast) {
+        await logAlert("fraud", `Appel vers ${m[2]} depuis ${m[3] || "?"} refusé : plafond d'appels externes atteint. Vérifie le journal des appels : si ce n'est pas normal, quelqu'un utilise peut-être un compte piraté.`);
+      }
+      state.fraudLast = m ? m[1] : "";
+      if (!prev.rateCleaned || Date.now() - prev.rateCleaned > 6 * 3600_000) {
+        const keep = new Date(Date.now() - 2 * 86400_000).toISOString().slice(0, 10).replace(/-/g, "");
+        for (const l of await ami.command("database show callikoe_rate")) {
+          const k = /\/callikoe_rate\/([hi])(\d{8})(\d{0,2})/.exec(l);
+          if (k && k[2] < keep) await ami.command(`database del callikoe_rate ${k[1]}${k[2]}${k[3]}`);
+        }
+        state.rateCleaned = Date.now();
+      } else state.rateCleaned = prev.rateCleaned;
+    } catch { state.fraudLast = prev.fraudLast; state.rateCleaned = prev.rateCleaned; }
     const lic = await getLicense().catch(() => null);
     state.license_days = lic?.days_left ?? null;
     const last = await db.getSetting("backup_last", null);

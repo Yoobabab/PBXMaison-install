@@ -8,6 +8,7 @@ import { UserError } from "./users.mjs";
 
 /** id → [libellé, gravité, description] */
 export const ALERT_EVENTS = {
+  fraud: ["Plafond anti-fraude atteint", "critical", "Des appels externes ont été refusés parce que le plafond par heure (ou d'appels internationaux par jour) est dépassé : signe possible de piratage."],
   emergency: ["Numéro d'urgence composé", "critical", "Un poste a appelé le 15, 17, 18, 112, 114, 115, 119, 116000, 191, 196 ou 197."],
   trunk_down: ["Trunk désenregistré", "critical", "Un trunk n'est plus enregistré chez l'opérateur depuis plus de 2 minutes : plus d'appels entrants."],
   ip_banned: ["Adresse IP bloquée", "warning", "Une adresse IP a été bloquée après des échecs de connexion répétés (tentative d'intrusion)."],

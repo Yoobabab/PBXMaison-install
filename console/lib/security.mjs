@@ -18,7 +18,7 @@ const COUNTRY = Object.fromEntries(COUNTRIES);
 export function defaultSecurity() {
   return {
     block_premium: true, block_anonymous: false, intl: [], in_block: [], out_block: [],
-    max_user_calls: 2, max_duration: 240, console_allow: [], whitelist: [],
+    max_user_calls: 2, max_duration: 240, max_per_hour: 100, max_intl_day: 20, console_allow: [], whitelist: [], sip_allow: [],
     f2b: { maxretry: 5, findtime: 10, bantime: 60 }, banned: [],
   };
 }
@@ -72,8 +72,10 @@ export function validateSecurity(input, current = defaultSecurity()) {
       .filter((e) => { const key = `${e.number}${e.prefix ? "*" : ""}`; if (seen.has(key)) return false; seen.add(key); return true; }).slice(0, 2000);
   }
   if (input.max_user_calls !== undefined) s.max_user_calls = int(input.max_user_calls, 0, 50, "Appels externes simultanés par utilisateur", "max_user_calls");
+  if (input.max_per_hour !== undefined) s.max_per_hour = int(input.max_per_hour, 0, 10000, "Appels externes par heure (tout le PBX)", "max_per_hour");
+  if (input.max_intl_day !== undefined) s.max_intl_day = int(input.max_intl_day, 0, 10000, "Appels internationaux par jour", "max_intl_day");
   if (input.max_duration !== undefined) s.max_duration = int(input.max_duration, 0, 1440, "Durée maximale d'un appel externe (minutes)", "max_duration");
-  for (const k of ["console_allow", "whitelist"]) {
+  for (const k of ["console_allow", "whitelist", "sip_allow"]) {
     if (input[k] === undefined) continue;
     const list = [];
     for (const raw of (Array.isArray(input[k]) ? input[k] : String(input[k]).split(/[\s,;]+/)).filter((x) => String(x).trim())) {
@@ -110,7 +112,14 @@ export function buildSecurityDialplan(s) {
 export const securityGlobals = (s) => [
   `SEC_BLOCK_PREMIUM = ${s.block_premium ? 1 : 0}`, `SEC_BLOCK_ANON = ${s.block_anonymous ? 1 : 0}`,
   `SEC_MAX_USER_CALLS = ${s.max_user_calls}`, `SEC_MAX_DURATION = ${s.max_duration}`,
+  `SEC_MAX_PER_HOUR = ${s.max_per_hour ?? 100}`, `SEC_MAX_INTL_DAY = ${s.max_intl_day ?? 20}`,
 ];
+
+/** Postes SIP (téléphones, DECT, applis) limités à certains réseaux : valeurs deny / permit des endpoints, ou null. */
+export function sipAcl(s) {
+  const list = (s.sip_allow || []).map((x) => (x.includes("/") ? x : `${x}/32`)).filter((x) => !x.includes(":"));
+  return list.length ? { deny: "0.0.0.0/0.0.0.0", permit: ["127.0.0.1/32", ...list].join(",") } : { deny: null, permit: null };
+}
 
 /** L'IP du visiteur est-elle autorisée sur la console ? (liste vide = tout le monde) */
 export function ipAllowed(ip, allow) {

@@ -108,7 +108,7 @@ PPATH="/${PURL#*://*/}"
 CFG="$(curl -sS "http://127.0.0.1${PPATH}44dbd229fa7b.cfg")"
 echo "$CFG" | grep -q "^account.1.user_name = 201$" && echo "$CFG" | grep -q "^linekey.2.type = 16$" && echo "$CFG" | grep -q "^transfer.dsskey_deal_type = 2$" \
   && pass "Provisioning : 44dbd229fa7b.cfg servi par Nginx (compte, BLF, transfert aveugle)" || { echo "$CFG" | head -20 >> "$OUT"; fail "fichier de provisioning"; }
-echo "$CFG" | grep -q "^phone_setting.backgrounds = Config:wallpaper-800x480.png$" && [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/phone/wallpaper-800x480.png)" == 200 ]] \
+echo "$CFG" | grep -q "^phone_setting.backgrounds = Config:callikoe-v2-800x480.png$" && [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/phone/callikoe-v2-800x480.png)" == 200 ]] \
   && pass "Provisioning : fond d'écran Callikoe (800x480) poussé et servi" || fail "fond d'écran"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1${PPATH}000000000000.cfg")" == 404 ]] && pass "Provisioning : MAC inconnue refusée (404)" || fail "MAC inconnue servie"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1/prov/mauvaisjeton/44dbd229fa7b.cfg")" == 404 ]] && pass "Provisioning : mauvais jeton refusé" || fail "jeton non vérifié"
@@ -256,6 +256,18 @@ echo "$R" | grep -q '"intl":\["32","41"\]' && pass "Sécurité : pays autorisés
 sleep 1
 sudo /usr/sbin/asterisk -rx 'dialplan show intl-allowed' | grep -q "_0041\." && sudo /usr/sbin/asterisk -rx 'dialplan show blocked-in' | grep -q "_0899\." && pass "Sécurité : contextes de blocage chargés dans Asterisk" || fail "contextes sécurité"
 sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep -q 'SEC_MAX_USER_CALLS=3' && pass "Sécurité : limite d'appels par utilisateur appliquée" || { sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep SEC_ >> "$OUT"; fail "globals sécurité"; }
+# Anti-fraude : plafond d'appels externes par heure, renvois limités au national, postes SIP limités à des réseaux
+api PUT /api/security '{"max_per_hour":2}' >/dev/null; sleep 1
+sudo /usr/sbin/asterisk -rx "database deltree callikoe_rate" >/dev/null 2>&1 || true
+for _ in 1 2 3; do sudo /usr/sbin/asterisk -rx "channel originate Local/0612345678@outbound application Wait 1" >/dev/null 2>&1 || true; sleep 2; done
+sleep 3
+sudo /usr/sbin/asterisk -rx "database show callikoe_fraud" | grep -q "0612345678" && pass "Anti-fraude : au-delà du plafond par heure, l'appel est refusé" || { sudo /usr/sbin/asterisk -rx "database show callikoe_rate" >> "$OUT"; fail "plafond anti-fraude"; }
+api PUT /api/security '{"max_per_hour":100}' >/dev/null
+sudo /usr/sbin/asterisk -rx "dialplan show user-external" | grep -q "_0\[1-9\]XXXXXXXX" && pass "Renvois externes : seuls les numéros nationaux sont composables" || fail "renvois externes"
+api PUT /api/security '{"sip_allow":["10.200.0.0/16"]}' >/dev/null; sleep 1
+ACL="$(sudo -u postgres psql -d asterisk -tAc "select deny||' '||permit from ps_endpoints where id='201'")"
+[[ "$ACL" == "0.0.0.0/0.0.0.0 127.0.0.1/32,10.200.0.0/16" ]] && sudo /usr/sbin/asterisk -rx "pjsip show endpoint 201" | grep -q "Endpoint:" && pass "Postes SIP limités aux réseaux autorisés (201 : $ACL)" || { echo "acl : $ACL" >> "$OUT"; fail "restriction des postes SIP"; }
+api PUT /api/security '{"sip_allow":[]}' >/dev/null
 F="$(api GET /api/security)"
 if echo "$F" | grep -q '"f2b":{"ok":true'; then
   api POST /api/security/ban '{"ip":"203.0.113.250"}' | grep -q '"203.0.113.250"' && pass "Sécurité : adresse IP bloquée à la main (fail2ban)" || fail "ban ip"
