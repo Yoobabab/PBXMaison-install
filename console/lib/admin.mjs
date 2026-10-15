@@ -449,6 +449,43 @@ export function createAdminService({ db, ami, pbx }) {
     };
   }
 
+  // ---------------------------------------------------------------- État du système (tableau de bord)
+  const dirSize = (dir) => {
+    let bytes = 0;
+    const walk = (p) => { let l; try { l = fs.readdirSync(p, { withFileTypes: true }); } catch { return; } for (const e of l) { const f = path.join(p, e.name); if (e.isDirectory()) walk(f); else { try { bytes += fs.statSync(f).size; } catch { /* supprimé */ } } } };
+    walk(dir); return bytes;
+  };
+  async function getSystem() {
+    const [b, last, upd, svc, cdr] = await Promise.all([backupSettings(), db.getSetting("backup_last", null), db.getSetting("update_check", null), activeServices(),
+      db.query("SELECT pg_total_relation_size('cdr') AS bytes, count(*)::int AS n, min(calldate) AS oldest FROM cdr").then((r) => r.rows[0]).catch(() => null)]);
+    let disk = null;
+    try { const st = fs.statfsSync(VAR); disk = { total: st.blocks * st.bsize, free: st.bavail * st.bsize }; } catch { /* indisponible */ }
+    const st = installState();
+    return {
+      updates: { current: readVersion(), commit: st.COMMIT || "", checked_at: upd?.checked_at || null, up_to_date: upd?.commit && st.COMMIT ? upd.commit === st.COMMIT : null, available: upd?.version || null },
+      backup: { schedule: b.schedule, hour: b.hour, remote: b.remote.enabled ? b.remote.host : "", last },
+      recordings: recordingUsage(), voicemail: { bytes: dirSize(process.env.PBXM_VM_SPOOL || "/var/spool/asterisk/voicemail") },
+      cdr: cdr ? { bytes: Number(cdr.bytes), calls: cdr.n, oldest: cdr.oldest } : null,
+      disk, services: Object.entries(CRITICAL_SERVICES).map(([id, label]) => ({ id, label, active: svc[id] ?? null })),
+    };
+  }
+  async function firewallCheck() {
+    const r = await runConfigure(["firewall-check"], { timeout: 20_000 });
+    return r.lines[0] || { ok: false, error: "Vérification impossible." };
+  }
+  async function systemAction(action) {
+    const r = await runConfigure([action], { timeout: 120_000 });
+    const done = r.lines.find((l) => l.step === "termine");
+    if (!done) throw sysError(r, "Action impossible");
+    return { ok: true, message: done.message };
+  }
+  async function purgeCdr(days) {
+    const d = Number(days);
+    if (!Number.isInteger(d) || d < 30) throw new UserError("Garde au moins 30 jours de journal.");
+    const r = await db.query("DELETE FROM cdr WHERE calldate < (now() AT TIME ZONE 'UTC') - make_interval(days => $1)", [d]);
+    return { deleted: r.rowCount };
+  }
+
   // ---------------------------------------------------------------- Tâches de fond
   function start() {
     const tick = (fn, ms) => setInterval(() => { if (isConfigured()) fn().catch((e) => console.error(e.message)); }, ms).unref();
@@ -473,6 +510,7 @@ export function createAdminService({ db, ami, pbx }) {
     getUpdates, startUpdate, updateStatus, getLicense,
     getAlerts, setAlerts, clearAlerts, logAlert, monitor,
     listGateways, saveGateway, deleteGateway, gatewaySetup,
+    getSystem, firewallCheck, systemAction, purgeCdr,
   };
 }
 

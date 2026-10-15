@@ -338,6 +338,10 @@ for _ in $(seq 1 30); do sleep 2; api GET /api/backups | grep -q '"running":fals
 BK="$(api GET /api/backups)"
 FILE="$(echo "$BK" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(j.last&&j.last.ok?j.last.file:"")})')"
 [[ -n "$FILE" ]] && sudo tar -xzOf "/var/lib/pbxmaison/backups/$FILE" ./database.sql | grep "pbxmaison_settings" >/dev/null && pass "Sauvegarde : archive créée avec la base de données ($FILE)" || { echo "$BK" | grep -o '"last":{[^}]*}' >> "$OUT"; sudo ls -la /var/lib/pbxmaison/backups >> "$OUT" 2>&1; fail "sauvegarde"; }
+R="$(api GET /api/system)"
+echo "$R" | grep -q '"services":\[' && echo "$R" | grep -q '"cdr":{' && pass "Tableau de bord : état du système (services, sauvegarde, stockage, journal)" || fail "système : $(echo "$R" | cut -c1-200)"
+R="$(api POST /api/system/firewall-check)"
+echo "$R" | grep -q '"label":"SIP (UDP 5060)","proto":"udp","port":"5060","listening":true' && pass "Test du pare-feu : SIP UDP 5060 à l'écoute" || fail "test pare-feu : $(echo "$R" | cut -c1-300)"
 api GET /api/license | grep -q '"key":"' && pass "Licence : informations lisibles" || fail "licence"
 api GET /api/updates/status | grep -q '"running":' && pass "Mises à jour : état lisible (pbx-configure)" || fail "état mise à jour"
 api POST /api/alerts/check '{}' | grep -q '"sending_enabled":false' && pass "Alertes : surveillance active (envoi des e-mails en préparation)" || fail "alertes"

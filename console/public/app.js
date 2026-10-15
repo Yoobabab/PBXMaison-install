@@ -437,13 +437,9 @@ async function renderDashboard() {
         <div><dt>Certificat</dt><dd>${d.network.tls ? '<span class="pill ok">HTTPS + SIP TLS</span>' : '<span class="pill wait">Absent</span> <a href="#/systeme">Obtenir</a>'}</dd></div>
         <div><dt>Licence</dt><dd class="mono">${esc(d.pbx.license)}</dd></div>
       </dl></div>
-      <div class="panel"><div class="ph"><h2>Pour démarrer</h2></div><div class="pad">
-        <ol style="margin:0;padding-left:20px;line-height:2">
-          <li>${d.trunks.total ? "✔ " : ""}<a href="#/trunks/nouveau">Ajouter le trunk de l'opérateur</a></li>
-          <li>${d.extensions.total ? "✔ " : ""}<a href="#/utilisateurs">Créer les postes</a> et les saisir dans les téléphones</li>
-          <li><a href="#/routes">Choisir qui sonne</a> sur les appels entrants et le trunk de sortie</li>
-        </ol></div></div>
+      <div class="panel"><div class="ph"><h2>État du système</h2><button class="btn ghost sm" id="fwtest">Tester le pare-feu</button></div><div id="sysbox"><div class="empty"><span class="spin"></span></div></div></div>
     </div>
+    <div id="fwres"></div>
     <div class="panel" style="margin-top:18px"><div class="ph"><h2>Appels en cours</h2><a href="#/appels" class="s">Plein écran</a></div><div id="dcalls"><div class="empty"><span class="spin"></span></div></div></div>`;
   const drawCalls = async () => {
     if ((location.hash || "#/") !== "#/" || !$("#dcalls")) return clearInterval(timer);
@@ -451,6 +447,46 @@ async function renderDashboard() {
     $("#dcalls").innerHTML = callsTable(c);
   };
   clearInterval(timer); await drawCalls(); timer = setInterval(drawCalls, 3000);
+  drawSystem();
+}
+
+const fmtSize = (n) => n == null ? "—" : n >= 1e9 ? `${(n / 1e9).toFixed(2)} Go` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} Mo` : `${Math.round(n / 1e3)} Ko`;
+async function drawSystem() {
+  const box = $("#sysbox"); if (!box) return;
+  let y; try { y = await api("GET", "/api/system"); } catch (e) { box.innerHTML = `<div class="pad err">${esc(e.message)}</div>`; return; }
+  const disk = y.disk ? `${fmtSize(y.disk.total - y.disk.free)} / ${fmtSize(y.disk.total)}` : "—";
+  const bk = y.backup, last = bk.last;
+  const svcOk = y.services.every((x) => x.active !== false);
+  const row = (label, right, href) => `<div class="sysrow">${href ? `<a href="${href}">${label}</a>` : `<span>${label}</span>`}<span class="sysr">${right}</span></div>`;
+  box.innerHTML = `
+    ${row(y.updates.up_to_date === false ? `Mise à jour disponible : ${esc(y.updates.available)}` : `Version ${esc(y.updates.current)}${y.updates.checked_at ? ` · vérifié ${fmtDate(y.updates.checked_at)}` : ""}`, y.updates.up_to_date === false ? '<span class="pill wait">À installer</span>' : y.updates.up_to_date ? '<span class="pill ok">À jour</span>' : '<span class="pill off">Non vérifié</span>', "#/mises-a-jour")}
+    ${row("Sauvegarde automatique", `${bk.schedule === "off" ? '<span class="pill bad">Désactivée</span>' : '<span class="pill ok">Activée</span>'}${bk.remote ? ` <span class="pill ok">FTP ${esc(bk.remote)}</span>` : ' <span class="pill wait">Sans copie distante</span>'} <span class="pill off">${last ? `${last.ok ? "" : "échec "}${fmtDate(last.at)}` : "jamais"}</span>`, "#/sauvegardes")}
+    ${row("Enregistrements", `<span class="pill off">${fmtSize(y.recordings.bytes)} · ${y.recordings.files} fichier(s)</span>`, "#/enregistrements")}
+    ${row("Messagerie vocale", `<span class="pill off">${fmtSize(y.voicemail.bytes)}</span>`)}
+    ${row("Journal des appels", `<span class="pill off">${y.cdr ? `${y.cdr.calls} lignes · ${fmtSize(y.cdr.bytes)}` : "—"}</span> <button class="btn ghost sm" id="purge">Purger</button>`, "#/journal")}
+    ${row("Disque", `<span class="pill ${y.disk && y.disk.free / y.disk.total < 0.1 ? "bad" : "off"}">${disk}</span>`)}
+    ${row(`Services <span class="s">${y.services.map((x) => `${x.active === false ? "✖" : "✔"} ${esc(x.label)}`).join(" · ")}</span>`, `${svcOk ? '<span class="pill ok">OK</span>' : '<span class="pill bad">Arrêté</span>'} <button class="btn ghost sm" id="rsvc">Redémarrer les services</button>`)}
+    ${row("Serveur", '<button class="btn ghost sm" id="reboot">Redémarrer le serveur</button>')}`;
+  const act = async (b, url, confirmText, body) => {
+    if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.classList.add("danger"); b.textContent = confirmText; setTimeout(() => { if (b.isConnected) { b.dataset.sure = ""; drawSystem(); } }, 5000); return; }
+    b.disabled = true;
+    try { const r = await api("POST", url, body); flash = { text: r.message || (r.deleted !== undefined ? `${r.deleted} ligne(s) supprimée(s).` : "Fait.") }; } catch (e) { flash = { cls: "bad", text: e.message }; }
+    renderDashboard();
+  };
+  $("#rsvc").onclick = (e) => act(e.target, "/api/system/restart-services", "Confirmer (appels en cours coupés)");
+  $("#reboot").onclick = (e) => act(e.target, "/api/system/reboot", "Confirmer le redémarrage (2 min sans téléphone)");
+  $("#purge").onclick = (e) => { e.preventDefault(); act(e.target, "/api/system/purge-cdr", "Supprimer > 1 an ?", { days: 365 }); };
+  $("#fwtest").onclick = async (e) => {
+    e.target.disabled = true; $("#fwres").innerHTML = '<div class="panel pad" style="margin-top:18px"><span class="spin"></span> Vérification…</div>';
+    try {
+      const r = await api("POST", "/api/system/firewall-check");
+      const st = (c) => c.open === false ? '<span class="pill bad">Fermé dans le pare-feu</span>' : c.listening === false ? `<span class="pill ${c.port === "5061" ? "off" : "bad"}">${c.port === "5061" ? "Inutilisé (pas de certificat)" : "Service non démarré"}</span>` : '<span class="pill ok">OK</span>';
+      $("#fwres").innerHTML = `<div class="panel" style="margin-top:18px"><div class="ph"><h2>Test du pare-feu</h2><span class="s">${r.firewall === "none" ? "aucun pare-feu Callikoe détecté" : `pare-feu : ${esc(r.firewall)}`}</span></div>
+        ${(r.checks || []).map((c) => `<div class="sysrow"><span>${esc(c.label)}</span><span class="sysr">${st(c)}</span></div>`).join("") || `<div class="pad err">${esc(r.error || "")}</div>`}
+        <div class="pad hint">Vérification faite sur le serveur : ports ouverts et services à l'écoute. Si le PBX est derrière une box, vérifie aussi les redirections de ports sur la box (UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80/443).</div></div>`;
+    } catch (err) { $("#fwres").innerHTML = `<div class="flash bad" style="margin-top:18px">${esc(err.message)}</div>`; }
+    e.target.disabled = false;
+  };
 }
 
 function callsTable(d) {

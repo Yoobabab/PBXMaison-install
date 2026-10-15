@@ -434,8 +434,35 @@ cmd_update_status() {
     process.stdout.write(JSON.stringify({ running: process.env.UPD_ACTIVE === "1", done: !!end, ok: end ? end === "FIN code=0" : null, log: lines.slice(-60) }) + "\n");' "$UPD_LOG"
 }
 
+# ----------------------------------------------------------------------------- Système (tableau de bord)
+cmd_firewall_check() {
+  # Vérification locale : services à l'écoute + ports ouverts dans le pare-feu (nftables ou ufw)
+  local ruleset="" fw="none"
+  if command -v nft >/dev/null && nft list ruleset 2>/dev/null | grep -q "table inet pbxmaison"; then fw="nftables"; ruleset="$(nft list ruleset 2>/dev/null)"
+  elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then fw="ufw"; ruleset="$(ufw status 2>/dev/null)"; fi
+  FW="$fw" RULES="$ruleset" LISTEN="$(ss -H -lntu 2>/dev/null)" node -e '
+    const listen = process.env.LISTEN || "", rules = process.env.RULES || "", fw = process.env.FW;
+    const isListening = (proto, port) => listen.split("\n").some((l) => { const f = l.trim().split(/\s+/); return f[0] === proto && new RegExp(`:${port}$`).test(f[4] || ""); });
+    const opened = (proto, port) => fw === "none" ? null : fw === "ufw" ? new RegExp(`(^|\\s)${port}(:\\d+)?(/${proto})?\\s+ALLOW`, "m").test(rules) || new RegExp(`${port.split("-")[0]}:\\d+/${proto}`).test(rules)
+      : new RegExp(`${proto} dport \\{?[^\\n]*\\b${port.split("-")[0]}\\b`).test(rules);
+    const checks = [["SIP (UDP 5060)", "udp", "5060"], ["SIP (TCP 5060)", "tcp", "5060"], ["SIP chiffré TLS (TCP 5061)", "tcp", "5061"],
+      ["Audio RTP (UDP 10000-20000)", "udp", "10000-20000"], ["Console web HTTP (TCP 80)", "tcp", "80"], ["Console web et softphone HTTPS (TCP 443)", "tcp", "443"]];
+    const out = checks.map(([label, proto, port]) => ({ label, proto, port, listening: port.includes("-") ? null : isListening(proto, port), open: opened(proto, port) }));
+    process.stdout.write(JSON.stringify({ ok: true, firewall: fw, checks: out }) + "\n");'
+}
+
 case "${1:-}" in
   apply) shift; cmd_apply "$@" ;;
+  firewall-check) cmd_firewall_check ;;
+  restart-services)
+    systemctl restart asterisk && json services ok "Moteur téléphonique redémarré"
+    systemctl restart fail2ban 2>/dev/null || true
+    systemctl reload nginx 2>/dev/null || true
+    systemd-run --on-active=2 --unit="pbxmaison-restart-$$" systemctl restart pbxmaison-console >/dev/null 2>&1 || true
+    json termine ok "Services redémarrés : la console revient dans quelques secondes" ;;
+  reboot)
+    systemd-run --on-active=5 --unit="pbxmaison-reboot-$$" systemctl reboot >/dev/null 2>&1
+    json termine ok "Redémarrage du serveur dans 5 secondes" ;;
   f2b) shift; cmd_f2b "$@" ;;
   backup) shift; cmd_backup "$@" ;;
   restore) shift; cmd_restore "$@" ;;

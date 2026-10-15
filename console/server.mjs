@@ -676,6 +676,11 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/updates", { preHandler: requireUser }, async (req) => admin.getUpdates({ check: req.query?.check === "1" }));
   app.post("/api/updates/start", { preHandler: requireFreshMfa }, async () => admin.startUpdate());
   app.get("/api/updates/status", { preHandler: requireUser }, async () => admin.updateStatus());
+  app.get("/api/system", { preHandler: requireUser }, async () => admin.getSystem());
+  app.post("/api/system/firewall-check", { preHandler: requireUser }, async () => admin.firewallCheck());
+  app.post("/api/system/restart-services", { preHandler: requireAdmin }, async () => admin.systemAction("restart-services"));
+  app.post("/api/system/reboot", { preHandler: requireAdmin }, async () => admin.systemAction("reboot"));
+  app.post("/api/system/purge-cdr", { preHandler: requireFreshMfa }, async (req) => admin.purgeCdr(req.body?.days));
   app.get("/api/license", { preHandler: requireUser }, async () => admin.getLicense());
 
   // ---------------------------------------------------------------- Alertes

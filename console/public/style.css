@@ -549,3 +549,9 @@ body.no-side .shell{margin-left:0}
 .mfa-card h2{font-size:18px;margin:0 0 6px}
 .mfa-card input{font-size:22px;letter-spacing:.3em;text-align:center;margin:10px 0 4px}
 .mfa-card .actions{border:0;padding-top:10px}
+
+.sysrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
+.sysrow:first-child{border-top:0}
+.sysrow a{color:var(--ink);font-weight:500;text-decoration:none}
+.sysrow a:hover{color:var(--accent)}
+.sysr{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
