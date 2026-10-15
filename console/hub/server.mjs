@@ -386,7 +386,9 @@ export async function buildApp({ db } = {}) {
     ssoKey ||= fs.readFileSync(path.join(ETC, "sso-key.pem"), "utf8");
     const ticket = signTicket(ssoKey, { aud: t.slug, email: req.email, role: req.role });
     await audit(req, `Ouverture du PBX ${t.slug}`);
-    const tls = fs.existsSync(`/etc/letsencrypt/live/${t.fqdn}/fullchain.pem`);
+    // Certificat du PBX (dossier lisible par root seulement : état fourni par callikoe-host). Toujours la console d'administration (port 8822).
+    const st = (await etat())?.pbx?.find((x) => x.slug === t.slug);
+    const tls = st ? !!st.tls : fs.existsSync(`/etc/letsencrypt/live/${t.fqdn}/fullchain.pem`);
     const base = process.env.HUB_PBX_URL_TEMPLATE ? process.env.HUB_PBX_URL_TEMPLATE.replace("{fqdn}", t.fqdn) : tls ? `https://${t.fqdn}:8822` : `http://${t.fqdn}`;
     const page = /^[a-z-]{2,30}$/.test(String(req.query?.page || "")) ? `&page=${req.query.page}` : "";
     return reply.redirect(`${base}/api/sso?t=${encodeURIComponent(ticket)}${page}`);

@@ -611,7 +611,7 @@ cmd_etat() {
       const fs=require("fs");const [reg,slug,env,eng,con,calls,ph,phon,tr,trok]=process.argv.slice(1);
       const t=(JSON.parse(fs.readFileSync(reg,"utf8")).tenants||[]).find(x=>x.slug===slug)||{};
       const e={};try{for(const l of fs.readFileSync(env,"utf8").split("\n")){const m=/^([A-Z_]+)=\x27?(.*?)\x27?$/.exec(l);if(m)e[m[1]]=m[2]}}catch{}
-      process.stdout.write(JSON.stringify({slug,n:t.n,name:t.name||e.PBX_NAME||slug,company:e.PBX_COMPANY||"",fqdn:t.fqdn,created_at:t.created_at,
+      process.stdout.write(JSON.stringify({slug,n:t.n,name:t.name||e.PBX_NAME||slug,company:e.PBX_COMPANY||"",fqdn:t.fqdn,created_at:t.created_at,tls:fs.existsSync(`/etc/letsencrypt/live/${t.fqdn}/fullchain.pem`),
         suspended:!!t.suspended,engine:eng,console:con,calls:Number(calls)||0,max_calls:Number(e.PBX_MAX_CALLS)||0,edition:e.PBX_EDITION||"",
         expires_at:e.PBX_LICENSE_EXPIRES||null,license:e.PBX_LICENSE_KEY||"",phones:Number(ph)||0,phones_online:Number(phon)||0,trunks:Number(tr)||0,trunks_ok:Number(trok)||0}))' \
       "$REG" "$slug" "$env" "$eng" "$con" "${calls:-0}" "$ph" "$phon" "$tr" "$trok"
