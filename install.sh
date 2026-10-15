@@ -67,7 +67,7 @@ if [[ ! -x /usr/bin/node ]] || [[ "$(/usr/bin/node -p 'process.versions.node.spl
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
   apt-get update -q >/dev/null
 fi
-apt_install nodejs postgresql unixodbc odbc-postgresql alembic python3-alembic python3-psycopg2 nginx certbot fail2ban
+apt_install nodejs postgresql unixodbc odbc-postgresql alembic python3-alembic python3-psycopg2 nginx certbot fail2ban python3-systemd
 [[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" -ge $NODE_MAJOR ]] || die "Node.js ${NODE_MAJOR} n'a pas pu être installé ($(/usr/bin/node -v))."
 systemctl enable --now nginx >/dev/null 2>&1 || true
 ok "Node.js $(/usr/bin/node -v), PostgreSQL, Nginx, Certbot, fail2ban"
@@ -325,7 +325,7 @@ EOF
   ok "Pare-feu actif (SSH port ${SSH_PORTS}, SIP, audio, web ; le reste est bloqué)"
 fi
 # Réglages gardés d'une installation à l'autre (modifiables dans la console : Sécurité)
-if ! grep -q "callikoe-manual" /etc/fail2ban/jail.d/pbxmaison.conf 2>/dev/null; then
+if ! grep -q "sshd" /etc/fail2ban/jail.d/pbxmaison.conf 2>/dev/null; then
   "$APP/pbx/bin/pbx-configure" f2b settings 5 10 60 "" >/dev/null || warn "Réglages fail2ban non écrits"
 fi
 touch /var/log/asterisk/security /var/log/asterisk/messages

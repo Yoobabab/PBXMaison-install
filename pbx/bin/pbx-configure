@@ -308,6 +308,11 @@ bantime  = $3m
 banaction = %(banaction_allports)s
 ignoreip = ${ignore}
 
+# SSH : lu dans le journal systemd (Debian 12 n'a pas /var/log/auth.log : sans ça fail2ban ne démarre pas)
+[sshd]
+enabled  = true
+backend  = systemd
+
 # Adresses bloquées à la main depuis la console : blocage permanent
 [callikoe-manual]
 enabled  = true
