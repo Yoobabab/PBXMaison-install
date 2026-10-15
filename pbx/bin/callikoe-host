@@ -187,18 +187,14 @@ EOF
   ok "Serveur web prêt"
 
   # fail2ban : les échecs d'authentification sont notés par l'aiguilleur avec l'adresse réelle du poste
-  cat > /etc/fail2ban/filter.d/callikoe-sip.conf <<'EOF'
-[Definition]
-failregex = CALLIKOE-AUTHFAIL <HOST>
-            CALLIKOE-FLOOD <HOST>$
-            CALLIKOE-UNKNOWN <HOST>
-ignoreregex =
-EOF
+  # Échecs de mot de passe et rafales : bannis vite. Adresse de PBX inconnue (souvent un ancien téléphone resté configuré) : bien plus tolérant.
+  # Ces deux règles ne bloquent que le SIP (5060/5061) : SSH, le web et les consoles restent joignables.
+  printf '[Definition]\nfailregex = CALLIKOE-AUTHFAIL <HOST>\n            CALLIKOE-FLOOD <HOST>$\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-sip.conf
+  printf '[Definition]\nfailregex = CALLIKOE-UNKNOWN <HOST>\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-sip-unknown.conf
   printf '[Definition]\nfailregex = ^CALLIKOE-NEVER-MATCH <HOST>$\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-manual.conf
   touch /var/log/pbxmaison-manual-ban.log
-  if [[ ! -f /etc/fail2ban/jail.d/callikoe.conf ]]; then
-    cat > /etc/fail2ban/jail.d/callikoe.conf <<'EOF'
-# Callikoe — serveur multi-tenant
+  cat > /etc/fail2ban/jail.d/callikoe.conf <<'EOF'
+# Callikoe — serveur multi-tenant (réécrit par callikoe-host à chaque mise à jour)
 [callikoe-sip]
 enabled  = true
 backend  = systemd
@@ -207,7 +203,22 @@ filter   = callikoe-sip
 maxretry = 5
 findtime = 10m
 bantime  = 60m
-banaction = %(banaction_allports)s
+port     = 5060,5061
+action   = %(banaction)s[name=callikoe-sip-udp, port="5060,5061", protocol="udp"]
+           %(banaction)s[name=callikoe-sip-tcp, port="5060,5061", protocol="tcp"]
+ignoreip = 127.0.0.1/8 ::1
+
+[callikoe-sip-unknown]
+enabled  = true
+backend  = systemd
+journalmatch = _SYSTEMD_UNIT=kamailio.service
+filter   = callikoe-sip-unknown
+maxretry = 40
+findtime = 10m
+bantime  = 30m
+port     = 5060,5061
+action   = %(banaction)s[name=callikoe-unk-udp, port="5060,5061", protocol="udp"]
+           %(banaction)s[name=callikoe-unk-tcp, port="5060,5061", protocol="tcp"]
 ignoreip = 127.0.0.1/8 ::1
 
 [sshd]
@@ -224,7 +235,6 @@ bantime  = -1
 banaction = %(banaction_allports)s
 ignoreip = 127.0.0.1/8 ::1
 EOF
-  fi
   systemctl restart fail2ban >/dev/null 2>&1 || warn "fail2ban n'a pas redémarré (journalctl -u fail2ban)"
   ok "Protection anti-intrusion sur l'aiguilleur SIP"
   hub_init

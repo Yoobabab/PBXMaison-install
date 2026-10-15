@@ -37,6 +37,8 @@ sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_TRUSTED_KEY_FILE="$PWD/test-key.pem" 
 pass "install.sh --multi-tenant --serveur terminé en $(( SECONDS - T0 )) s"
 grep -q "Première connexion" install.out && pass "Lien de première connexion à la console du serveur affiché" || { tail -n 15 install.out >> "$OUT"; fail "lien de la console du serveur absent"; }
 sudo systemctl is-active --quiet kamailio && pass "Aiguilleur SIP (Kamailio) actif sur ${IP}:5060" || fail "kamailio arrêté"
+sudo fail2ban-client status callikoe-sip >/dev/null 2>&1 && sudo fail2ban-client status callikoe-sip-unknown >/dev/null 2>&1 \
+  && pass "Anti-intrusion SIP actif (bannit seulement le SIP : SSH et web restent joignables)" || { sudo journalctl -u fail2ban -n 15 --no-pager | cut -c1-200 >> "$OUT"; fail "jails fail2ban"; }
 sudo systemctl is-active --quiet callikoe-hub && pass "Console du serveur active" || { sudo journalctl -u callikoe-hub -n 20 --no-pager | cut -c1-200 >> "$OUT"; fail "console du serveur arrêtée"; }
 sudo systemctl is-active --quiet asterisk 2>/dev/null && fail "un Asterisk « mono-PBX » tourne aussi" || pass "Pas d'Asterisk global : un moteur par client"
 
