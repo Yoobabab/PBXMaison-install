@@ -334,10 +334,11 @@ glob() { labx "$1" "dialplan show globals" | sed -nE "s/^\s*$2=(.*)$/\1/p" | hea
 reset() { labx pa "dialplan set global RANG none" >/dev/null; labx pb "dialplan set global RANG none" >/dev/null; labx op "dialplan set global LASTOUT none" >/dev/null; }
 
 # 5. Appels entrants : opérateur → trunk de A → poste 201 de A (et pas celui de B)
-sudo timeout 9 tcpdump -i any -nn -q "udp and dst host 127.0.0.11 and dst portrange 31000-31099" 2>/dev/null > "$LAB/rtp-a.txt" &
+sudo timeout 9 tcpdump -i any -nn -q "udp and (portrange 10000-10399 or portrange 30000-30099 or portrange 31000-31199)" 2>/dev/null > "$LAB/rtp-all.txt" &
 reset; labx op "channel originate PJSIP/accta extension s@play" >/dev/null; sleep 9.5
 [[ "$(glob pa RANG)" == 201 && "$(glob pb RANG)" == none ]] && pass "Entrant sur le trunk de cli a → poste 201 de cli a uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clia; fail "entrant A"; }
-NRTP="$(grep -c . "$LAB/rtp-a.txt" || true)"
+NRTP="$(grep -cE '> 127\.0\.0\.11\.31[0-9]{3}:' "$LAB/rtp-all.txt" || true)"
+{ echo "== RTP pendant l'appel entrant A (flux : nombre de paquets)"; awk '{print $5, $6, $7}' "$LAB/rtp-all.txt" | sort | uniq -c | sort -rn | head -20; } >> "$PWD/multi-diag.txt" 2>/dev/null || true
 (( NRTP > 50 )) && pass "Son de l'opérateur reçu par le poste de cli a (${NRTP} paquets RTP, directs, sans passer par l'aiguilleur)" || { echo "   (RTP vers le poste A : ${NRTP} paquets ; compteur du poste : $(glob pa RTPRX))" >> "$OUT"; fail "son entrant"; }
 reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null; sleep 9
 [[ "$(glob pb RANG)" == 201 && "$(glob pa RANG)" == none ]] && pass "Entrant sur le trunk de cli b → poste 201 de cli b uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; fail "entrant B"; }
