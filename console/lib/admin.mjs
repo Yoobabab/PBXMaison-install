@@ -6,6 +6,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import dns from "node:dns/promises";
+import { sipPorts } from "./sipports.mjs";
 import { spawn, execFile } from "node:child_process";
 import { APP_DIR, CONFIGURE_CMD, VAR, installState, pbxEnv, isConfigured } from "./config.mjs";
 import { UserError, displayName } from "./users.mjs";
@@ -319,6 +321,51 @@ export function createAdminService({ db, ami, pbx }) {
     };
   }
 
+  // ---------------------------------------------------------------- Port SIP (5060 ou 5160, avec transition)
+  /** État : port actuel, transition en cours, appareils et trunks encore vus sur l'ancien port. */
+  async function getSipPort() {
+    const sp = sipPorts();
+    const st = (await runConfigure(["sip-port", "status"], { timeout: 60_000 })).lines[0] || {};
+    const legacy = [];
+    if (sp.both) {
+      const [phones, trunks] = await Promise.all([pbx.listPhones().catch(() => []), pbx.listTrunks().catch(() => [])]);
+      const trunkIps = new Map();
+      for (const t of trunks) for (const h of [t.host, (t.proxy || "").split(":")[0]].filter(Boolean)) {
+        try { for (const a of await dns.lookup(h, { all: true })) trunkIps.set(a.address, t.id); } catch { /* nom introuvable */ }
+      }
+      const seen = new Set();
+      for (const c of st.legacy || []) {
+        const key = `${c.ip}:${c.port}`; if (seen.has(key)) continue; seen.add(key);
+        const ph = phones.find((x) => x.source_ip === c.ip && String(x.source_port || "") === String(c.port)) || phones.find((x) => x.source_ip === c.ip);
+        legacy.push({ ip: c.ip, port: c.port, proto: c.proto, to: c.to,
+          who: ph ? { kind: "user", id: ph.user.id, name: ph.user.name, model: ph.model } : trunkIps.has(c.ip) ? { kind: "trunk", id: trunkIps.get(c.ip) } : null });
+      }
+      // Postes enregistrés par l'ancien port (paramètre x-ast-txp=transport-…-legacy des contacts)
+      let contacts = "";
+      try { contacts = await ami.command("pjsip show contacts"); } catch { /* moteur en redémarrage */ }
+      for (const m of String(contacts).matchAll(/Contact:\s+([\w-]+)\/sip:[^@\s]*@([\d.]+):(\d+)\S*x-ast-txp=transport-(\w+)-legacy/g)) {
+        const [, ep, ip, port, proto] = m;
+        if (legacy.some((x) => x.ip === ip && String(x.port) === port)) continue;
+        const id = ep.replace(/-web$/, ""), ph = phones.find((x) => x.user.id === id);
+        legacy.push({ ip, port: Number(port), proto, to: sp.other, who: { kind: "user", id, name: ph?.user.name || "", model: ph?.model || "" } });
+      }
+    }
+    return { port: sp.port, tls: sp.tls, both: sp.both, other: sp.other, listening: st.listening || [], legacy };
+  }
+  /** start : passage en 5160 (les deux ports ouverts) · finish : fermeture de l'ancien port · revert : retour vers 5060 (les deux ouverts) */
+  async function setSipPort(action) {
+    const sp = sipPorts();
+    const [port, both] = action === "start" ? [5160, 1] : action === "revert" ? [5060, sp.port === 5060 && !sp.both ? 0 : 1] : action === "finish" ? [sp.port, 0] : [null, null];
+    if (!port) throw new UserError("Action inconnue.");
+    const r = await runConfigure(["sip-port", "set", String(port), String(both)], { timeout: 150_000 });
+    const res = r.lines[0];
+    if (!res?.ok) throw new UserError(res?.error || sysError(r, "Changement de port impossible").message);
+    // Les téléphones provisionnés récupèrent le nouveau port tout de suite (fichier régénéré + demande de resynchronisation)
+    let sent = 0;
+    if (res.restarted) { await new Promise((ok) => setTimeout(ok, 3000)); try { sent = (await pbx.resyncAll()).sent; } catch { /* AMI pas encore prêt */ } }
+    return { ...(await getSipPort()), restarted: !!res.restarted, resynced: sent };
+  }
+
   // ---------------------------------------------------------------- Capture réseau (pcap pour Wireshark)
   const CAP_DIR = path.join(VAR, "captures");
   const capPath = (name) => /^capture-\d{8}-\d{6}-(sip|all)\.pcap$/.test(String(name || "")) ? path.join(CAP_DIR, name) : null;
@@ -489,7 +536,7 @@ export function createAdminService({ db, ami, pbx }) {
     return {
       gateway: { id: g.id, name: g.name, model: m?.label, mac: g.mac }, admin_password: g.admin_password,
       provisioning: text ? { url: await pbx.provisioningUrl(server), file: m.prov === "gs-ht" ? `cfg${g.mac || "<mac>"}.xml` : m.prov === "snom-dect" ? `${g.mac || "<mac>"}.xml` : `${g.mac || "<mac>"}.cfg`, beta: m.status === "beta" } : null,
-      guide: manualGuide(g, { host: server.host }), server: server.host,
+      guide: manualGuide(g, { host: server.host, port: sipPorts().port }), server: server.host, sip_port: sipPorts().port,
       accounts: accounts.map((a) => ({ port: a.index, user: a.user, name: a.name, auth_id: a.auth_id, password: a.password })),
       text,
     };
@@ -553,7 +600,7 @@ export function createAdminService({ db, ami, pbx }) {
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,
     getShortcodes, setShortcodes, pollStatusCodes,
     getBackups, setBackups, runBackup, testRemote, restoreBackup, restoreStatus, stageUpload,
-    getUpdates, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, deleteCapture,
+    getUpdates, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, deleteCapture, getSipPort, setSipPort,
     getAlerts, setAlerts, clearAlerts, logAlert, monitor,
     listGateways, saveGateway, deleteGateway, gatewaySetup,
     getSystem, firewallCheck, systemAction, purgeCdr,

@@ -182,6 +182,54 @@ dns_register() {
     if(r.ok){console.log(r.ip);process.exit(0)}console.log(r.error||"erreur");process.exit(1)' "$out"
 }
 
+# Port SIP : 5060 (par défaut) ou 5160 ; SIP_BOTH=1 pendant une transition (les deux ports ouverts)
+SIP_PORT=5060; SIP_BOTH=0
+[[ -f "$ETC/sip-ports" ]] && . "$ETC/sip-ports"
+[[ "$SIP_PORT" == 5160 ]] || SIP_PORT=5060
+SIP_TLS_PORT=$((SIP_PORT + 1)); SIP_OTHER=$((SIP_PORT == 5160 ? 5060 : 5160))
+export SIP_PORT SIP_BOTH
+
+# Transport SIP TLS (port 5061 ou 5161 ; l'autre aussi pendant une transition), si le certificat existe
+write_tls_transport() {
+  [[ -f /etc/asterisk/keys/fullchain.pem ]] || { rm -f /etc/asterisk/pjsip_tls.conf; return 0; }
+  local ports="$SIP_TLS_PORT" name="transport-tls" p
+  ((SIP_BOTH == 1)) && ports="$SIP_TLS_PORT $((SIP_OTHER + 1))"
+  : > /etc/asterisk/pjsip_tls.conf
+  for p in $ports; do
+    cat >> /etc/asterisk/pjsip_tls.conf <<EOF
+[${name}]
+type = transport
+protocol = tls
+bind = 0.0.0.0:${p}
+cert_file = /etc/asterisk/keys/fullchain.pem
+priv_key_file = /etc/asterisk/keys/privkey.pem
+method = tlsv1_2
+symmetric_transport = yes
+external_media_address = ${PUBLIC_IP}
+external_signaling_address = ${PUBLIC_IP}
+
+EOF
+    name="transport-tls-legacy"
+  done
+  chown asterisk:asterisk /etc/asterisk/pjsip_tls.conf
+}
+
+# Pare-feu : ouvre les ports SIP utilisés (et ferme les autres une fois la transition terminée)
+fw_sip_ports() {
+  local udp="$SIP_PORT" tcp="$SIP_PORT, $SIP_TLS_PORT"
+  ((SIP_BOTH == 1)) && { udp="5060, 5160"; tcp="5060, 5061, 5160, 5161"; }
+  if [[ -f /etc/nftables.conf ]] && grep -q 'comment "SIP UDP"' /etc/nftables.conf; then
+    sed -i -E "s/^( *)udp dport .* accept comment \"SIP UDP\"/\1udp dport { ${udp} } accept comment \"SIP UDP\"/; s/^( *)tcp dport .* accept comment \"SIP TCP\/TLS\"/\1tcp dport { ${tcp} } accept comment \"SIP TCP\/TLS\"/" /etc/nftables.conf
+    nft -c -f /etc/nftables.conf && nft -f /etc/nftables.conf
+  elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    local p
+    for p in 5060 5160; do
+      if [[ "$p" == "$SIP_PORT" ]] || ((SIP_BOTH == 1)); then ufw allow "$p/udp" >/dev/null; ufw allow "$p:$((p + 1))/tcp" >/dev/null
+      else ufw delete allow "$p/udp" >/dev/null 2>&1 || true; ufw delete allow "$p:$((p + 1))/tcp" >/dev/null 2>&1 || true; fi
+    done
+  fi
+}
+
 # Écrit /etc/asterisk à partir des modèles (variables de pbx.env, secrets.env, install.state)
 render_asterisk() {
   install -d -o asterisk -g asterisk -m 0750 /etc/asterisk /etc/asterisk/keys
@@ -192,6 +240,7 @@ render_asterisk() {
   cp /usr/share/asterisk/musiconhold.conf.sample /etc/asterisk/musiconhold.conf
   # Musiques d'attente des files (console : Gestion d'appels › Files d'attente)
   printf '\n#tryinclude /var/lib/pbxmaison/musiconhold_callikoe.conf\n' >> /etc/asterisk/musiconhold.conf
+  write_tls_transport
   chown -R asterisk:asterisk /etc/asterisk
 }
 
@@ -254,20 +303,9 @@ EOF
       chmod 755 /etc/letsencrypt/renewal-hooks/deploy/pbxmaison
       install -o asterisk -g asterisk -m 0640 "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" /etc/asterisk/keys/fullchain.pem
       install -o asterisk -g asterisk -m 0600 "/etc/letsencrypt/live/${PBX_FQDN}/privkey.pem" /etc/asterisk/keys/privkey.pem
-      cat > /etc/asterisk/pjsip_tls.conf <<EOF
-[transport-tls]
-type = transport
-protocol = tls
-bind = 0.0.0.0:5061
-cert_file = /etc/asterisk/keys/fullchain.pem
-priv_key_file = /etc/asterisk/keys/privkey.pem
-method = tlsv1_2
-external_media_address = ${PUBLIC_IP}
-external_signaling_address = ${PUBLIC_IP}
-EOF
-      chown asterisk:asterisk /etc/asterisk/pjsip_tls.conf
+      write_tls_transport
       tls=1
-      json certificat ok "Certificat obtenu : https://${PBX_FQDN}:${ADMIN_PORT} (console) et SIP TLS (5061)"
+      json certificat ok "Certificat obtenu : https://${PBX_FQDN}:${ADMIN_PORT} (console) et SIP TLS (${SIP_TLS_PORT})"
     else
       json certificat warn "Certificat refusé par Let's Encrypt : le port 80 doit être joignable depuis Internet. Relance l'assistant une fois corrigé."
     fi
@@ -445,6 +483,48 @@ cmd_update() {
     "set -o pipefail; curl -fsSL https://raw.githubusercontent.com/${repo}/${ref}/install.sh | bash >> $UPD_LOG 2>&1; echo \"FIN code=\$?\" >> $UPD_LOG" >/dev/null
   echo '{"ok":true,"running":true}'
 }
+# Port SIP (console : Sécurité › Port SIP) : set <5060|5160> <0|1 transition> · status (appareils encore sur l'ancien port)
+cmd_sip_port() {
+  case "${1:-status}" in
+    set)
+      local port="${2:-}" both="${3:-0}" i
+      [[ "$port" == 5060 || "$port" == 5160 ]] && [[ "$both" == 0 || "$both" == 1 ]] || { echo '{"ok":false,"error":"Réglage invalide."}'; exit 1; }
+      printf 'SIP_PORT=%s\nSIP_BOTH=%s\n' "$port" "$both" > "$ETC/sip-ports.new"; chmod 644 "$ETC/sip-ports.new"; mv "$ETC/sip-ports.new" "$ETC/sip-ports"
+      SIP_PORT="$port"; SIP_BOTH="$both"; SIP_TLS_PORT=$((SIP_PORT + 1)); SIP_OTHER=$((SIP_PORT == 5160 ? 5060 : 5160)); export SIP_PORT SIP_BOTH
+      set -a; . "$ETC/pbx.env"; set +a
+      render_asterisk >/dev/null
+      fw_sip_ports >/dev/null 2>&1 || true
+      # Les ports SIP ne changent qu'au redémarrage du moteur : il attend la fin des appels en cours
+      local up0 up
+      up0="$(/usr/sbin/asterisk -rx "core show uptime seconds" 2>/dev/null | awk '/System uptime/ {print $3}')"; up0="${up0:-999999999}"
+      /usr/sbin/asterisk -rx "core restart when convenient" >/dev/null 2>&1 || systemctl restart asterisk
+      for i in $(seq 1 45); do
+        sleep 2
+        up="$(/usr/sbin/asterisk -rx "core show uptime seconds" 2>/dev/null | awk '/System uptime/ {print $3}')" || true
+        [[ -n "$up" ]] && ((up < up0)) || continue
+        if /usr/sbin/asterisk -rx "pjsip show transports" 2>/dev/null | grep -q "0.0.0.0:${SIP_PORT}\b" \
+          && { ((SIP_BOTH == 0)) || /usr/sbin/asterisk -rx "pjsip show transports" 2>/dev/null | grep -q "0.0.0.0:${SIP_OTHER}\b"; } \
+          && ! { ((SIP_BOTH == 0)) && /usr/sbin/asterisk -rx "pjsip show transports" 2>/dev/null | grep -q "0.0.0.0:${SIP_OTHER}\b"; }; then
+          echo "{\"ok\":true,\"restarted\":true,\"port\":${SIP_PORT},\"both\":${SIP_BOTH}}"; return 0
+        fi
+      done
+      echo "{\"ok\":true,\"restarted\":false,\"port\":${SIP_PORT},\"both\":${SIP_BOTH}}" ;;
+    status)
+      local live="" legacy=""
+      live="$(/usr/sbin/asterisk -rx "pjsip show transports" 2>/dev/null | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | sort -u | paste -sd, -)" || true
+      if ((SIP_BOTH == 1)); then
+        command -v conntrack >/dev/null || apt-get install -y -q --no-install-recommends conntrack >/dev/null 2>&1 || true
+        if command -v conntrack >/dev/null; then
+          legacy="$( { conntrack -L -p udp --dport "$SIP_OTHER" 2>/dev/null; conntrack -L -p tcp --dport "$SIP_OTHER" 2>/dev/null; conntrack -L -p tcp --dport "$((SIP_OTHER + 1))" 2>/dev/null; } \
+            | awk -v me1="${PUBLIC_IP:-}" -v me2="${LOCAL_IP:-}" '{ proto=$1; src=""; sp=""; dp=""; for (i=1;i<=NF;i++) { if ($i ~ /^src=/ && src=="") src=substr($i,5); if ($i ~ /^sport=/ && sp=="") sp=substr($i,7); if ($i ~ /^dport=/ && dp=="") dp=substr($i,7) }
+                    if (src != "" && src != me1 && src != me2 && src != "127.0.0.1") printf "%s{\"proto\":\"%s\",\"ip\":\"%s\",\"port\":%s,\"to\":%s}", (n++ ? "," : ""), proto, src, sp, dp }')" || true
+        fi
+      fi
+      echo "{\"port\":${SIP_PORT},\"both\":${SIP_BOTH},\"listening\":[${live}],\"legacy\":[${legacy}]}" ;;
+    *) echo '{"ok":false,"error":"Action inconnue."}'; exit 1 ;;
+  esac
+}
+
 # Capture réseau des appels (SIP + audio RTP) au format pcap, lisible dans Wireshark
 CAPDIR="$VAR/captures"
 cmd_capture() {
@@ -455,8 +535,8 @@ cmd_capture() {
       [[ "$secs" =~ ^[0-9]+$ ]] && ((secs >= 5 && secs <= 600)) || { echo '{"ok":false,"error":"Durée : entre 5 et 600 secondes."}'; exit 1; }
       pgrep -f "tcpdump.*$CAPDIR" >/dev/null && { echo '{"ok":false,"error":"Une capture est déjà en cours."}'; exit 1; }
       command -v tcpdump >/dev/null || apt-get install -y -q --no-install-recommends tcpdump >/dev/null 2>&1 || { echo '{"ok":false,"error":"tcpdump introuvable."}'; exit 1; }
-      filter="port 5060 or port 5061"
-      [[ "$mode" == all ]] && filter="port 5060 or port 5061 or (udp portrange 10000-20000)"
+      filter="port 5060 or port 5061 or port 5160 or port 5161"
+      [[ "$mode" == all ]] && filter="$filter or (udp portrange 10000-20000)"
       name="capture-$(date +%Y%m%d-%H%M%S)-${mode}.pcap"
       # Détachée : la console récupère la main tout de suite ; fichier rendu lisible par la console à la fin
       setsid bash -c "timeout $secs tcpdump -i any -n -s 0 -c 500000 -Z root -w '$CAPDIR/$name' $filter >/dev/null 2>&1; chown pbxmaison:pbxmaison '$CAPDIR/$name'; chmod 640 '$CAPDIR/$name'" </dev/null >/dev/null 2>&1 &
@@ -484,12 +564,13 @@ cmd_firewall_check() {
   local ruleset="" fw="none"
   if command -v nft >/dev/null && nft list ruleset 2>/dev/null | grep -q "table inet pbxmaison"; then fw="nftables"; ruleset="$(nft list ruleset 2>/dev/null)"
   elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then fw="ufw"; ruleset="$(ufw status 2>/dev/null)"; fi
-  FW="$fw" RULES="$ruleset" LISTEN="$(ss -H -lntu 2>/dev/null)" node -e '
+  FW="$fw" RULES="$ruleset" SP="$SIP_PORT" LISTEN="$(ss -H -lntu 2>/dev/null)" node -e '
     const listen = process.env.LISTEN || "", rules = process.env.RULES || "", fw = process.env.FW;
     const isListening = (proto, port) => listen.split("\n").some((l) => { const f = l.trim().split(/\s+/); return f[0] === proto && new RegExp(`:${port}$`).test(f[4] || ""); });
     const opened = (proto, port) => fw === "none" ? null : fw === "ufw" ? new RegExp(`(^|\\s)${port}(:\\d+)?(/${proto})?\\s+ALLOW`, "m").test(rules) || new RegExp(`${port.split("-")[0]}:\\d+/${proto}`).test(rules)
       : new RegExp(`${proto} dport \\{?[^\\n]*\\b${port.split("-")[0]}\\b`).test(rules);
-    const checks = [["SIP (UDP 5060)", "udp", "5060"], ["SIP (TCP 5060)", "tcp", "5060"], ["SIP chiffré TLS (TCP 5061)", "tcp", "5061"],
+    const sp = Number(process.env.SP) || 5060;
+    const checks = [[`SIP (UDP ${sp})`, "udp", String(sp)], [`SIP (TCP ${sp})`, "tcp", String(sp)], [`SIP chiffré TLS (TCP ${sp + 1})`, "tcp", String(sp + 1)],
       ["Audio RTP (UDP 10000-20000)", "udp", "10000-20000"], ["Console web HTTP (TCP 80)", "tcp", "80"], ["Softphone, appli et téléphones HTTPS (TCP 443)", "tcp", "443"], ["Console d’administration HTTPS (TCP 8822)", "tcp", "8822"]];
     const out = checks.map(([label, proto, port]) => ({ label, proto, port, listening: port.includes("-") ? null : isListening(proto, port), open: opened(proto, port) }));
     process.stdout.write(JSON.stringify({ ok: true, firewall: fw, checks: out }) + "\n");'
@@ -513,6 +594,7 @@ case "${1:-}" in
   update) shift; cmd_update "$@" ;;
   update-status) cmd_update_status ;;
   capture) shift; cmd_capture "$@" ;;
+  sip-port) shift; cmd_sip_port "$@" ;;
   dns)    [[ -f "$ETC/pbx.env" ]] || exit 0
           set -a; . "$ETC/pbx.env"; set +a
           is_managed_fqdn "$PBX_FQDN" || { echo "Adresse ${PBX_FQDN} non gérée par Callikoe : rien à faire."; exit 0; }

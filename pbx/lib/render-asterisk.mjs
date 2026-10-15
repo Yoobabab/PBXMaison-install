@@ -16,7 +16,23 @@ const need = (k) => { if (!env[k]) { console.error(`Variable manquante : ${k}`);
 const localNets = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"]
   .map((n) => `local_net = ${n}`).join("\n");
 
+// Port SIP (5060 ou 5160) et, pendant une transition, transports supplémentaires sur l'autre port
+const sipPort = env.SIP_PORT === "5160" ? "5160" : "5060";
+const otherPort = sipPort === "5160" ? "5060" : "5160";
+const legacy = env.SIP_BOTH === "1" ? ["udp", "tcp"].map((p) => `
+[transport-${p}-legacy]
+type = transport
+protocol = ${p}
+bind = 0.0.0.0:${otherPort}
+symmetric_transport = yes
+external_media_address = ${env.PUBLIC_IP}
+external_signaling_address = ${env.PUBLIC_IP}
+${localNets}
+`).join("") : "";
+
 const values = {
+  SIP_PORT: sipPort,
+  SIP_LEGACY: legacy,
   PUBLIC_IP: need("PUBLIC_IP"),
   LOCAL_NETS: localNets,
   DB_PASSWORD: need("DB_PASSWORD"),

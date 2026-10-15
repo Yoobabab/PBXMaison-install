@@ -5,6 +5,8 @@
  * Fonctions pures, testées dans console/test/devices.test.mjs.
  */
 import { UserError } from "./users.mjs";
+/** Serveur SIP « hôte » ou « hôte:port » quand le PBX n'écoute pas sur 5060 (Snom, Grandstream). */
+const hostPort = (server) => server.port && Number(server.port) !== 5060 ? `${server.host}:${server.port}` : server.host;
 const normalizeMac = (input) => {
   if (!String(input ?? "").trim()) return "";
   const s = String(input).trim().toLowerCase().replace(/[^0-9a-f]/g, "");
@@ -122,7 +124,7 @@ export function buildSnomXml(accounts, server) {
     const i = a.index;
     L.push(` <user_active idx="${i}" perm="">on</user_active>`, ` <user_realname idx="${i}" perm="">${xml(a.name)}</user_realname>`,
       ` <user_name idx="${i}" perm="">${xml(a.user)}</user_name>`, ` <user_pname idx="${i}" perm="">${xml(a.auth_id)}</user_pname>`,
-      ` <user_pass idx="${i}" perm="">${xml(a.password)}</user_pass>`, ` <user_host idx="${i}" perm="">${xml(server.host)}</user_host>`,
+      ` <user_pass idx="${i}" perm="">${xml(a.password)}</user_pass>`, ` <user_host idx="${i}" perm="">${xml(hostPort(server))}</user_host>`,
       ` <user_mailbox idx="${i}" perm="">*97</user_mailbox>`, ` <user_expiry idx="${i}" perm="">600</user_expiry>`);
   }
   L.push(" </phone-settings>", "</settings>", "");
@@ -144,7 +146,7 @@ export function buildGrandstreamXml(mac, accounts, server, { maxAccounts = 4 } =
   for (const a of accounts) {
     const p = GS_ACCOUNT_P[a.index - 1];
     if (!p || a.index > maxAccounts) continue;
-    L.push(`    <P${p.enable}>1</P${p.enable}>`, `    <P${p.server}>${xml(server.host)}</P${p.server}>`, `    <P${p.user}>${xml(a.user)}</P${p.user}>`,
+    L.push(`    <P${p.enable}>1</P${p.enable}>`, `    <P${p.server}>${xml(hostPort(server))}</P${p.server}>`, `    <P${p.user}>${xml(a.user)}</P${p.user}>`,
       `    <P${p.auth}>${xml(a.auth_id)}</P${p.auth}>`, `    <P${p.pass}>${xml(a.password)}</P${p.pass}>`, `    <P${p.name}>${xml(a.name)}</P${p.name}>`);
   }
   L.push("  </config>", "</gs_provision>", "");

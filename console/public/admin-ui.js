@@ -111,10 +111,46 @@ async function pageOutbound(sub) {
 }
 
 // ================================================================ Sécurité
+// Port SIP : 5060 → 5160 avec une transition (les deux ports ouverts) et un retour possible
+async function drawSipPort(msg = "") {
+  const box = H.$("#sipport"); if (!box) return;
+  let d; try { d = await H.api("GET", "/api/sip-port"); } catch (e) { box.innerHTML = `<div class="flash bad">${H.esc(e.message)}</div>`; return; }
+  const state = d.both ? (d.port === 5160 ? "transition" : "retour") : d.port === 5160 ? "5160" : "5060";
+  const who = (w) => !w ? '<span class="s">appareil inconnu (poste réglé à la main, appli mobile, passerelle…)</span>'
+    : w.kind === "trunk" ? `Trunk <b>${H.esc(w.id)}</b>` : `Poste <b>${H.esc(w.id)}</b> ${H.esc(w.name)} <span class="s">${H.esc(w.model || "")}</span>`;
+  const btn = (action, label, cls = "") => `<button type="button" class="btn ${cls}" data-sipact="${action}">${label}</button>`;
+  box.innerHTML = `${msg}<div class="panel"><div class="ph"><h2>Port SIP du standard</h2>${pill(d.both ? "wait" : "ok", d.both ? `Transition : ${d.port} et ${d.other} ouverts` : `Port ${d.port}`)}</div><div class="pad stack">
+    <p style="margin:0">Les robots qui cherchent des standards à pirater visent le port <b>5060</b>. Passer en <b>5160</b> (et 5161 en TLS) les fait passer à côté, sans changer la sécurité des mots de passe. Le softphone web n'est pas concerné (il passe par le 443).</p>
+    ${state === "5060" ? `<p class="hint" style="margin:0">Au lancement : les deux ports restent ouverts pendant la transition, les téléphones provisionnés reçoivent le nouveau port, puis tu fermes le 5060 quand plus rien ne l'utilise. Le moteur téléphonique redémarre à chaque étape <b>dès qu'aucun appel n'est en cours</b> (quelques secondes).</p>
+      <div class="row">${btn("start", "Passer en 5160")}</div>` : ""}
+    ${state === "transition" ? `<p style="margin:0">Le standard écoute sur <b>5160</b> et encore sur <b>5060</b>. Les téléphones provisionnés passent en 5160 d'eux-mêmes ; les appareils réglés à la main (applis mobiles, postes d'autres marques, passerelles) sont à modifier : serveur ${H.esc(location.hostname)}, port <b>5160</b> (TLS 5161).</p>` : ""}
+    ${state === "retour" ? `<p style="margin:0">Retour en cours : le standard écoute sur <b>5060</b> et encore sur <b>5160</b>. Les téléphones provisionnés repassent en 5060 d'eux-mêmes.</p>` : ""}
+    ${state === "5160" ? `<p style="margin:0">Le standard écoute uniquement sur <b>5160</b> (TLS 5161). Le 5060 est fermé dans le pare-feu.</p>` : ""}
+    ${d.both ? `<div><b>Encore vus sur l'ancien port (${d.other})</b>
+        ${d.legacy.length ? `<div class="cx-list">${d.legacy.map((x) => `<div class="cx-row"><span class="mono">${H.esc(x.ip)}:${H.esc(x.port)}</span> <span class="grow">${who(x.who)}</span>${pill("wait", x.proto.toUpperCase())}</div>`).join("")}</div>`
+          : `<p class="hint">Aucun appareil ni trunk vu sur le ${d.other} en ce moment : tu peux terminer.</p>`}</div>
+      <div class="row">${btn("finish", `Terminer : fermer le ${d.other}`)}<button type="button" class="btn ghost" data-siprefresh>Actualiser</button>${btn("resync", "Renvoyer la configuration aux téléphones", "ghost")}</div>` : ""}
+    ${state !== "5060" && state !== "retour" ? `<div class="row">${btn("revert", "Revenir en 5060", "ghost")}</div>` : ""}
+    <p class="hint" style="margin:0">Trunks avec enregistrement (Unyc, Sewan, Networth, Dstny) : l'opérateur suit le nouveau port tout seul. Pense à faire un appel entrant et un appel sortant de test après chaque étape. PBX derrière une box : redirige aussi le nouveau port.</p>
+  </div></div>`;
+  box.querySelector("[data-siprefresh]")?.addEventListener("click", () => drawSipPort());
+  box.querySelectorAll("[data-sipact]").forEach((b) => b.onclick = async () => {
+    const action = b.dataset.sipact;
+    if (action === "resync") { const r = await H.api("POST", "/api/phones/resync"); return drawSipPort(`<div class="flash">Configuration renvoyée à ${r.sent} téléphone(s).</div>`); }
+    box.querySelectorAll("button").forEach((x) => { x.disabled = true; });
+    b.innerHTML = '<span class="spin"></span> Redémarrage du moteur (attend la fin des appels)…';
+    try {
+      const r = await H.api("POST", "/api/sip-port", { action });
+      drawSipPort(r.restarted ? `<div class="flash">C'est fait : port ${r.port}${r.both ? ` (et ${r.other} pendant la transition)` : ""}. ${r.resynced ? `${r.resynced} téléphone(s) ont reçu la nouvelle configuration.` : ""} Fais un appel de test.</div>`
+        : `<div class="flash warn">Réglage enregistré : le moteur redémarrera dès que les appels en cours seront terminés. Actualise dans un moment.</div>`);
+    } catch (e) { drawSipPort(`<div class="flash bad">${H.esc(e.message)}</div>`); }
+  });
+}
+
 async function pageSecurity(sub = "apercu") {
   H.setNav("sec");
   const { settings: s, f2b, countries } = await H.api("GET", "/api/security");
-  const T = [["apercu", "Vue d'ensemble"], ["ip", "Adresses IP"], ["numeros", "Numéros bloqués"], ["pays", "International"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"], ["journal", "Connexions et journal"]];
+  const T = [["apercu", "Vue d'ensemble"], ["ip", "Adresses IP"], ["numeros", "Numéros bloqués"], ["pays", "International"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"], ["port", "Port SIP"], ["journal", "Connexions et journal"]];
   const banned = [...(f2b.manual || []).map((ip) => ({ ip, manual: true })), ...(f2b.auto || []).map((ip) => ({ ip, manual: false }))];
   let body = "";
   if (sub === "apercu") {
@@ -199,6 +235,7 @@ async function pageSecurity(sub = "apercu") {
       </div></div>
       <div class="actions"><button class="btn">Enregistrer</button></div></form>`;
   }
+  if (sub === "port") body = '<div id="sipport"><div class="empty"><span class="spin"></span></div></div>';
   if (sub === "journal") {
     const [{ entries }, me] = await Promise.all([H.api("GET", "/api/audit"), H.api("GET", "/api/me")]);
     body = `<div class="kpis">${kpi("lock", "Double authentification", me.totp ? "Activée" : "Désactivée", me.totp ? `${me.recovery_left} code(s) de secours restant(s)` : "", me.totp ? "good" : "warn")}
@@ -209,6 +246,7 @@ async function pageSecurity(sub = "apercu") {
         ${entries.map((e) => `<tr><td>${fmtDT(e.at)}</td><td>${H.esc(e.email)}</td><td class="mono">${H.esc(e.ip)}</td><td>${e.ok ? "" : pill("bad", "Refusé")} ${H.esc(e.action)}${e.detail ? `<div class="s mono">${H.esc(e.detail)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Rien pour l\'instant.</div>'}</div>`;
   }
   H.app.innerHTML = head("Sécurité", "Protège le standard contre les intrusions, la fraude et les appels indésirables.") + tabs("#/securite", sub, T) + `<div class="cx-body">${body}</div>`;
+  if (sub === "port") return drawSipPort();
   const save = async (v, msg = "Réglages de sécurité enregistrés.") => {
     const r = await H.api("PUT", "/api/security", v);
     H.setFlash(r.warning ? { cls: "warn", text: r.warning } : { text: msg }); pageSecurity(sub);
@@ -527,7 +565,7 @@ async function gatewaySetup(id) {
         ${s.accounts.map((a) => `<tr><td>${a.port}</td><td>${H.esc(a.name)}</td><td class="mono">${H.esc(a.user)}</td><td class="mono">${H.esc(a.auth_id)} <button class="btn link" data-copy="${H.esc(a.auth_id)}">Copier</button></td>
           <td class="mono"><span class="cx-secret" data-v="${H.esc(a.password)}">••••••••••</span> <button class="btn link" data-show>Afficher</button> <button class="btn link" data-copy="${H.esc(a.password)}">Copier</button></td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty">Aucun port attribué : <a href="#/passerelles/${id}">choisis les utilisateurs</a>.</div>`}
-      <div class="pad hint">Serveur : <span class="mono">${H.esc(s.server)}</span>, port 5060 (UDP). Ces identifiants sont ceux des utilisateurs : ne les communique pas.</div></div>`;
+      <div class="pad hint">Serveur : <span class="mono">${H.esc(s.server)}</span>, port ${s.sip_port || 5060} (UDP). Ces identifiants sont ceux des utilisateurs : ne les communique pas.</div></div>`;
   H.copyButtons(H.app);
   H.app.querySelectorAll("[data-show]").forEach((b) => b.addEventListener("click", () => { const x = b.previousElementSibling; x.textContent = x.textContent.startsWith("•") ? x.dataset.v : "••••••••••"; }));
 }

@@ -291,7 +291,13 @@ chmod 644 "$ETC/install.state"
 "$APP/pbx/bin/pbx-configure" nginx
 systemctl enable nginx >/dev/null 2>&1
 ok "IP publique ${PUBLIC_IP}$( ((BEHIND_NAT)) && echo " (machine derrière un routeur, IP locale ${LOCAL_IP})")"
-((BEHIND_NAT)) && warn "Derrière une box : rediriger vers ${LOCAL_IP} UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80/443/8822, et désactiver le SIP ALG."
+# Port SIP choisi dans la console (Sécurité › Port SIP) : 5060 par défaut, 5160 possible, les deux pendant une transition
+SIPP=5060; SIPB=0
+if [[ -f "$ETC/sip-ports" ]]; then SIPP="$(. "$ETC/sip-ports"; echo "${SIP_PORT:-5060}")"; SIPB="$(. "$ETC/sip-ports"; echo "${SIP_BOTH:-0}")"; fi
+[[ "$SIPP" == 5160 ]] || SIPP=5060
+SIP_UDP="$SIPP"; SIP_TCP="$SIPP, $((SIPP + 1))"
+[[ "$SIPB" == 1 ]] && { SIP_UDP="5060, 5160"; SIP_TCP="5060, 5061, 5160, 5161"; }
+((BEHIND_NAT)) && warn "Derrière une box : rediriger vers ${LOCAL_IP} UDP ${SIPP}, TCP ${SIPP}-$((SIPP + 1)), UDP 10000-20000, TCP 80/443/8822, et désactiver le SIP ALG."
 
 # =============================================================================
 step "Sécurité : pare-feu et fail2ban"
@@ -301,7 +307,9 @@ if ((IS_WSL)); then
 elif [[ "${PBXM_NO_FIREWALL:-0}" == 1 ]]; then
   warn "Pare-feu non configuré (PBXM_NO_FIREWALL=1)"
 elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-  ufw allow 5060/udp >/dev/null; ufw allow 5060:5061/tcp >/dev/null; ufw allow 10000:20000/udp >/dev/null
+  for P in ${SIP_UDP//,/ }; do ufw allow "$P/udp" >/dev/null; done
+  for P in ${SIP_TCP//,/ }; do ufw allow "$P/tcp" >/dev/null; done
+  ufw allow 10000:20000/udp >/dev/null
   ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 8822/tcp >/dev/null
   ok "Règles ajoutées au pare-feu ufw existant"
 else
@@ -322,8 +330,8 @@ table inet pbxmaison {
     tcp dport { ${SSH_PORTS} } accept comment "SSH"
     tcp dport { 80, 443 } accept comment "Web public : softphone, appli, téléphones"
     tcp dport 8822 accept comment "Console d'administration"
-    udp dport 5060 accept comment "SIP UDP"
-    tcp dport { 5060, 5061 } accept comment "SIP TCP/TLS"
+    udp dport { ${SIP_UDP} } accept comment "SIP UDP"
+    tcp dport { ${SIP_TCP} } accept comment "SIP TCP/TLS"
     udp dport 10000-20000 accept comment "Audio RTP"
   }
   chain forward { type filter hook forward priority 0; policy drop; }

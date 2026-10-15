@@ -229,7 +229,7 @@ async function wizCheck() {
     ${n.dns_ok || n.auto ? "" : `<div class="pad"><div class="note">Sans DNS correct, le PBX fonctionne mais <strong>sans certificat HTTPS</strong>.
       Crée l'enregistrement <strong>A</strong> <code>${esc(p.fqdn)}</code> → <code>${esc(n.public_ip)}</code> chez ton hébergeur DNS,
       puis vérifie à nouveau (la propagation peut prendre quelques minutes). Tu pourras aussi obtenir le certificat plus tard, depuis « Système ».</div></div>`}
-    ${n.behind_nat ? `<div class="pad"><div class="note">Machine derrière une box : redirige vers <code>${esc(n.local_ip)}</code> les ports UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80 et 443, et désactive le « SIP ALG ».</div></div>` : ""}
+    ${n.behind_nat ? `<div class="pad"><div class="note">Machine derrière une box : redirige vers <code>${esc(n.local_ip)}</code> les ports UDP ${n.sip_port || 5060}, TCP ${n.sip_port || 5060}-${(n.sip_port || 5060) + 1}, UDP 10000-20000, TCP 80, 443 et 8822, et désactive le « SIP ALG ».</div></div>` : ""}
     <div class="pad row" style="border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn ghost" id="back">Autre fichier</button>
       ${n.dns_ok || n.auto ? "" : `<button class="btn ghost" id="recheck">Vérifier à nouveau le DNS</button>`}
@@ -485,7 +485,7 @@ async function drawSystem() {
     e.target.disabled = true; $("#fwres").innerHTML = '<div class="panel pad" style="margin-top:18px"><span class="spin"></span> Vérification…</div>';
     try {
       const r = await api("POST", "/api/system/firewall-check");
-      const st = (c) => c.open === false ? '<span class="pill bad">Fermé dans le pare-feu</span>' : c.listening === false ? `<span class="pill ${c.port === "5061" ? "off" : "bad"}">${c.port === "5061" ? "Inutilisé (pas de certificat)" : "Service non démarré"}</span>` : '<span class="pill ok">OK</span>';
+      const st = (c) => c.open === false ? '<span class="pill bad">Fermé dans le pare-feu</span>' : c.listening === false ? `<span class="pill ${["5061", "5161"].includes(c.port) ? "off" : "bad"}">${["5061", "5161"].includes(c.port) ? "Inutilisé (pas de certificat)" : "Service non démarré"}</span>` : '<span class="pill ok">OK</span>';
       $("#fwres").innerHTML = `<div class="panel" style="margin-top:18px"><div class="ph"><h2>Test du pare-feu</h2><span class="s">${r.firewall === "none" ? "aucun pare-feu Callikoe détecté" : `pare-feu : ${esc(r.firewall)}`}</span></div>
         ${(r.checks || []).map((c) => `<div class="sysrow"><span>${esc(c.label)}</span><span class="sysr">${st(c)}</span></div>`).join("") || `<div class="pad err">${esc(r.error || "")}</div>`}
         <div class="pad hint">Vérification faite sur le serveur : ports ouverts et services à l'écoute. Si le PBX est derrière une box, vérifie aussi les redirections de ports sur la box (UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80/443).</div></div>`;
@@ -936,7 +936,7 @@ async function renderUser(id, tab = "general") {
       <dl class="creds">
         <div><dt>Serveur / domaine</dt><dd><span class="mono">${esc(host)}</span> <button class="copy" data-copy="${esc(host)}">Copier</button>
           ${!server.dns_ok ? `<div class="s">Le FQDN ${esc(server.fqdn)} ne pointe pas encore vers ce serveur : utilise l'IP en attendant.</div>` : ""}</dd></div>
-        <div><dt>Port</dt><dd>5060 (UDP ou TCP)${server.tls ? " · 5061 en TLS" : ""}</dd></div>
+        <div><dt>Port</dt><dd>${server.sip_port || 5060} (UDP ou TCP)${server.tls ? ` · ${server.sip_tls_port || 5061} en TLS` : ""}</dd></div>
         <div><dt>Numéro / utilisateur</dt><dd><span class="mono">${esc(u.id)}</span> <button class="copy" data-copy="${esc(u.id)}">Copier</button></dd></div>
         <div><dt>ID d'authentification</dt><dd id="authid"><span class="s">…</span></dd></div>
         <div><dt>Mot de passe</dt><dd id="pw"><span class="s">…</span></dd></div>

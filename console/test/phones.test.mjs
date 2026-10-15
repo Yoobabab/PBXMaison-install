@@ -63,3 +63,12 @@ test("module d'extension : touches EXP50 provisionnées sur un T57W, refusé sur
   assert.doesNotMatch(cfg, /^expansion_module\.2\./m);
   assert.throws(() => validatePhone({ model: "yealink-t31p", modules: [{ keys: [] }] }, defaultPhone(), ctx), /n'accepte pas de module/);
 });
+
+test("port SIP 5160 : envoyé au Yealink (5161 en TLS)", () => {
+  const p = validatePhone({ model: "yealink-t54w", mac: "44dbd229fa7c" }, defaultPhone(), ctx);
+  const srv = { host: "pbx.exemple.fr", port: 5160, tls_port: 5161, prov_url: "https://pbx.exemple.fr/prov/x/" };
+  assert.match(buildYealinkCfg({ id: "201", first_name: "A", last_name: "B" }, p, { auth_id: "x", password: "y" }, srv), /^account\.1\.sip_server\.1\.port = 5160$/m);
+  const tls = validatePhone({ settings: { transport: "tls" } }, p, ctx);
+  assert.match(buildYealinkCfg({ id: "201", first_name: "A", last_name: "B" }, tls, { auth_id: "x", password: "y" }, srv), /^account\.1\.sip_server\.1\.port = 5161$/m);
+  assert.match(buildYealinkCfg({ id: "201", first_name: "A", last_name: "B" }, p, { auth_id: "x", password: "y" }, { host: "h", prov_url: "u" }), /^account\.1\.sip_server\.1\.port = 5060$/m);
+});

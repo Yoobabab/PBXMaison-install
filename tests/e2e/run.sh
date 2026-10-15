@@ -367,6 +367,22 @@ R="$(api GET /api/dashboard)"
 echo "$R" | grep -q '"activation_code":"PBXACT1\.' && pass "Code d'installation disponible pour le portail" || fail "code : $R"
 api GET /api/calls | grep -q '"available":true' && pass "Appels en cours : lecture via AMI OK" || fail "AMI"
 
+# Port SIP : passage en 5160 avec transition, fermeture du 5060, retour en 5060
+TR() { sudo /usr/sbin/asterisk -rx 'pjsip show transports' 2>/dev/null; }
+R="$(api POST /api/sip-port '{"action":"start"}')"
+[[ "$R" == *'"restarted":true'* ]] && TR | grep -q "0.0.0.0:5160" && TR | grep -q "0.0.0.0:5060" \
+  && pass "Port SIP : transition, le standard écoute sur 5160 et encore sur 5060" || { TR >> "$OUT"; fail "port SIP transition : $R"; }
+curl -sS "http://127.0.0.1${PPATH}44dbd229fa7b.cfg" | grep -q "^account.1.sip_server.1.port = 5160$" && pass "Port SIP : les téléphones provisionnés reçoivent le 5160" || fail "port SIP provisionnement"
+api GET /api/sip-port | grep -q '"both":true' && pass "Port SIP : liste des appareils encore sur l'ancien port disponible" || fail "port SIP état"
+R="$(api POST /api/sip-port '{"action":"finish"}')"
+[[ "$R" == *'"restarted":true'* ]] && TR | grep -q "0.0.0.0:5160" && ! TR | grep -q "0.0.0.0:5060" \
+  && pass "Port SIP : 5060 fermé une fois la transition terminée" || { TR >> "$OUT"; fail "port SIP fin : $R"; }
+sudo /usr/sbin/asterisk -rx 'pjsip show registrations' | grep -q "dstny" && pass "Port SIP : le trunk se réenregistre depuis le nouveau port" || fail "trunk après changement de port"
+R="$(api POST /api/sip-port '{"action":"revert"}')"; R2="$(api POST /api/sip-port '{"action":"finish"}')"
+[[ "$R2" == *'"restarted":true'* ]] && TR | grep -q "0.0.0.0:5060" && ! TR | grep -q "0.0.0.0:5160" \
+  && curl -sS "http://127.0.0.1${PPATH}44dbd229fa7b.cfg" | grep -q "^account.1.sip_server.1.port = 5060$" \
+  && pass "Port SIP : retour en 5060 sans réinstaller" || { TR >> "$OUT"; fail "port SIP retour : $R / $R2"; }
+
 # 5. Réinstallation (mise à jour) sans perte de configuration
 # shellcheck disable=SC2024
 sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 timeout 900 bash ../../install.sh > reinstall.out 2>&1 || { tail -n 30 reinstall.out; fail "réinstallation"; }

@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
+import { sipPorts } from "./sipports.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType, modelById } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
@@ -528,7 +529,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const u = await getUser(num);
     const secret = await extensionSecret(num);
     return { pbx: env().PBX_NAME || "", extension: num, name: displayName(u), auth_id: secret.auth_id, password: secret.password,
-      host: server.host, fqdn: server.fqdn, ports: { udp: 5060, tcp: 5060, tls: server.tls ? 5061 : null }, voicemail: "*97" };
+      host: server.host, fqdn: server.fqdn, ports: { udp: sipPorts().port, tcp: sipPorts().port, tls: server.tls ? sipPorts().tls : null }, voicemail: "*97" };
   }
 
   // ------------------------------------------------------------------ Téléphones connectés
@@ -575,7 +576,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         model: u.phone.model ? models.get(u.phone.model) : dev.label,
         mac: u.phone.mac || dev.mac || "",
         device: dev, user_agent: ua, firmware: dev.firmware || "",
-        source_ip: sourceIp, local_ip: localIp,
+        source_ip: sourceIp, source_port: c?.source_port || "", local_ip: localIp,
         connection: sourceIp ? connectionType(sourceIp, localIp, []) : null,
         provisioned: u.phone.last_provisioned || null,
         extra_contacts: Math.max(0, contacts.length - 1),
@@ -609,7 +610,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const prov_url = await provisioningUrl(server);
     const model = modelById(u.phone.model);
     const acc = [{ index: 1, user: u.id, name: displayName(u), auth_id: secret.auth_id, password: secret.password }];
-    const srv = { host: server.host, prov_url, lang: u.phone.settings.language, tz: u.phone.settings.timezone, admin_password: u.phone.admin_password };
+    const srv = { host: server.host, port: sipPorts().port, tls_port: sipPorts().tls, prov_url, lang: u.phone.settings.language, tz: u.phone.settings.timezone, admin_password: u.phone.admin_password };
     let text;
     if (model?.format === "fanvil") text = buildFanvilCfg(acc, srv);
     else if (model?.format === "snom") text = buildSnomXml(acc, srv);
@@ -617,7 +618,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     else {
       // Codes de statut (Codes raccourcis) : le bouton NPD du téléphone prévient le PBX, le statut se voit partout
       const codes = { st_available: "*30", st_dnd: "*32", pickup: "**", ...(await db.getSetting("shortcodes", {})) };
-      text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes }, names);
+      text = buildYealinkCfg(u, u.phone, secret, { host: server.host, port: sipPorts().port, tls_port: sipPorts().tls, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes }, names);
     }
     return { user: u, text, format: model?.format || "yealink" };
   }
@@ -636,7 +637,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     return out;
   }
   async function gatewayConfig(g, server) {
-    const srv = { host: server.host, prov_url: await provisioningUrl(server), lang: language(), admin_password: g.admin_password };
+    const srv = { host: server.host, port: sipPorts().port, prov_url: await provisioningUrl(server), lang: language(), admin_password: g.admin_password };
     return { text: buildGatewayFile(g, await gatewayAccounts(g), srv), accounts: await gatewayAccounts(g) };
   }
 

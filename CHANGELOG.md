@@ -1,5 +1,8 @@
 # Nouveautés de Callikoe
 
+## 1.5.0
+- Port SIP 5060 ou 5160 (Sécurité › Port SIP) : transition sans coupure (les deux ports ouverts), téléphones provisionnés mis à jour d'eux-mêmes, liste des appareils encore sur l'ancien port, fermeture en un clic, retour en 5060 possible
+
 ## 1.4.0
 - Console d'administration sur son propre port HTTPS 8822 (réservable aux adresses de l'installateur) ; le 443 ne sert plus qu'au softphone, à l'appli et aux téléphones
 - Yealink T57W, T48U, T77U : écran « Show More » dessiné (6 touches à gauche, 5 à droite, 3 colonnes de 6 au centre)

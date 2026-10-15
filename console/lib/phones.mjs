@@ -58,7 +58,7 @@ export const BACKLIGHT = { 0: "Toujours allumé", 30: "30 secondes", 60: "1 minu
 export const SCREENSAVER = { 60: "1 minute", 300: "5 minutes", 600: "10 minutes", 1800: "30 minutes", 3600: "1 heure", 7200: "2 heures", 21600: "6 heures" };
 export const TRANSFER = { attended: ["Transfert supervisé", 1], blind: ["Transfert aveugle", 2], newcall: ["Nouvel appel", 0] };
 export const LED = { voicemail: "Messages vocaux uniquement", missed: "Appels manqués uniquement", both: "Messages vocaux et appels manqués", off: "Aucun" };
-export const TRANSPORTS = { udp: ["UDP (5060)", 0, 5060], tcp: ["TCP (5060)", 1, 5060], tls: ["TLS chiffré (5061)", 2, 5061] };
+export const TRANSPORTS = { udp: ["UDP", 0, 5060], tcp: ["TCP", 1, 5060], tls: ["TLS chiffré", 2, 5061] };
 /** Sonnerie selon le type d'appel (en-tête Alert-Info envoyé par le PBX) */
 export const RING_TYPES = { interne: "Appel interne (collègue)", externe: "Appel externe (client)", groupe: "Groupe d'appel", file: "File d'attente", svi: "Via le SVI (standard automatique)" };
 export const RINGERS = { "": "Sonnerie par défaut du téléphone", 1: "Sonnerie 1", 2: "Sonnerie 2", 3: "Sonnerie 3", 4: "Sonnerie 4", 5: "Sonnerie 5", 6: "Sonnerie 6", 7: "Sonnerie 7", 8: "Sonnerie 8" };
@@ -201,7 +201,9 @@ export function randomPassword(n = 12) {
 export function buildYealinkCfg(user, phone, secret, server, names = new Map()) {
   const st = phone.settings;
   const model = modelById(phone.model);
-  const [, transportCode, port] = TRANSPORTS[st.transport] || TRANSPORTS.udp;
+  const [, transportCode] = TRANSPORTS[st.transport] || TRANSPORTS.udp;
+  // Port SIP du PBX (5060 ou 5160, console : Sécurité › Port SIP) ; +1 en TLS
+  const port = st.transport === "tls" ? (server.tls_port || 5061) : (server.port || 5060);
   const [, tzOffset, tzName, dst] = TIMEZONES[st.timezone] || TIMEZONES["Europe/Paris"];
   const name = `${user.first_name} ${user.last_name}`.trim() || `Poste ${user.id}`;
   const v = (k, val) => `${k} = ${String(val ?? "").replace(/[\r\n]/g, " ")}`;

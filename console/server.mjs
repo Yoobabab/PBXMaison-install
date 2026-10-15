@@ -2,6 +2,7 @@
  * Console web du PBX PBXMaison.
  * Écoute en local (127.0.0.1:8080) derrière Nginx, sous l'utilisateur système « pbxmaison ».
  */
+import { sipPorts } from "./lib/sipports.mjs";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -66,7 +67,7 @@ export async function buildApp({ db, ami } = {}) {
   // Console : session valide ET double authentification faite (sinon seule la mise en place de la double authentification est permise)
   const ROLES = { admin: "Accès complet (administrateur)", tech: "Technicien (tout sauf les comptes)", client: "Accès restreint (utilisateurs, téléphones, routage, annuaire)", lecture: "Accès visuel (lecture seule)" };
   // Accès restreint (client) : pas de trunks, règles sortantes, sécurité, codes, sauvegardes, mises à jour, licence, alertes, passerelles, système, comptes
-  const CLIENT_DENY = /^\/api\/(outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
+  const CLIENT_DENY = /^\/api\/(outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|sip-port|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
   const requireUser = async (req, reply) => {
     const u = currentUser(req);
     if (!u) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
@@ -108,7 +109,7 @@ export async function buildApp({ db, ami } = {}) {
   // Journal d'audit : toute modification faite depuis la console (qui, quand, d'où, quoi)
   const AUDIT_LABEL = [[/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
     [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
-    [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
+    [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"], [/^\/api\/sip-port/, "Port SIP"]];
   app.addHook("onResponse", async (req, reply) => {
     if (req.method === "GET" || !req.url.startsWith("/api/") || reply.statusCode >= 400) return;
     if (/^\/api\/(login|logout|reauth|u\/|invite\/|accounts|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
@@ -349,7 +350,7 @@ export async function buildApp({ db, ami } = {}) {
         license: env.PBX_LICENSE_KEY, edition: env.PBX_EDITION, max_calls: Number(env.PBX_MAX_CALLS),
         expires_at: env.PBX_LICENSE_EXPIRES },
       network: { public_ip: st.PUBLIC_IP, local_ip: st.LOCAL_IP, behind_nat: st.BEHIND_NAT === "1",
-        dns_ok: ss.DNS_OK === "1", tls: ss.TLS === "1" },
+        dns_ok: ss.DNS_OK === "1", tls: ss.TLS === "1", sip_port: sipPorts().port },
       trunks: { total: trunks.length, registered: trunks.filter((t) => t.status.code === "Registered").length },
       extensions: { total: exts.length, registered: exts.filter((e) => e.registered).length },
       calls: { available: calls.available, active: calls.calls.length },
@@ -360,7 +361,8 @@ export async function buildApp({ db, ami } = {}) {
   function sipServer() {
     const env = pbxEnv(), st = installState(), ss = setupState();
     return { fqdn: env.PBX_FQDN, dns_ok: ss.DNS_OK === "1", tls: ss.TLS === "1", public_ip: st.PUBLIC_IP,
-      local_ip: st.LOCAL_IP, behind_nat: st.BEHIND_NAT === "1", host: ss.DNS_OK === "1" ? env.PBX_FQDN : st.PUBLIC_IP };
+      local_ip: st.LOCAL_IP, behind_nat: st.BEHIND_NAT === "1", host: ss.DNS_OK === "1" ? env.PBX_FQDN : st.PUBLIC_IP,
+      sip_port: sipPorts().port, sip_tls_port: sipPorts().tls };
   }
 
   app.get("/api/templates", { preHandler: requireUser }, async () => pbx.templates());
@@ -651,6 +653,10 @@ export async function buildApp({ db, ami } = {}) {
     return reply.type("audio/wav").header("cache-control", "private, no-store").send(fs.createReadStream(f));
   });
   app.delete("/api/recordings/file", { preHandler: requireUser }, async (req) => admin.deleteRecording(req.query?.f));
+
+  // ---------------------------------------------------------------- Port SIP
+  app.get("/api/sip-port", { preHandler: requireUser }, async () => admin.getSipPort());
+  app.post("/api/sip-port", { preHandler: requireAdmin }, async (req) => admin.setSipPort(req.body?.action));
 
   // ---------------------------------------------------------------- Capture réseau (pcap)
   app.get("/api/capture", { preHandler: requireUser }, async () => admin.listCaptures());
