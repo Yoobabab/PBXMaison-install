@@ -36,14 +36,13 @@ export function isValidLicenseKey(key) {
   return sum === m[4];
 }
 
+/** Le fichier de clé peut contenir plusieurs clés publiques du portail (changement de clé) : une seule doit valider. */
 export function verifySignature(obj, publicKeyPem) {
   const { signature, ...rest } = obj ?? {};
   if (typeof signature !== "string") return false;
-  try {
-    return crypto.verify(null, Buffer.from(canonicalJson(rest)), publicKeyPem, Buffer.from(signature, "base64"));
-  } catch {
-    return false;
-  }
+  const keys = String(publicKeyPem || "").match(/-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----/g) || [];
+  const data = Buffer.from(canonicalJson(rest)), sig = Buffer.from(signature, "base64");
+  return keys.some((k) => { try { return crypto.verify(null, data, k, sig); } catch { return false; } });
 }
 
 /** Renvoie la liste des problèmes (vide = config valide). */
