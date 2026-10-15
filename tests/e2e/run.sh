@@ -323,11 +323,11 @@ sudo /usr/sbin/asterisk -rx 'parking show default' | grep -q "701-709" && pass "
 sudo /usr/sbin/asterisk -rx 'database put callikoe_status 204 away' >/dev/null
 sleep 7
 api GET /api/extensions/204 | grep -q '"status":"away"' && pass "Code *31 : statut « absent » appliqué par la console" || fail "statut par code"
-sudo /usr/sbin/asterisk -rx 'core show hints' | grep "dnd204" | grep -qi "InUse" && pass "Touche Statut : voyant allumé sur le téléphone (statut absent)" || { sudo /usr/sbin/asterisk -rx 'core show hints' | grep dnd >> "$OUT"; fail "voyant statut"; }
+sudo /usr/sbin/asterisk -rx 'devstate list' | grep "dnd204" | grep -q "INUSE" && pass "Touche Statut : voyant allumé sur le téléphone (statut absent)" || { sudo /usr/sbin/asterisk -rx 'devstate list' | grep dnd >> "$OUT"; fail "voyant statut"; }
 sudo /usr/sbin/asterisk -rx 'dialplan show dnd204@from-internal' | grep -q "DEVICE_STATE(Custom:dnd" && pass "Touche Statut : appui = bascule du statut" || fail "bascule statut"
 api PUT /api/extensions/204 '{"status":"available"}' >/dev/null
 sleep 2
-sudo /usr/sbin/asterisk -rx 'core show hints' | grep "dnd204" | grep -qi "Idle" && pass "Statut changé dans la console : voyant éteint sur le téléphone" || { sudo /usr/sbin/asterisk -rx 'core show hints' | grep dnd >> "$OUT"; fail "voyant statut console"; }
+sudo /usr/sbin/asterisk -rx 'devstate list' | grep "dnd204" | grep -q "NOT_INUSE" && pass "Statut changé dans la console : voyant éteint sur le téléphone" || { sudo /usr/sbin/asterisk -rx 'devstate list' | grep dnd >> "$OUT"; fail "voyant statut console"; }
 sudo /usr/sbin/asterisk -rx 'dialplan show s@rec-start' | grep -q "MixMonitor" && sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep -q "REC_ENABLED=1" && pass "Enregistrement des appels externes actif par défaut" || fail "enregistrement"
 api GET /api/recordings | grep -q '"recordings":\[' && pass "Enregistrements : liste lisible" || fail "liste enregistrements"
 
