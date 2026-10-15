@@ -11,6 +11,9 @@ on:
       - packaging/**
       - .github/workflows/build-asterisk.yml
 
+permissions:
+  contents: write
+
 jobs:
   multi:
     runs-on: ubuntu-24.04
@@ -41,6 +44,18 @@ jobs:
           [[ -f $f ]] || exit 0
           split -C 3500 "$f" diag-part-
           for p in diag-part-*; do msg="$(sed -e 's/%/%25/g' "$p" | awk '{printf "%s%%0A", $0}')"; echo "::warning title=Diagnostic ${p#diag-part-}::${msg}"; done
+      - name: Diagnostics complets (branche e2e-diag, lisible sans les journaux d'Actions)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p /tmp/diag && cd /tmp/diag
+          for f in multi-result.txt multi-diag.txt install.out creer-a.out creer-b.out rs.out; do [[ -f $GITHUB_WORKSPACE/tests/e2e/$f ]] && cp "$GITHUB_WORKSPACE/tests/e2e/$f" . ; done
+          for c in clia clib; do sudo tail -n 400 /var/log/callikoe/$c/sipdebug > sip-$c.txt 2>/dev/null || true; done
+          sudo tail -n 300 $GITHUB_WORKSPACE/tests/e2e/multi-lab/op/log/messages > op.txt 2>/dev/null || true
+          sudo journalctl -u kamailio --no-pager -n 200 > kamailio.txt 2>/dev/null || true
+          sudo chown -R "$(id -u)" . ; ls -la
+          git init -q -b e2e-diag && git add -A && git -c user.name=ci -c user.email=ci@invalid commit -qm "diag ${GITHUB_SHA}" 
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-diag
       - name: Journaux en cas d'échec
         if: failure() || cancelled()
         shell: bash
