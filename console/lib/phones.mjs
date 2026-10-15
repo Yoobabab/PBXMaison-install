@@ -267,7 +267,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     const p = `linekey.${i + 1}`;
     if (k.type === "line") L.push(v(`${p}.type`, 15), v(`${p}.line`, 1), v(`${p}.value`, ""), v(`${p}.label`, k.label || ""));
     else if (k.type === "blf") L.push(v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label || names.get(k.value) || k.value));
-    else if (k.type === "status") L.push(v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `dnd${user.id}`), v(`${p}.label`, k.label || "Ne pas déranger"));
+    else if (k.type === "status") L.push(v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `status${user.id}`), v(`${p}.label`, k.label || "Ne pas déranger"));
     else if (k.type === "speed") L.push(v(`${p}.type`, 13), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label));
     else L.push(v(`${p}.type`, 0), v(`${p}.value`, ""), v(`${p}.label`, ""));
   }

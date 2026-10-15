@@ -324,7 +324,7 @@ sudo /usr/sbin/asterisk -rx 'database put callikoe_status 204 away' >/dev/null
 sleep 7
 api GET /api/extensions/204 | grep -q '"status":"away"' && pass "Code *31 : statut « absent » appliqué par la console" || fail "statut par code"
 sudo /usr/sbin/asterisk -rx 'devstate list' | grep "dnd204" | grep -q "INUSE" && pass "Touche Statut : voyant allumé sur le téléphone (statut absent)" || { sudo /usr/sbin/asterisk -rx 'devstate list' | grep dnd >> "$OUT"; fail "voyant statut"; }
-sudo /usr/sbin/asterisk -rx 'dialplan show dnd204@from-internal' | grep -q "DEVICE_STATE(Custom:dnd" && pass "Touche Statut : appui = bascule du statut" || fail "bascule statut"
+sudo /usr/sbin/asterisk -rx 'dialplan show status204@from-internal' | grep -q "DEVICE_STATE(Custom:dnd" && pass "Touche Statut : appui = bascule du statut" || fail "bascule statut"
 api PUT /api/extensions/204 '{"status":"available"}' >/dev/null
 sleep 2
 sudo /usr/sbin/asterisk -rx 'devstate list' | grep "dnd204" | grep -q "NOT_INUSE" && pass "Statut changé dans la console : voyant éteint sur le téléphone" || { sudo /usr/sbin/asterisk -rx 'devstate list' | grep dnd >> "$OUT"; fail "voyant statut console"; }
