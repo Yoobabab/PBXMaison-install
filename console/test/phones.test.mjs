@@ -51,3 +51,15 @@ test("reconnaissance des appareils", () => {
   assert.equal(connectionType("82.1.2.3", "82.1.2.3").code, "direct");
   assert.equal(connectionType("82.1.2.3", "10.0.0.2", [{ name: "Siège", ip: "82.1.2.3" }]).code, "sbc");
 });
+
+test("module d'extension : touches EXP50 provisionnées sur un T57W, refusé sur un T31", () => {
+  const p = validatePhone({ model: "yealink-t57w", mac: "44dbd229fa7b", modules: [{ keys: [{ type: "none" }, { type: "blf", value: "202" }] }] }, defaultPhone(), ctx);
+  assert.equal(p.modules[0].keys.length, 2);
+  const cfg = buildYealinkCfg({ id: "201", first_name: "Marie", last_name: "D" }, p, { auth_id: "AbC", password: "pw" },
+    { host: "pbx.exemple.fr", prov_url: "https://pbx.exemple.fr/prov/x/" });
+  assert.match(cfg, /^expansion_module\.1\.key\.2\.type = 16$/m);
+  assert.match(cfg, /^expansion_module\.1\.key\.2\.value = 202$/m);
+  assert.match(cfg, /^expansion_module\.1\.key\.60\.type = 0$/m);
+  assert.doesNotMatch(cfg, /^expansion_module\.2\./m);
+  assert.throws(() => validatePhone({ model: "yealink-t31p", modules: [{ keys: [] }] }, defaultPhone(), ctx), /n'accepte pas de module/);
+});

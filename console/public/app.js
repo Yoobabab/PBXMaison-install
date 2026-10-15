@@ -1092,57 +1092,86 @@ function wireKeys(u, users) {
   const o = phoneOpts;
   const model = o.models.find((m) => m.id === u.phone.model);
   const L = keyLayout(model);
+  const expId = Object.entries(o.expansions || {}).find(([, e]) => e.models.some((m) => (u.phone.model || "").startsWith(m)))?.[0] || "";
+  const EXP = expId ? o.expansions[expId] : null;
   let keys = u.phone.keys.map((k) => ({ ...k }));
+  let mods = (u.phone.modules || []).map((m) => (m.keys || []).map((k) => ({ ...k })));
   const others = users.filter((x) => x.id !== u.id);
   const box = $("#keys");
-  let page = 0, cur = null;
-  const K = (i) => keys[i] || { type: "none", value: "", label: "" };
-  const setKey = (i, k) => { while (keys.length <= i) keys.push({ type: "none", value: "", label: "" }); keys[i] = k; };
+  let page = 0, cur = null; // cur = { m: -1 (téléphone) ou n° de module, i }
+  const modPage = [0, 0, 0];
+  const NONE = () => ({ type: "none", value: "", label: "" });
+  const arr = (m) => m < 0 ? keys : mods[m];
+  const K = (m, i) => arr(m)[i] || NONE();
+  const setKey = (m, i, k) => { const a = arr(m); while (a.length <= i) a.push(NONE()); a[i] = k; };
+  const trim = (m) => { const a = arr(m); while (a.length && a.at(-1).type === "none") a.pop(); };
+  const isCur = (m, i) => cur && cur.m === m && cur.i === i;
   const keyText = (k) => k.type === "none" ? "" : k.type === "line" ? (k.label || `Ligne ${u.id}`) : k.label || (k.type === "blf" ? (others.find((x) => x.id === k.value)?.name || k.value) : k.value);
-  // Téléphone dessiné comme sur la notice : touches de chaque côté de l'écran, libellés à l'écran, pages
+  const cell = (m, i, max, right = false) => {
+    if (i >= max) return `<span class="phv-k off"></span>`;
+    const k = K(m, i);
+    return `<button type="button" class="phv-k t-${k.type} ${isCur(m, i) ? "sel" : ""} ${right ? "rt" : ""}" data-key="${m}:${i}" title="${m < 0 ? "" : `Module ${m + 1}, `}touche ${i + 1}"><i></i><span>${esc(keyText(k)) || "<em>+</em>"}</span><b>${i + 1}</b></button>`;
+  };
+  const pagesNav = (n, curPage, attr) => n > 1 ? `<div class="phv-pages">${Array.from({ length: n }, (_, p) => `<button type="button" ${attr}="${p}" class="${p === curPage ? "on" : ""}">Page ${p + 1}</button>`).join("")}</div>` : "";
+  // Téléphone dessiné comme sur la notice (haut du poste) + modules d'extension à droite
   const drawVisual = () => {
     const start = page * L.perPage;
-    const cell = (i) => {
-      if (i >= L.n) return `<span class="phv-k off"></span>`;
-      const k = K(i);
-      return `<button type="button" class="phv-k t-${k.type} ${cur === i ? "sel" : ""}" data-key="${i}" title="Touche ${i + 1}"><i></i><span>${esc(keyText(k)) || '<em>+</em>'}</span><b>${i + 1}</b></button>`;
-    };
-    const col = (side) => Array.from({ length: L.perSide }, (_, r) => cell(start + side * L.perSide + r)).join("");
-    $("#phv").innerHTML = `<div class="phv ${L.touch ? "touch" : ""}">
-      <div class="phv-head"><span class="phv-brand">${esc(model?.brand || "Téléphone")}</span><span class="phv-model">${esc(model?.label.replace(/^\S+\s/, "") || "")}</span></div>
-      <div class="phv-top">
-        <div class="phv-col">${col(0)}</div>
-        <div class="phv-screen"><div class="phv-bar"><span>${esc(u.id)}</span><span>${L.pages > 1 ? `${page + 1}/${L.pages}` : ""}</span></div>
-          <div class="phv-mid">${L.sides === 2 ? `<span class="phv-clock">12:00</span>` : ""}</div>
-          <div class="phv-soft"><span>Historique</span><span>Annuaire</span><span>NPD</span><span>Menu</span></div></div>
-        ${L.sides === 2 ? `<div class="phv-col r">${col(1)}</div>` : ""}
-      </div>
-      <div class="phv-hard"><span>✉</span><span>🎧</span><span>🎙</span><span>⇆</span></div>
-      <div class="phv-pad">${"1 2 3 4 5 6 7 8 9 * 0 #".split(" ").map((x) => `<span>${x}</span>`).join("")}</div>
-      ${L.pages > 1 ? `<div class="phv-pages">${Array.from({ length: L.pages }, (_, p) => `<button type="button" data-page="${p}" class="${p === page ? "on" : ""}">Page ${p + 1}</button>`).join("")}</div>` : ""}
-    </div>`;
-    $("#phv").querySelectorAll("[data-key]").forEach((b) => b.onclick = () => { cur = Number(b.dataset.key); drawVisual(); drawPanel(); });
+    const col = (side) => Array.from({ length: L.perSide }, (_, r) => cell(-1, start + side * L.perSide + r, L.n, side === 1)).join("");
+    const phone = L.touch
+      ? `<div class="phv touch"><div class="phv-head"><span class="phv-brand">${esc(model?.brand || "Téléphone")}</span><span class="phv-model">${esc(model?.label.replace(/^\S+\s/, "") || "")}</span></div>
+          <div class="phv-screen big"><div class="phv-bar"><span>${esc(u.id)}</span><span>${L.pages > 1 ? `${page + 1}/${L.pages}` : ""}</span></div>
+            <div class="phv-tgrid"><div class="phv-col">${col(0)}</div><div class="phv-col r">${col(1)}</div></div>
+            <div class="phv-soft"><span>Historique</span><span>Annuaire</span><span>NPD</span><span>Menu</span></div></div>
+          ${pagesNav(L.pages, page, "data-page")}</div>`
+      : `<div class="phv"><div class="phv-head"><span class="phv-brand">${esc(model?.brand || "Téléphone")}</span><span class="phv-model">${esc(model?.label.replace(/^\S+\s/, "") || "")}</span></div>
+          <div class="phv-top"><div class="phv-col">${col(0)}</div>
+            <div class="phv-screen"><div class="phv-bar"><span>${esc(u.id)}</span><span>${L.pages > 1 ? `${page + 1}/${L.pages}` : ""}</span></div>
+              <div class="phv-mid">${L.sides === 2 ? `<span class="phv-clock">12:00</span>` : ""}</div>
+              <div class="phv-soft"><span>Historique</span><span>Annuaire</span><span>NPD</span><span>Menu</span></div></div>
+            ${L.sides === 2 ? `<div class="phv-col r">${col(1)}</div>` : ""}</div>
+          ${pagesNav(L.pages, page, "data-page")}</div>`;
+    const modules = EXP ? mods.map((_, m) => {
+      const half = EXP.perPage / 2, st = modPage[m] * EXP.perPage, max = EXP.perPage * EXP.pages;
+      const mc = (side) => Array.from({ length: half }, (_, r) => cell(m, st + side * half + r, max, side === 1)).join("");
+      return `<div class="phv phv-exp"><div class="phv-head"><span class="phv-brand">${esc(EXP.label.replace("Yealink ", ""))}</span><span class="phv-model">module ${m + 1}</span></div>
+        <div class="phv-screen exp"><div class="phv-tgrid"><div class="phv-col">${mc(0)}</div><div class="phv-col r">${mc(1)}</div></div></div>
+        ${pagesNav(EXP.pages, modPage[m], `data-mpage="${m}" data-p`)}</div>`;
+    }).join("") : "";
+    $("#phv").innerHTML = `${EXP ? `<div class="phv-mods"><span>Modules d'extension ${esc(EXP.label)} (${EXP.perPage} touches × ${EXP.pages} pages)</span>${[0, 1, 2, 3].map((n) => `<button type="button" data-nmods="${n}" class="${mods.length === n ? "on" : ""}">${n === 0 ? "Aucun" : n}</button>`).join("")}</div>` : ""}
+      <div class="phv-row">${phone}${modules}</div>
+      ${L.touch ? `<p class="hint" style="margin:8px 0 0">Écran tactile : les raccourcis s'affichent à l'écran, ${L.perPage} par page. La fonction « masquer » du téléphone les cache ou les montre tous : leur réglage ne change pas.</p>` : ""}`;
+    $("#phv").querySelectorAll("[data-key]").forEach((b) => b.onclick = () => { const [m, i] = b.dataset.key.split(":").map(Number); cur = { m, i }; drawVisual(); drawPanel(); });
     $("#phv").querySelectorAll("[data-page]").forEach((b) => b.onclick = () => { page = Number(b.dataset.page); drawVisual(); });
+    $("#phv").querySelectorAll("[data-mpage]").forEach((b) => b.onclick = () => { modPage[Number(b.dataset.mpage)] = Number(b.dataset.p); drawVisual(); });
+    $("#phv").querySelectorAll("[data-nmods]").forEach((b) => b.onclick = () => {
+      const n = Number(b.dataset.nmods);
+      while (mods.length < n) mods.push([]);
+      mods = mods.slice(0, n);
+      if (cur && cur.m >= n) cur = null;
+      drawAll();
+    });
   };
   const drawPanel = () => {
     const pnl = $("#phvpanel");
-    if (cur === null) { pnl.innerHTML = `<div class="phv-empty">Clique sur une touche du téléphone pour choisir ce qu'elle fait : <strong>BLF</strong> (supervision d'un collègue), <strong>Statut</strong> (Ne pas déranger), <strong>numérotation rapide</strong> ou <strong>ligne</strong>.</div>`; return; }
-    const k = K(cur);
-    pnl.innerHTML = `<div class="phv-ph"><strong>Touche ${cur + 1}</strong><span class="s">${L.pages > 1 ? `page ${Math.floor(cur / L.perPage) + 1}, ` : ""}${(cur % L.perPage) < L.perSide ? "à gauche" : "à droite"}</span></div>
-      <div class="phv-types">${Object.entries(o.key_types).map(([t, l]) => `<button type="button" data-t="${t}" class="${k.type === t ? "on" : ""}">${esc(l.split(" (")[0])}</button>`).join("")}</div>
+    if (!cur) { pnl.innerHTML = `<div class="phv-empty">Clique sur une touche ${EXP ? "du téléphone ou d'un module " : "du téléphone "}pour choisir ce qu'elle fait : <strong>BLF</strong> (supervision d'un collègue), <strong>Statut</strong> (Ne pas déranger), <strong>numérotation rapide</strong> ou <strong>ligne</strong>.</div>`; return; }
+    const { m, i } = cur, k = K(m, i);
+    const where = m < 0 ? `${L.pages > 1 ? `page ${Math.floor(i / L.perPage) + 1}, ` : ""}${(i % L.perPage) < L.perSide ? "à gauche" : "à droite"}`
+      : `module ${m + 1}, page ${Math.floor(i / EXP.perPage) + 1}, ${(i % EXP.perPage) < EXP.perPage / 2 ? "à gauche" : "à droite"}`;
+    pnl.innerHTML = `<div class="phv-ph"><strong>Touche ${i + 1}</strong><span class="s">${where}</span></div>
+      <div class="phv-types">${Object.entries(o.key_types).filter(([t]) => m < 0 || t !== "line").map(([t, l]) => `<button type="button" data-t="${t}" class="${k.type === t ? "on" : ""}">${esc(l.split(" (")[0])}</button>`).join("")}</div>
       ${k.type === "blf" ? `<label>Collègue supervisé<select data-pv="value"><option value="">— Choisir —</option>${others.map((x) => `<option value="${esc(x.id)}" ${k.value === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label>` : ""}
       ${k.type === "speed" ? `<label>Numéro<input data-pv="value" value="${esc(k.value)}" inputmode="tel" placeholder="06 12 34 56 78 ou 201"></label>` : ""}
       ${k.type === "none" ? "" : `<label>Libellé à l'écran<input data-pv="label" value="${esc(k.label)}" maxlength="24" placeholder="${k.type === "line" ? "facultatif" : ""}"></label>`}
       <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
       <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button></div>`;
-    pnl.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { setKey(cur, { type: b.dataset.t, value: "", label: b.dataset.t === "status" ? "Ne pas déranger" : "" }); drawAll(); });
+    pnl.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { setKey(m, i, { type: b.dataset.t, value: "", label: b.dataset.t === "status" ? "Ne pas déranger" : "" }); drawAll(); });
     pnl.querySelectorAll("[data-pv]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
-      const k2 = { ...K(cur), [el.dataset.pv]: el.value };
+      const k2 = { ...K(m, i), [el.dataset.pv]: el.value };
       if (el.dataset.pv === "value" && k2.type === "blf") k2.label = others.find((x) => x.id === el.value)?.name || "";
-      setKey(cur, k2);
+      setKey(m, i, k2);
       if (el.tagName === "SELECT") drawAll(); else { drawVisual(); drawList(); }
     }));
-    pnl.querySelector("[data-clear]").onclick = () => { setKey(cur, { type: "none", value: "", label: "" }); while (keys.length && keys.at(-1).type === "none") keys.pop(); drawAll(); };
+    pnl.querySelector("[data-clear]").onclick = () => { setKey(m, i, NONE()); trim(m); drawAll(); };
   };
   const drawAll = () => { drawVisual(); drawPanel(); drawList(); };
   const draw = drawAll;
@@ -1177,7 +1206,8 @@ function wireKeys(u, users) {
   $("#kf").onsubmit = async (e) => {
     e.preventDefault();
     try {
-      await api("PUT", `/api/extensions/${u.id}`, { phone: { keys } });
+      mods.forEach((_, m) => trim(m));
+      await api("PUT", `/api/extensions/${u.id}`, { phone: { keys, modules: mods.map((k) => ({ keys: k })) } });
       flash = { text: "Touches enregistrées. Le téléphone les reçoit au prochain provisioning (bouton Reprovisionner dans Téléphone IP)." };
       renderUser(u.id, "touches");
     } catch (err) { showFormError(e.target, err); }

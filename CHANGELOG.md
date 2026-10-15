@@ -1,5 +1,8 @@
 # Nouveautés de Callikoe
 
+## 1.3.1
+- Touches : modules d'extension Yealink EXP43, EXP50 et EXP55 (jusqu'à 3), écrans tactiles (T57W, T48U, T58) dessinés avec leurs raccourcis à l'écran, dessin du poste sans le clavier
+
 ## 1.3.0
 - Touches du téléphone : le poste est dessiné comme sur la notice, on clique sur une touche pour choisir BLF, Statut, numérotation rapide ou ligne
 - Rôles : accès complet, technicien, accès restreint (utilisateurs, téléphones, routage, annuaire) et accès visuel

@@ -64,6 +64,14 @@ export const RING_TYPES = { interne: "Appel interne (collègue)", externe: "Appe
 export const RINGERS = { "": "Sonnerie par défaut du téléphone", 1: "Sonnerie 1", 2: "Sonnerie 2", 3: "Sonnerie 3", 4: "Sonnerie 4", 5: "Sonnerie 5", 6: "Sonnerie 6", 7: "Sonnerie 7", 8: "Sonnerie 8" };
 export const KEY_TYPES = { line: "Ligne", blf: "BLF (supervision + interception)", status: "Statut Ne pas déranger (voyant + bascule)", speed: "Numérotation rapide", none: "Aucune" };
 
+/** Modules d'extension Yealink : touches par page, pages, téléphones compatibles (préfixe du modèle). */
+export const EXPANSIONS = {
+  exp55: { label: "Yealink EXP55", perPage: 26, pages: 3, models: ["yealink-t73", "yealink-t74", "yealink-t77"] },
+  exp50: { label: "Yealink EXP50", perPage: 20, pages: 3, models: ["yealink-t53", "yealink-t54", "yealink-t57", "yealink-t58"] },
+  exp43: { label: "Yealink EXP43", perPage: 20, pages: 3, models: ["yealink-t43", "yealink-t46", "yealink-t48"] },
+};
+export const expansionFor = (modelId) => Object.entries(EXPANSIONS).find(([, e]) => e.models.some((m) => String(modelId || "").startsWith(m)))?.[0] || "";
+
 export function defaultPhone(tz = "Europe/Paris") {
   return {
     model: "", mac: "", admin_password: "",
@@ -73,6 +81,7 @@ export function defaultPhone(tz = "Europe/Paris") {
       rings: { interne: "", externe: "", groupe: "", file: "", svi: "" },
     },
     keys: [{ type: "line", value: "", label: "" }],
+    modules: [], // modules d'extension : [{ keys: [...] }], 3 au plus
   };
 }
 
@@ -83,6 +92,7 @@ export function phoneFromStored(stored, tz) {
     ...d, ...p,
     settings: { ...d.settings, ...p.settings },
     keys: Array.isArray(p.keys) && p.keys.length ? p.keys : d.keys,
+    modules: Array.isArray(p.modules) ? p.modules : [],
   };
 }
 
@@ -100,6 +110,24 @@ export const formatMac = (m) => (m || "").toUpperCase().replace(/(..)(?=.)/g, "$
 
 const pick = (table, v, fallback) => (Object.prototype.hasOwnProperty.call(table, String(v)) ? (typeof fallback === "number" ? Number(v) : String(v)) : fallback);
 const cleanLabel = (s) => String(s ?? "").replace(/[\r\n=#]/g, " ").trim().slice(0, 24);
+
+/** Une touche programmable (téléphone ou module d'extension). */
+function validKey(k, i, ctx, field, word) {
+  const type = KEY_TYPES[k?.type] ? k.type : "none";
+  const value = String(k?.value ?? "").trim();
+  const label = cleanLabel(k?.label);
+  if (type === "blf") {
+    if (!ctx.extensions?.has(value)) throw new PhoneError(`${word} ${i + 1} : choisis l'utilisateur à superviser.`, `${field}.${i}`);
+    return { type, value, label: label || ctx.extensions.get(value) || value };
+  }
+  if (type === "speed") {
+    if (!/^[0-9*#+]{2,20}$/.test(value.replace(/[\s.]/g, ""))) throw new PhoneError(`${word} ${i + 1} : numéro invalide.`, `${field}.${i}`);
+    if (!label) throw new PhoneError(`${word} ${i + 1} : indique un libellé.`, `${field}.${i}`);
+    return { type, value: value.replace(/[\s.]/g, ""), label };
+  }
+  if (type === "status") return { type, value: "", label: label || "Ne pas déranger" };
+  return { type, value: "", label: type === "line" ? label : "" };
+    }
 
 /**
  * Valide l'onglet Téléphone IP.
@@ -137,23 +165,20 @@ export function validatePhone(input, current, ctx) {
   if (input.keys !== undefined) {
     if (!Array.isArray(input.keys)) throw new PhoneError("Touches invalides.", "phone.keys");
     if (input.keys.length > 40) throw new PhoneError("40 touches au maximum.", "phone.keys");
-    p.keys = input.keys.map((k, i) => {
-      const type = KEY_TYPES[k?.type] ? k.type : "none";
-      const value = String(k?.value ?? "").trim();
-      const label = cleanLabel(k?.label);
-      if (type === "blf") {
-        if (!ctx.extensions?.has(value)) throw new PhoneError(`Touche ${i + 1} : choisis l'utilisateur à superviser.`, `phone.keys.${i}`);
-        return { type, value, label: label || ctx.extensions.get(value) || value };
-      }
-      if (type === "speed") {
-        if (!/^[0-9*#+]{2,20}$/.test(value.replace(/[\s.]/g, ""))) throw new PhoneError(`Touche ${i + 1} : numéro invalide.`, `phone.keys.${i}`);
-        if (!label) throw new PhoneError(`Touche ${i + 1} : indique un libellé.`, `phone.keys.${i}`);
-        return { type, value: value.replace(/[\s.]/g, ""), label };
-      }
-      if (type === "status") return { type, value: "", label: label || "Ne pas déranger" };
-      return { type, value: "", label: type === "line" ? label : "" };
-    });
+    p.keys = input.keys.map((k, i) => validKey(k, i, ctx, "phone.keys", "Touche"));
     while (p.keys.length && p.keys.at(-1).type === "none") p.keys.pop();
+  }
+  if (input.modules !== undefined) {
+    if (!Array.isArray(input.modules) || input.modules.length > 3) throw new PhoneError("3 modules d'extension au maximum.", "phone.modules");
+    const exp = EXPANSIONS[expansionFor(p.model)];
+    if (input.modules.length && !exp) throw new PhoneError("Ce modèle n'accepte pas de module d'extension.", "phone.modules");
+    p.modules = input.modules.map((m, mi) => {
+      const keys = Array.isArray(m?.keys) ? m.keys : [];
+      if (keys.length > exp.perPage * exp.pages) throw new PhoneError(`Module ${mi + 1} : ${exp.perPage * exp.pages} touches au maximum.`, `phone.modules.${mi}`);
+      const out = keys.map((k, i) => validKey(k, i, ctx, `phone.modules.${mi}.keys`, `Module ${mi + 1}, touche`));
+      while (out.length && out.at(-1).type === "none") out.pop();
+      return { keys: out };
+    });
   }
   if (p.mac && !p.admin_password) p.admin_password = randomPassword(12);
   return p;
@@ -261,15 +286,24 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     "",
     "## Touches",
   ];
+  const keyLines = (p, k) => {
+    if (k.type === "line") return [v(`${p}.type`, 15), v(`${p}.line`, 1), v(`${p}.value`, ""), v(`${p}.label`, k.label || "")];
+    if (k.type === "blf") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label || names.get(k.value) || k.value)];
+    if (k.type === "status") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `status${user.id}`), v(`${p}.label`, k.label || "Ne pas déranger")];
+    if (k.type === "speed") return [v(`${p}.type`, 13), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label)];
+    return [v(`${p}.type`, 0), v(`${p}.value`, ""), v(`${p}.label`, "")];
+  };
   const n = Math.max(model?.keys || 0, phone.keys.length);
-  for (let i = 0; i < n; i++) {
-    const k = phone.keys[i] || { type: "none" };
-    const p = `linekey.${i + 1}`;
-    if (k.type === "line") L.push(v(`${p}.type`, 15), v(`${p}.line`, 1), v(`${p}.value`, ""), v(`${p}.label`, k.label || ""));
-    else if (k.type === "blf") L.push(v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label || names.get(k.value) || k.value));
-    else if (k.type === "status") L.push(v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `status${user.id}`), v(`${p}.label`, k.label || "Ne pas déranger"));
-    else if (k.type === "speed") L.push(v(`${p}.type`, 13), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label));
-    else L.push(v(`${p}.type`, 0), v(`${p}.value`, ""), v(`${p}.label`, ""));
+  for (let i = 0; i < n; i++) L.push(...keyLines(`linekey.${i + 1}`, phone.keys[i] || { type: "none" }));
+  // Modules d'extension (EXP43 / EXP50 / EXP55) : toutes les touches écrites, les vides remises à zéro
+  const exp = EXPANSIONS[expansionFor(phone.model)];
+  if (exp) {
+    L.push("", "## Modules d'extension");
+    for (let m = 0; m < 3; m++) {
+      const keys = phone.modules?.[m]?.keys || [];
+      if (m >= (phone.modules || []).length && !keys.length) continue;
+      for (let i = 0; i < exp.perPage * exp.pages; i++) L.push(...keyLines(`expansion_module.${m + 1}.key.${i + 1}`, keys[i] || { type: "none" }));
+    }
   }
   L.push("");
   return L.join("\n");

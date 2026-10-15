@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
-import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES,
+import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType, modelById } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
 import { parseRouting } from "./nlroute.mjs";
@@ -596,7 +596,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   }
   const phoneOptions = () => ({
     models: MODELS, languages: LANGUAGES, date_formats: DATE_FORMATS, time_formats: TIME_FORMATS, timezones: TIMEZONES,
-    backlight: BACKLIGHT, screensaver: SCREENSAVER, transfer: TRANSFER, led: LED, transports: TRANSPORTS, key_types: KEY_TYPES,
+    backlight: BACKLIGHT, screensaver: SCREENSAVER, transfer: TRANSFER, led: LED, transports: TRANSPORTS, key_types: KEY_TYPES, expansions: EXPANSIONS,
     ring_types: RING_TYPES, ringers: RINGERS,
   });
 
