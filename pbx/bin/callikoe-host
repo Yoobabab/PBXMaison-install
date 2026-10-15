@@ -451,10 +451,7 @@ reg_del() {
 }
 aiguilleur() {
   node "$APP/pbx/lib/kamailio-tables.mjs" "$REG" "$KDB" "$TVAR" >/dev/null
-  chown -R kamailio:kamailio "$KDB"
-  local t; for t in dom tru prx; do
-    kamcmd htable.reload "$t" >/dev/null 2>&1 || { warn "Rechargement de l'aiguilleur impossible ($t) : redémarrage"; systemctl restart kamailio; return 0; }
-  done
+  "$APP/pbx/bin/callikoe-kamreload" || true
 }
 
 # Lit un pbx-config.json (fichier ou base64) et le vérifie ; écrit le fichier dans $2

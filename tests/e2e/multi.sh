@@ -298,7 +298,7 @@ sleep 1
 for c in clia clib; do astx $c "logger add channel sipdebug notice,warning,error,verbose" >/dev/null; astx $c "core set verbose 3" >/dev/null; astx $c "pjsip set logger on" >/dev/null; done
 sipdump() { # sipdump <PBX client> : diagnostics dans multi-diag.txt (publiés à part)
   local D="$PWD/multi-diag.txt"
-  { echo "== tables de l'aiguilleur"; sudo kamcmd htable.dump dom 2>&1 | head -12
+  { echo "== tables de l'aiguilleur"; sudo kamcmd -s unix:/run/kamailio/kamailio_ctl htable.dump tru 2>&1 | grep -E "name|error" | head -12; sudo journalctl -t callikoe-aiguilleur --no-pager | tail -n 8
     sudo ls -la /run/kamailio 2>&1; systemctl cat kamailio 2>/dev/null | grep -E "^(Exec|User|Protect|ReadWrite|Environment)"
     sudo journalctl -u kamailio --no-pager | grep -iE "htable|db_text|dbt_|error|CALLIKOE" | grep -v reparse_on | tail -n 12 | cut -c1-220
     echo "== SIP vu par $1"

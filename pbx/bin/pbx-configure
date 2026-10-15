@@ -462,10 +462,7 @@ EOF
 kamailio_sync() {
   local out
   out="$(node "$APP/pbx/lib/kamailio-tables.mjs" /etc/callikoe/tenants.json /var/lib/callikoe/kamailio/db /var/lib/callikoe/t)"
-  chown -R kamailio:kamailio /var/lib/callikoe/kamailio/db 2>/dev/null || true
-  local t; for t in dom tru prx; do
-    /usr/sbin/kamcmd htable.reload "$t" >/dev/null 2>&1 || { systemctl restart kamailio >/dev/null 2>&1 || true; break; }
-  done
+  "$APP/pbx/bin/callikoe-kamreload" >/dev/null 2>&1 || true
   echo "$out"
 }
 

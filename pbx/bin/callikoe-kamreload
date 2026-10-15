@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Recharge les tables de l'aiguilleur SIP (Kamailio) sans coupure ; en cas d'échec, redémarre l'aiguilleur.
+# (kamcmd renvoie 0 même quand le rechargement échoue : on vérifie sa réponse)
+set -uo pipefail
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+SOCK=unix:/run/kamailio/kamailio_ctl
+chown -R kamailio:kamailio /var/lib/callikoe/kamailio/db 2>/dev/null || true
+for t in dom tru prx; do
+  out="$(kamcmd -s "$SOCK" htable.reload "$t" 2>&1)"
+  if [[ "$out" != *"reloaded"* ]]; then
+    logger -t callikoe-aiguilleur "rechargement de la table $t impossible ($out) : redémarrage de l'aiguilleur"
+    systemctl restart kamailio
+    exit 0
+  fi
+done
+logger -t callikoe-aiguilleur "tables rechargées"
