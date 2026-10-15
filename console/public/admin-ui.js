@@ -432,7 +432,7 @@ async function pageLicense() {
   H.setNav("licence");
   const l = await H.api("GET", "/api/license");
   const pct = l.max_calls ? Math.min(100, Math.round(100 * l.usage.calls / l.max_calls)) : 0;
-  const EDITIONS = { start: "Start", pro: "Pro", enterprise: "Entreprise" };
+  const EDITIONS = { basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" };
   H.app.innerHTML = head("Licence", "Informations de licence et d'utilisation du standard.") +
     `<div class="cx-lic"><div class="cx-lic-card"><span class="cx-lic-ed">Callikoe ${H.esc(EDITIONS[l.edition] || l.edition || "")}</span>
       <div class="cx-lic-key mono">${H.esc(l.key || "—")}</div>
@@ -445,7 +445,19 @@ async function pageLicense() {
     <div class="panel" style="margin-top:18px"><div class="ph"><h2>Détails</h2></div><div class="cx-kv">
       ${[["Nom du PBX", l.pbx.name], ["Société", l.pbx.company], ["Adresse", l.pbx.fqdn], ["Administrateur", l.pbx.admin_email], ["Identifiant du PBX", l.pbx.id], ["Version", `${l.system.version}${l.system.commit ? ` (${l.system.commit})` : ""}`], ["Système", l.system.os], ["Installé le", l.system.installed_at ? fmtDT(l.system.installed_at) : "—"]]
         .map(([k, v]) => `<div><span>${k}</span><b class="${k.startsWith("Identifiant") ? "mono" : ""}">${H.esc(v || "—")}</b></div>`).join("")}</div></div>
-    <p class="hint" style="margin-top:14px">Pour changer d'édition ou ajouter des appels simultanés, contacte IRT NETWORK : la nouvelle licence s'applique en rechargeant le fichier de configuration (<a href="#/systeme">Système</a>).</p>`;
+    <form class="panel" id="licf" style="margin-top:18px" novalidate><div class="ph"><h2>Changer de licence</h2></div><div class="pad stack">
+      <p class="hint" style="margin:0">Changement d'édition (ex. Pro → Entreprise), d'appels simultanés (ex. 4 → 8) ou renouvellement : génère la nouvelle clé dans le portail Callikoe (fiche du PBX › Changer la licence), puis colle-la ici. Elle s'applique tout de suite, sans couper les appels en cours.</p>
+      <label>Nouvelle clé de licence<textarea name="token" rows="3" class="mono" placeholder="CLK1.…" spellcheck="false" autocomplete="off"></textarea></label>
+      <div class="form-msg"></div>
+      <div class="row"><button class="btn">Appliquer la nouvelle licence</button></div></div></form>`;
+  H.$("#licf").onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector("button"); btn.disabled = true;
+    try {
+      const r = await H.api("POST", "/api/license", { token: e.target.token.value });
+      H.setFlash({ text: `Licence appliquée : Callikoe ${EDITIONS[r.edition] || r.edition}, ${r.max_calls} appels simultanés.` }); pageLicense();
+    } catch (err) { H.showFormError(e.target, err); btn.disabled = false; }
+  };
 }
 
 // ================================================================ Passerelles et DECT
@@ -554,6 +566,30 @@ async function pageAccounts() {
 }
 
 /** Point d'entrée : page = sortants | securite | enregistrements | codes | sauvegardes | mises-a-jour | alertes | licence | passerelles */
+// ================================================================ Capture réseau (pcap pour Wireshark)
+async function pageCapture() {
+  H.setNav("cap");
+  const size = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)} Mo` : `${Math.max(1, Math.round(n / 1e3))} Ko`;
+  const d = await H.api("GET", "/api/capture");
+  H.app.innerHTML = head("Capture réseau", "Enregistre le trafic des appels (comme Wireshark) pour analyser un problème : appel refusé, pas de son, son coupé, touches non reconnues.") +
+    `<form class="panel" id="capf" novalidate><div class="ph"><h2>${d.running ? `${pill("wait", "Capture en cours…")}` : "Nouvelle capture"}</h2></div><div class="pad stack"><div class="form-msg"></div>
+      <div class="grid3"><label>Contenu<select name="mode"><option value="sip">Signalisation SIP seulement (léger)</option><option value="all">SIP + audio RTP (pour « pas de son »)</option></select></label>
+        <label>Durée<select name="seconds">${[[30, "30 secondes"], [60, "1 minute"], [120, "2 minutes"], [300, "5 minutes"], [600, "10 minutes"]].map(([v, l]) => `<option value="${v}" ${v === 120 ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+      <p class="hint" style="margin:0">Lance la capture, reproduis l'appel qui pose problème, puis télécharge le fichier <code>.pcap</code> et ouvre-le dans Wireshark (Téléphonie › Appels VoIP pour voir l'échange et réécouter l'audio). Les postes en SIP TLS (port 5061) apparaissent chiffrés. Le fichier contient les numéros et, avec l'audio, les conversations : à garder pour soi et à supprimer après analyse. 20 captures gardées au plus.</p>
+      <div class="row">${d.running ? '<button type="button" class="btn" id="capstop">Arrêter la capture</button>' : '<button class="btn">Démarrer la capture</button>'}</div></div></form>
+    <div class="panel" style="margin-top:18px"><div class="ph"><h2>Captures</h2></div>
+      ${d.files.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Contenu</th><th>Taille</th><th></th></tr></thead><tbody>${d.files.map((f) => `<tr><td>${fmtDT(f.at)}</td><td>${f.mode === "all" ? "SIP + audio" : "SIP"}</td><td>${f.ready ? size(f.size) : pill("wait", "en cours")}</td>
+        <td class="acts">${f.ready ? `<a class="btn ghost sm" href="/api/capture/file/${encodeURIComponent(f.name)}" download>Télécharger</a> <button class="btn ghost sm" data-capdel="${H.esc(f.name)}">Supprimer</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Aucune capture.</div>'}</div>`;
+  H.$("#capf").onsubmit = async (e) => {
+    e.preventDefault();
+    try { const r = await H.api("POST", "/api/capture/start", H.formData(e.target)); H.setFlash({ text: `Capture démarrée pour ${r.seconds} s : reproduis l'appel maintenant.` }); pageCapture(); }
+    catch (err) { H.showFormError(e.target, err); }
+  };
+  H.$("#capstop")?.addEventListener("click", async () => { await H.api("POST", "/api/capture/stop"); pageCapture(); });
+  H.app.querySelectorAll("[data-capdel]").forEach((b) => b.onclick = async () => { await H.api("DELETE", `/api/capture/file/${encodeURIComponent(b.dataset.capdel)}`); pageCapture(); });
+  if (d.running || d.files.some((f) => !f.ready)) H.poll(async () => { const x = await H.api("GET", "/api/capture"); if (!x.running && x.files.every((f) => f.ready)) { if (location.hash === "#/capture") pageCapture(); return true; } return false; }, 4000);
+}
+
 export async function renderAdmin(helpers, page, sub) {
   H = helpers;
   switch (page) {
@@ -567,5 +603,6 @@ export async function renderAdmin(helpers, page, sub) {
     case "licence": return pageLicense();
     case "passerelles": return pageGateways(sub);
     case "comptes": return pageAccounts();
+    case "capture": return pageCapture();
   }
 }

@@ -114,6 +114,7 @@ const NI = {
   updates: '<path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/>',
   alerts: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
   licence: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10h6M7 14h4"/><circle cx="17" cy="12" r="2"/>',
+  cap: '<path d="M3 12h3l2-5 4 10 2-5h7"/>',
   sys: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   soft: '<path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/>',
   out2: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
@@ -124,16 +125,19 @@ const NAV = [
   ["", [["#/", "Tableau de bord", "home"]]],
   ["Téléphonie", [["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"], ["#/passerelles", "Passerelles et DECT", "gw"],
     ["#/gestion", "Gestion d'appels", "cf"], ["#/sortants", "Règles sortantes", "out"], ["#/trunks", "Trunks", "trunks"], ["#/codes", "Codes de raccourci", "codes"]]],
-  ["Activité", [["#/journal", "Journal des appels", "cdr"], ["#/enregistrements", "Enregistrements", "rec"], ["#/annuaire", "Annuaire", "book"]]],
+  ["Activité", [["#/journal", "Journal des appels", "cdr"], ["#/enregistrements", "Enregistrements", "rec"], ["#/annuaire", "Annuaire", "book"], ["#/capture", "Capture réseau", "cap"]]],
   ["Administration", [["#/securite", "Sécurité", "sec"], ["#/sauvegardes", "Sauvegardes", "backup"], ["#/mises-a-jour", "Mises à jour", "updates"],
     ["#/comptes", "Comptes", "accounts"], ["#/alertes", "Alertes", "alerts"], ["#/licence", "Licence", "licence"], ["#/systeme", "Système", "sys"]]],
 ];
+// Accès restreint (client) : ces pages restent réservées à l'installateur
+const CLIENT_HIDDEN = new Set(["cap", "gw", "out", "trunks", "codes", "sec", "backup", "updates", "accounts", "alerts", "licence", "sys"]);
 const NAV_LABEL = Object.fromEntries(NAV.flatMap(([g, items]) => items.map(([, l, k]) => [k, [g, l]])));
 function setNav(active) {
   const on = !!state?.logged_in;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  $("#nav").innerHTML = on ? NAV.map(([g, items]) => `<div class="ng">${g ? `<span class="ngl">${g}</span>` : ""}${items.map(([h, l, k]) =>
+  const nav = NAV.map(([g, items]) => [g, items.filter(([, , k]) => state?.role !== "client" || !CLIENT_HIDDEN.has(k))]).filter(([, items]) => items.length);
+  $("#nav").innerHTML = on ? nav.map(([g, items]) => `<div class="ng">${g ? `<span class="ngl">${g}</span>` : ""}${items.map(([h, l, k]) =>
     `<a href="${h}" class="${k === active ? "on" : ""}" ${k === active ? 'aria-current="page"' : ""}>${nicon(k)}<span>${l}</span></a>`).join("")}</div>`).join("") : "";
   $("#user").innerHTML = on ? `<a class="sf-link" href="/softphone" target="_blank" rel="noopener">${nicon("soft", 17)}<span>Softphone web</span></a>
     <div class="sf-user"><span class="sf-av">${esc((state.email || "?").charAt(0).toUpperCase())}</span><span class="sf-mail" title="${esc(state.email || "")}">${esc(state.email || "")}</span>
@@ -453,6 +457,7 @@ async function renderDashboard() {
 const fmtSize = (n) => n == null ? "—" : n >= 1e9 ? `${(n / 1e9).toFixed(2)} Go` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} Mo` : `${Math.round(n / 1e3)} Ko`;
 async function drawSystem() {
   const box = $("#sysbox"); if (!box) return;
+  if (state?.role === "client") { box.closest(".panel")?.remove(); box.remove(); return; }
   let y; try { y = await api("GET", "/api/system"); } catch (e) { box.innerHTML = `<div class="pad err">${esc(e.message)}</div>`; return; }
   const disk = y.disk ? `${fmtSize(y.disk.total - y.disk.free)} / ${fmtSize(y.disk.total)}` : "—";
   const bk = y.backup, last = bk.last;
@@ -815,7 +820,7 @@ async function renderUserNew(from) {
   };
 }
 
-const USER_TABS = [["general", "Général"], ["renvois", "Renvois d'appels"], ["telephone", "Téléphone IP"], ["touches", "Touches BLF"], ["messagerie", "Messagerie vocale"], ["options", "Options"]];
+const USER_TABS = [["general", "Général"], ["renvois", "Renvois d'appels"], ["telephone", "Téléphone IP"], ["touches", "Touches"], ["messagerie", "Messagerie vocale"], ["options", "Options"]];
 let phoneOpts = null;
 const fmtMac = (m) => (m || "").toUpperCase().replace(/(..)(?=.)/g, "$1:");
 const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—";
@@ -944,9 +949,10 @@ async function renderUser(id, tab = "general") {
     const ph = u.phone, o = phoneOpts;
     const model = o.models.find((m) => m.id === ph.model);
     body = `<form method="post" id="kf" novalidate class="pad stack"><div class="form-msg"></div>
-      <p class="hint" style="margin:0">${model ? `${esc(model.label)} : ${model.keys} touches programmables (sur plusieurs pages).` : "Choisis le modèle dans « Téléphone IP » pour connaître le nombre de touches."}
-        Une touche <strong>BLF</strong> s'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.</p>
-      <div class="keys" id="keys"></div>
+      <p class="hint" style="margin:0">${model ? `${esc(model.label)} : ${model.keys} touches programmables${keyLayout(model).pages > 1 ? ` (${keyLayout(model).pages} pages)` : ""}.` : "Choisis le modèle dans « Téléphone IP » pour connaître le nombre de touches."}
+        Clique sur une touche du téléphone pour la régler. Une touche <strong>BLF</strong> s'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.</p>
+      <div class="phv-wrap"><div id="phv"></div><div id="phvpanel" class="phv-panel"></div></div>
+      <details class="phv-list"><summary>Vue en liste</summary><div class="keys" id="keys"></div></details>
       <div class="row"><button type="button" class="btn ghost sm" id="addkey">+ Ajouter une touche</button>
         <button type="button" class="btn ghost sm" id="addall">+ BLF pour tous les utilisateurs</button></div>
       <div class="actions" style="padding-top:16px"><button class="btn">Enregistrer</button></div></form>`;
@@ -1074,12 +1080,73 @@ async function wireAppQr(u) {
   try { idle((await api("GET", `/api/extensions/${u.id}/app-token`)).active); } catch { box.remove(); }
 }
 
+/** Disposition des touches programmables : touches par côté et par page, écran tactile ou non. */
+function keyLayout(model) {
+  const n = model?.keys || 10;
+  const touch = /x(480|600)$/.test(model?.screen || "");
+  const perSide = n >= 24 ? 5 : n >= 12 ? 3 : n >= 4 ? 2 : n;
+  const sides = n >= 4 ? 2 : 1;
+  return { n, touch, perSide, sides, perPage: perSide * sides, pages: Math.ceil(n / (perSide * sides)) };
+}
 function wireKeys(u, users) {
   const o = phoneOpts;
+  const model = o.models.find((m) => m.id === u.phone.model);
+  const L = keyLayout(model);
   let keys = u.phone.keys.map((k) => ({ ...k }));
   const others = users.filter((x) => x.id !== u.id);
   const box = $("#keys");
-  const draw = () => {
+  let page = 0, cur = null;
+  const K = (i) => keys[i] || { type: "none", value: "", label: "" };
+  const setKey = (i, k) => { while (keys.length <= i) keys.push({ type: "none", value: "", label: "" }); keys[i] = k; };
+  const keyText = (k) => k.type === "none" ? "" : k.type === "line" ? (k.label || `Ligne ${u.id}`) : k.label || (k.type === "blf" ? (others.find((x) => x.id === k.value)?.name || k.value) : k.value);
+  // Téléphone dessiné comme sur la notice : touches de chaque côté de l'écran, libellés à l'écran, pages
+  const drawVisual = () => {
+    const start = page * L.perPage;
+    const cell = (i) => {
+      if (i >= L.n) return `<span class="phv-k off"></span>`;
+      const k = K(i);
+      return `<button type="button" class="phv-k t-${k.type} ${cur === i ? "sel" : ""}" data-key="${i}" title="Touche ${i + 1}"><i></i><span>${esc(keyText(k)) || '<em>+</em>'}</span><b>${i + 1}</b></button>`;
+    };
+    const col = (side) => Array.from({ length: L.perSide }, (_, r) => cell(start + side * L.perSide + r)).join("");
+    $("#phv").innerHTML = `<div class="phv ${L.touch ? "touch" : ""}">
+      <div class="phv-head"><span class="phv-brand">${esc(model?.brand || "Téléphone")}</span><span class="phv-model">${esc(model?.label.replace(/^\S+\s/, "") || "")}</span></div>
+      <div class="phv-top">
+        <div class="phv-col">${col(0)}</div>
+        <div class="phv-screen"><div class="phv-bar"><span>${esc(u.id)}</span><span>${L.pages > 1 ? `${page + 1}/${L.pages}` : ""}</span></div>
+          <div class="phv-mid">${L.sides === 2 ? `<span class="phv-clock">12:00</span>` : ""}</div>
+          <div class="phv-soft"><span>Historique</span><span>Annuaire</span><span>NPD</span><span>Menu</span></div></div>
+        ${L.sides === 2 ? `<div class="phv-col r">${col(1)}</div>` : ""}
+      </div>
+      <div class="phv-hard"><span>✉</span><span>🎧</span><span>🎙</span><span>⇆</span></div>
+      <div class="phv-pad">${"1 2 3 4 5 6 7 8 9 * 0 #".split(" ").map((x) => `<span>${x}</span>`).join("")}</div>
+      ${L.pages > 1 ? `<div class="phv-pages">${Array.from({ length: L.pages }, (_, p) => `<button type="button" data-page="${p}" class="${p === page ? "on" : ""}">Page ${p + 1}</button>`).join("")}</div>` : ""}
+    </div>`;
+    $("#phv").querySelectorAll("[data-key]").forEach((b) => b.onclick = () => { cur = Number(b.dataset.key); drawVisual(); drawPanel(); });
+    $("#phv").querySelectorAll("[data-page]").forEach((b) => b.onclick = () => { page = Number(b.dataset.page); drawVisual(); });
+  };
+  const drawPanel = () => {
+    const pnl = $("#phvpanel");
+    if (cur === null) { pnl.innerHTML = `<div class="phv-empty">Clique sur une touche du téléphone pour choisir ce qu'elle fait : <strong>BLF</strong> (supervision d'un collègue), <strong>Statut</strong> (Ne pas déranger), <strong>numérotation rapide</strong> ou <strong>ligne</strong>.</div>`; return; }
+    const k = K(cur);
+    pnl.innerHTML = `<div class="phv-ph"><strong>Touche ${cur + 1}</strong><span class="s">${L.pages > 1 ? `page ${Math.floor(cur / L.perPage) + 1}, ` : ""}${(cur % L.perPage) < L.perSide ? "à gauche" : "à droite"}</span></div>
+      <div class="phv-types">${Object.entries(o.key_types).map(([t, l]) => `<button type="button" data-t="${t}" class="${k.type === t ? "on" : ""}">${esc(l.split(" (")[0])}</button>`).join("")}</div>
+      ${k.type === "blf" ? `<label>Collègue supervisé<select data-pv="value"><option value="">— Choisir —</option>${others.map((x) => `<option value="${esc(x.id)}" ${k.value === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label>` : ""}
+      ${k.type === "speed" ? `<label>Numéro<input data-pv="value" value="${esc(k.value)}" inputmode="tel" placeholder="06 12 34 56 78 ou 201"></label>` : ""}
+      ${k.type === "none" ? "" : `<label>Libellé à l'écran<input data-pv="label" value="${esc(k.label)}" maxlength="24" placeholder="${k.type === "line" ? "facultatif" : ""}"></label>`}
+      <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
+      <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button></div>`;
+    pnl.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { setKey(cur, { type: b.dataset.t, value: "", label: b.dataset.t === "status" ? "Ne pas déranger" : "" }); drawAll(); });
+    pnl.querySelectorAll("[data-pv]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+      const k2 = { ...K(cur), [el.dataset.pv]: el.value };
+      if (el.dataset.pv === "value" && k2.type === "blf") k2.label = others.find((x) => x.id === el.value)?.name || "";
+      setKey(cur, k2);
+      if (el.tagName === "SELECT") drawAll(); else { drawVisual(); drawList(); }
+    }));
+    pnl.querySelector("[data-clear]").onclick = () => { setKey(cur, { type: "none", value: "", label: "" }); while (keys.length && keys.at(-1).type === "none") keys.pop(); drawAll(); };
+  };
+  const drawAll = () => { drawVisual(); drawPanel(); drawList(); };
+  const draw = drawAll;
+  const drawList = () => {
     box.innerHTML = keys.length ? keys.map((k, i) => `<div class="keyrow" data-i="${i}">
       <span class="kn">${i + 1}</span>
       <select data-f="type">${Object.entries(o.key_types).map(([t, l]) => `<option value="${t}" ${k.type === t ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
@@ -1092,6 +1159,7 @@ function wireKeys(u, users) {
       const i = Number(row.dataset.i);
       row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
         keys[i][el.dataset.f] = el.value;
+        if (el.dataset.f === "label") drawVisual();
         if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = keys[i].type === "status" ? "Ne pas déranger" : ""; draw(); }
         if (el.dataset.f === "value" && keys[i].type === "blf") { keys[i].label = others.find((x) => x.id === el.value)?.name || ""; draw(); }
       }));
@@ -1307,7 +1375,7 @@ async function route() {
     const inv = /^#\/invitation\/([\w-]+)$/.exec(location.hash);
     if (inv && !state.logged_in) return renderInvite(inv[1]);
     if (!state.logged_in) return renderLogin();
-    if (!state.email || state.need_totp === undefined) { const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; }
+    if (!state.email || state.need_totp === undefined) { const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; state.role = me.role; }
     if (state.need_totp) return renderTotpRequired();
     const h = location.hash || "#/";
     let m;
@@ -1320,7 +1388,7 @@ async function route() {
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "routages", m[2] || null);
     else if (h === "#/routes") await renderRoutes();
-    else if ((m = h.match(/^#\/(sortants|passerelles|codes|enregistrements|securite|sauvegardes|mises-a-jour|alertes|licence|comptes)(?:\/(.+))?$/))) await renderAdmin(adminHelpers, m[1], m[2] || null);
+    else if ((m = h.match(/^#\/(sortants|passerelles|codes|enregistrements|securite|sauvegardes|mises-a-jour|alertes|licence|comptes|capture)(?:\/(.+))?$/))) await renderAdmin(adminHelpers, m[1], m[2] || null);
     else if (h === "#/appels") await renderCalls();  // accessible depuis le tableau de bord et le journal
     else if (h === "#/journal") await renderCdr();
     else if ((m = h.match(/^#\/annuaire(?:\/(\w+))?$/))) await renderContacts(m[1]);

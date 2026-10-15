@@ -270,6 +270,11 @@ curl -sS -c "$TJAR" -X POST "$API/api/invite/$ITOK" -H "content-type: applicatio
 curl -sS -b "$TJAR" "$API/api/trunks" | grep -q '"id":"dstny"' && curl -sS -b "$TJAR" -X PUT "$API/api/routes" -H "content-type: application/json" -d '{"inbound":[]}' | grep -q "lecture seule" \
   && pass "Comptes : rôle « lecture seule » consulte sans pouvoir modifier" || fail "rôle lecture seule"
 raw_api GET /api/audit | grep -q "tech@test.invalid" && pass "Journal : les actions sont attribuées à chaque compte" || fail "audit par compte"
+api PUT /api/accounts/tech%40test.invalid '{"role":"client"}' >/dev/null
+curl -sS -b "$TJAR" -X PUT "$API/api/extensions/206" -H "content-type: application/json" -d '{"options":{"hidden":false}}' | grep '"id":"206"' >/dev/null \
+  && curl -sS -b "$TJAR" "$API/api/security" | grep -q "Accès restreint" \
+  && curl -sS -b "$TJAR" -X DELETE "$API/api/trunks/dstny" | grep -q "Accès restreint" \
+  && pass "Comptes : accès restreint modifie les utilisateurs mais pas la sécurité ni les trunks" || fail "rôle accès restreint"
 api DELETE /api/accounts/tech%40test.invalid >/dev/null
 curl -sS -b "$TJAR" "$API/api/trunks" | grep -q "n'existe plus" && pass "Comptes : compte supprimé, accès coupé immédiatement" || fail "suppression de compte"
 
@@ -346,6 +351,15 @@ echo "$R" | grep -q '"services":\[' && echo "$R" | grep -q '"cdr":{' && pass "Ta
 R="$(api POST /api/system/firewall-check)"
 echo "$R" | grep -q '"label":"SIP (UDP 5060)","proto":"udp","port":"5060","listening":true' && pass "Test du pare-feu : SIP UDP 5060 à l'écoute" || fail "test pare-feu : $(echo "$R" | cut -c1-300)"
 api GET /api/license | grep -q '"key":"' && pass "Licence : informations lisibles" || fail "licence"
+R="$(api POST /api/license "{\"token\":\"$(cat license-token.txt)\"}")"
+[[ "$R" == *'"edition":"enterprise"'* && "$R" == *'"max_calls":8'* ]] && sudo /usr/sbin/asterisk -rx 'dialplan show globals' | grep -q "MAX_CALLS=8" \
+  && pass "Licence : nouvelle clé du portail appliquée (Pro 4 → Entreprise 8 appels, moteur à jour)" || fail "changement de licence : $R"
+api POST /api/license '{"token":"CLK1.abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"}' | grep -q "illisible" && pass "Licence : clé falsifiée refusée" || fail "clé falsifiée"
+api POST /api/capture/start '{"seconds":5,"mode":"sip"}' | grep -q '"ok":true' && pass "Capture réseau : démarrée (5 s, SIP)" || fail "capture start"
+sleep 9
+CAPF="$(api GET /api/capture | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const f=JSON.parse(s).files.find(x=>x.ready);console.log(f?f.name:"")})')"
+[[ -n "$CAPF" ]] && curl -sS -b "$JAR" "$API/api/capture/file/$CAPF" -o cap.pcap && [[ "$(od -An -tx1 -N4 cap.pcap | tr -d ' ')" =~ ^(d4c3b2a1|a1b2c3d4|4d3cb2a1|0a0d0d0a)$ ]] \
+  && pass "Capture réseau : fichier pcap téléchargeable (Wireshark)" || fail "capture pcap : $CAPF $(od -An -tx1 -N4 cap.pcap 2>/dev/null)"
 api GET /api/updates/status | grep -q '"running":' && pass "Mises à jour : état lisible (pbx-configure)" || fail "état mise à jour"
 api POST /api/alerts/check '{}' | grep -q '"sending_enabled":false' && pass "Alertes : surveillance active (envoi des e-mails en préparation)" || fail "alertes"
 

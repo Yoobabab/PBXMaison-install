@@ -20,8 +20,8 @@
       "auth_username_default": "custom",
       "codecs": [
         "alaw",
-        "g729",
-        "ulaw"
+        "ulaw",
+        "g722"
       ],
       "outbound": {
         "from_user": "caller_id",
@@ -41,7 +41,7 @@
       "label": "NETW (Networth)",
       "source": "builtin",
       "verified": false,
-      "notes": "D’après la configuration 3CX existante : identifiant SIP = numéro du trunk au format 33XXXXXXXXX, port 5060. À confirmer avec l’export du modèle 3CX.",
+      "notes": "D’après la configuration 3CX existante : identifiant SIP = numéro du trunk au format 33XXXXXXXXX, port 5060. À confirmer avec l’export du modèle 3CX. Networth : numéro principal et SDA au format 33XXXXXXXXX (sans +), identifiant = numéro principal, numérotation nationale (le format E.164 renvoie « opération interdite »).",
       "registrar": {
         "host": "sip.netw.fr",
         "port": 5060
@@ -90,8 +90,7 @@
       "codecs": [
         "alaw",
         "ulaw",
-        "g722",
-        "g729"
+        "g722"
       ],
       "outbound": {
         "from_user": "caller_id",
@@ -128,7 +127,7 @@
       "auth_username_default": "custom",
       "codecs": [
         "alaw",
-        "g729"
+        "ulaw"
       ],
       "outbound": {
         "from_user": "caller_id",
@@ -177,5 +176,6 @@
       },
       "number_format": "national"
     }
-  ]
+  ],
+  "codec_note": "Codecs (15/10/2026) : les opérateurs français passent le réseau téléphonique en G.711 A-law (PCMA) ; G.722 seulement entre clients du même opérateur (Sewan, Dstny). G.729 retiré : le moteur ne sait pas le convertir pour les softphones, l'appel serait muet."
 }

@@ -38,4 +38,8 @@ const cfg = {
 cfg.signature = crypto.sign(null, Buffer.from(canonical(cfg)), privateKey).toString("base64");
 fs.writeFileSync(path.join(dir, "test-key.pem"), publicKey.export({ type: "spki", format: "pem" }));
 fs.writeFileSync(path.join(dir, "pbx-config.json"), JSON.stringify(cfg, null, 2));
+// Clé de licence « changement d'édition » (comme le portail : Pro 4 appels → Entreprise 8 appels)
+const lic = { pbx_id: cfg.pbx.id, key: cfg.license.key, edition: "enterprise", simultaneous_calls: 8, expires_at: new Date(Date.now() + 400 * 86400000).toISOString(), issued_at: new Date().toISOString() };
+lic.signature = crypto.sign(null, Buffer.from(canonical(lic)), privateKey).toString("base64");
+fs.writeFileSync(path.join(dir, "license-token.txt"), `CLK1.${Buffer.from(JSON.stringify(lic)).toString("base64url")}`);
 console.log(`Config de test : ${cfg.pbx.fqdn} · ${cfg.license.key}`);

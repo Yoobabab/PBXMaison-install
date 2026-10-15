@@ -64,7 +64,9 @@ export async function buildApp({ db, ami } = {}) {
   const userCount = async () => Number((await db.query("SELECT count(*) FROM pbxmaison_users")).rows[0].count);
   const currentUser = (req) => readSession(req.cookies[COOKIE], settings.sessionSecret);
   // Console : session valide ET double authentification faite (sinon seule la mise en place de la double authentification est permise)
-  const ROLES = { admin: "Administrateur", tech: "Technicien", lecture: "Lecture seule" };
+  const ROLES = { admin: "Accès complet (administrateur)", tech: "Technicien (tout sauf les comptes)", client: "Accès restreint (utilisateurs, téléphones, routage, annuaire)", lecture: "Accès visuel (lecture seule)" };
+  // Accès restreint (client) : pas de trunks, règles sortantes, sécurité, codes, sauvegardes, mises à jour, licence, alertes, passerelles, système, comptes
+  const CLIENT_DENY = /^\/api\/(outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
   const requireUser = async (req, reply) => {
     const u = currentUser(req);
     if (!u) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
@@ -74,6 +76,9 @@ export async function buildApp({ db, ami } = {}) {
     req.role = row.role;
     if (!u.mfa) return reply.code(403).send({ error: "Active d'abord la double authentification.", need_totp_setup: true });
     if (row.role === "lecture" && req.method !== "GET" && !/^\/api\/(reauth|logout|totp\/)/.test(req.url)) return reply.code(403).send({ error: "Compte en lecture seule : modification impossible." });
+    const path = req.url.split("?")[0];
+    if (row.role === "client" && (CLIENT_DENY.test(path) || (req.method !== "GET" && /^\/api\/trunks(\/|$)/.test(path))))
+      return reply.code(403).send({ error: "Accès restreint : cette partie est réservée à l'installateur." });
   };
   const requireAdmin = async (req, reply) => {
     const r = await requireFreshMfa(req, reply); if (r) return r;
@@ -103,7 +108,7 @@ export async function buildApp({ db, ami } = {}) {
   // Journal d'audit : toute modification faite depuis la console (qui, quand, d'où, quoi)
   const AUDIT_LABEL = [[/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
     [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
-    [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"]];
+    [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
   app.addHook("onResponse", async (req, reply) => {
     if (req.method === "GET" || !req.url.startsWith("/api/") || reply.statusCode >= 400) return;
     if (/^\/api\/(login|logout|reauth|u\/|invite\/|accounts|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
@@ -647,6 +652,16 @@ export async function buildApp({ db, ami } = {}) {
   });
   app.delete("/api/recordings/file", { preHandler: requireUser }, async (req) => admin.deleteRecording(req.query?.f));
 
+  // ---------------------------------------------------------------- Capture réseau (pcap)
+  app.get("/api/capture", { preHandler: requireUser }, async () => admin.listCaptures());
+  app.post("/api/capture/start", { preHandler: requireUser }, async (req) => admin.startCapture(req.body || {}));
+  app.post("/api/capture/stop", { preHandler: requireUser }, async () => admin.stopCapture());
+  app.get("/api/capture/file/:name", { preHandler: requireUser }, async (req, reply) => {
+    const f = admin.captureFile(req.params.name);
+    return reply.type("application/vnd.tcpdump.pcap").header("content-disposition", `attachment; filename="${path.basename(f)}"`).header("cache-control", "private, no-store").send(fs.createReadStream(f));
+  });
+  app.delete("/api/capture/file/:name", { preHandler: requireUser }, async (req) => admin.deleteCapture(req.params.name));
+
   // ---------------------------------------------------------------- Codes raccourcis
   app.get("/api/shortcodes", { preHandler: requireUser }, async () => admin.getShortcodes());
   app.put("/api/shortcodes", { preHandler: requireUser }, async (req) => admin.setShortcodes(req.body || {}));
@@ -679,6 +694,7 @@ export async function buildApp({ db, ami } = {}) {
   app.post("/api/system/reboot", { preHandler: requireAdmin }, async () => admin.systemAction("reboot"));
   app.post("/api/system/purge-cdr", { preHandler: requireFreshMfa }, async (req) => admin.purgeCdr(req.body?.days));
   app.get("/api/license", { preHandler: requireUser }, async () => admin.getLicense());
+  app.post("/api/license", { preHandler: requireAdmin }, async (req) => admin.setLicense(req.body?.token));
 
   // ---------------------------------------------------------------- Alertes
   app.get("/api/alerts", { preHandler: requireUser }, async () => admin.getAlerts());

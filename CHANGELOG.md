@@ -1,5 +1,12 @@
 # Nouveautés de Callikoe
 
+## 1.3.0
+- Touches du téléphone : le poste est dessiné comme sur la notice, on clique sur une touche pour choisir BLF, Statut, numérotation rapide ou ligne
+- Rôles : accès complet, technicien, accès restreint (utilisateurs, téléphones, routage, annuaire) et accès visuel
+- Licence : changement d'édition, d'appels simultanés ou renouvellement en collant la nouvelle clé du portail
+- Capture réseau des appels (fichier pcap pour Wireshark), avec ou sans l'audio
+- Modèles d'opérateurs : codecs corrigés (G.711 A-law en premier, G.722 pour Sewan et Dstny, G.729 retiré car non converti par le moteur)
+
 ## 1.2.0
 - Console : double authentification obligatoire (compatible Psono), codes de secours, comptes nominatifs par technicien, journal des modifications
 - Anti-fraude : plafond d'appels externes par heure et d'appels internationaux par jour, téléphones acceptés seulement depuis les réseaux autorisés
