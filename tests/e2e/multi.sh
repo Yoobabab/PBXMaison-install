@@ -345,6 +345,10 @@ regd() { labx "$1" "pjsip show registrations" | grep -q "Registered"; }
 waitfor 40 regd pa && pass "Poste 201 de cli a enregistré (via l'aiguilleur, domaine a.e2e.invalid)" || { labx pa "pjsip show registrations" >> "$OUT"; sipdump clia; fail "poste A non enregistré"; }
 waitfor 40 regd pb && pass "Poste 201 de cli b enregistré (même numéro, autre PBX)" || { labx pb "pjsip show registrations" >> "$OUT"; sipdump clib; fail "poste B non enregistré"; }
 astx clia "pjsip show contacts" | grep -q "201/" && ! astx clib "pjsip show contacts" | grep -q "127.0.0.11" && pass "Chaque poste est connu de son seul PBX" || fail "contacts mélangés"
+# Adresse réelle du poste (vue par l'aiguilleur) gardée par le PBX et affichée dans sa console
+P="$(sudo -u postgres psql -d cx_clia -tAc "SELECT path FROM ps_contacts WHERE endpoint = '201'" 2>&1)"
+R="$(curl -sS -b "$LAB/jar-a" http://127.0.0.1:9001/api/extensions)"
+[[ "$P" == *"received=sip:127.0.0.11"* && "$R" == *'"source_ip":"127.0.0.11"'* ]] && pass "Console de cli a : adresse réelle du poste 201 (notée par l'aiguilleur)" || { echo "   path=$P" >> "$OUT"; echo "$R" | cut -c1-500 >> "$OUT"; fail "adresse réelle du poste"; }
 sleep 8
 regd px && fail "poste pirate enregistré chez cli b avec les identifiants de cli a" || pass "Poste de cli a refusé par cli b (identifiants d'un autre PBX)"
 sudo journalctl -u kamailio --no-pager | grep -q "CALLIKOE-AUTHFAIL 127.0.0.13" && pass "Échec noté avec l'adresse réelle du poste pirate (fail2ban)" || { sudo journalctl -u kamailio -n 30 --no-pager | cut -c1-200 >> "$OUT"; fail "AUTHFAIL absent"; }

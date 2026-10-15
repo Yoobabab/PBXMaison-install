@@ -63,3 +63,13 @@ test("module d'extension : touches EXP50 provisionnées sur un T57W, refusé sur
   assert.doesNotMatch(cfg, /^expansion_module\.2\./m);
   assert.throws(() => validatePhone({ model: "yealink-t31p", modules: [{ keys: [] }] }, defaultPhone(), ctx), /n'accepte pas de module/);
 });
+
+test("contactSource : adresse réelle du poste (PBX seul : Contact ; multi-tenant : Path de l'aiguilleur)", async () => {
+  const { contactSource } = await import("../lib/phones.mjs");
+  assert.deepEqual(contactSource({ uri: "sip:201@92.184.113.141:5060" }).slice(1, 3), ["92.184.113.141", "5060"]);
+  const c = { uri: "sip:201@192.168.1.18:5060", path: "<sip:146.59.197.37;lr;received=sip:92.184.113.141:41234>" };
+  assert.deepEqual(contactSource(c, true).slice(1, 3), ["92.184.113.141", "41234"]);
+  assert.deepEqual(contactSource({ ...c, path: "<sip:1.2.3.4;lr;received=sip:92.184.113.141:5062%3Btransport%3Dtcp>" }, true).slice(1, 3), ["92.184.113.141", "5062"]);
+  assert.deepEqual(contactSource({ ...c, path: "" }, true).slice(1, 3), ["192.168.1.18", "5060"]);
+  assert.deepEqual(contactSource(c, false).slice(1, 3), ["192.168.1.18", "5060"]);
+});

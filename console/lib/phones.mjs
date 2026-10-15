@@ -335,6 +335,21 @@ const privateIp = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169
  * Type de connexion d'un appareil.
  * @param sourceIp IP vue par le PBX ; localIp IP annoncée par l'appareil (Via) ; sbcs [{name, ip}]
  */
+/**
+ * Adresse réelle d'où un poste s'est enregistré : [ip, port].
+ * PBX seul (rewrite_contact) : l'hôte du Contact. Multi-tenant : le poste passe par l'aiguilleur SIP,
+ * qui note l'adresse vue sur Internet dans le Path (received=sip:IP:port, parfois encodé ou entre guillemets).
+ */
+export function contactSource(contact, tenant = false) {
+  if (tenant && contact?.path) {
+    let p = String(contact.path);
+    try { p = decodeURIComponent(p.replace(/%(?![0-9a-fA-F]{2})/g, "%25")); } catch { /* tel quel */ }
+    const m = /received="?sips?:\[?([0-9a-fA-F.:]+?)\]?(?::(\d+))?(?:[;>",]|$)/.exec(p);
+    if (m) return m;
+  }
+  return /@\[?([^\]:;>]+)\]?(?::(\d+))?/.exec(contact?.uri || "");
+}
+
 export function connectionType(sourceIp, localIp, sbcs = []) {
   const sbc = sbcs.find((s) => s.ip === sourceIp);
   if (sbc) return { code: "sbc", label: `Via le SBC « ${sbc.name} »` };

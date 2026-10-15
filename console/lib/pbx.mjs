@@ -10,7 +10,7 @@ import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mj
 import { CX_MODE, KAMAILIO_URI, VAR as CX_VAR } from "./config.mjs";
 import { runConfigure } from "./admin.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
-  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, connectionType, modelById } from "./phones.mjs";
+  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, contactSource, connectionType, modelById } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
@@ -266,7 +266,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   async function registrations() {
     const r = await db.query(`
       SELECT e.id,
-             (SELECT json_agg(json_build_object('uri', c.uri, 'user_agent', c.user_agent, 'via', c.via_addr,
+             (SELECT json_agg(json_build_object('uri', c.uri, 'user_agent', c.user_agent, 'via', c.via_addr, 'path', c.path,
                       'expires', c.expiration_time) ORDER BY c.expiration_time DESC)
               FROM ps_contacts c WHERE c.endpoint = e.id) AS contacts
       FROM ps_endpoints e WHERE e.context = 'from-internal'`);
@@ -277,12 +277,15 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const key = row.id.replace(/-web$/, "");
       const list = map.get(key) || [];
       map.set(key, list.concat(contacts.map((c) => {
-        // rewrite_contact=yes : l'hôte du contact est l'adresse vue par le PBX ; Via = adresse annoncée par l'appareil
-        const source = /@\[?([^\]:;>]+)\]?(?::(\d+))?/.exec(c.uri || "");
+        // rewrite_contact=yes : l'hôte du contact est l'adresse vue par le PBX ; Via = adresse annoncée par l'appareil.
+        // Multi-tenant : le poste passe par l'aiguilleur, qui note son adresse réelle dans le Path (received=sip:IP:port)
+        const source = contactSource(c, CX_MODE === "tenant");
         const sourceIp = source?.[1] || "";
-        return { user_agent: c.user_agent || "", ip: sourceIp || c.via || "", source_ip: sourceIp, source_port: source?.[2] || "",
-          local_ip: c.via || "", device: row.id.endsWith("-web") ? { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" } : identifyDevice(c.user_agent),
-          connection: connectionType(sourceIp, c.via || "", []) };
+        // Multi-tenant : le Via du dessus est celui de l'aiguilleur ; l'adresse locale du poste est celle de son Contact
+        const localIp = CX_MODE === "tenant" && c.path ? (/@\[?([^\]:;>]+)/.exec(c.uri || "")?.[1] || "") : c.via || "";
+        return { user_agent: c.user_agent || "", ip: sourceIp || localIp, source_ip: sourceIp, source_port: source?.[2] || "",
+          local_ip: localIp, device: row.id.endsWith("-web") ? { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" } : identifyDevice(c.user_agent),
+          connection: connectionType(sourceIp, localIp, []) };
       })));
     }
     return map;
