@@ -220,6 +220,14 @@ exten => _[a-z0-9].,1,Set(GLOBAL(RANG)=${EXTEN})
 exten => s,1,Answer()
  same => n,Wait(5)
  same => n,Hangup()'
+# Traces SIP (lues seulement en cas d'échec)
+for c in clia clib; do astx $c "logger add channel sipdebug notice,warning,error,verbose" >/dev/null; astx $c "core set verbose 3" >/dev/null; astx $c "pjsip set logger on" >/dev/null; done
+sipdump() { # sipdump <PBX client> : échanges SIP vus par son moteur
+  echo "== SIP vu par $1" >> "$OUT"
+  sudo grep -E "<--- |---> |^(REGISTER|INVITE|SIP/2.0|Via|Route|Path|Contact|To|From|Supported|Require|Authorization|WWW-Authenticate|Unsupported)" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | cut -c1-200 | head -n 70 >> "$OUT" || true
+  sudo grep -iE "WARNING|ERROR|NOTICE" "/var/log/callikoe/$1/messages" 2>/dev/null | tail -n 10 | cut -c1-200 >> "$OUT" || true
+  sudo journalctl -u kamailio --no-pager | grep -E "CALLIKOE|ERROR|WARN" | grep -v reparse_on_dns | tail -n 10 | cut -c1-200 >> "$OUT" || true
+}
 mkast pa "$(PHONE 127.0.0.11 a.e2e.invalid "${AUTH[a]}" "${PW[a]}")" "$ANSWER" 31000
 mkast pb "$(PHONE 127.0.0.12 b.e2e.invalid "${AUTH[b]}" "${PW[b]}")" "$ANSWER" 31100
 # Poste pirate : identifiants de cli a, présentés au domaine de cli b
@@ -229,8 +237,8 @@ waitfor() { # waitfor <secondes> <commande…>
   local t=$1; shift; for _ in $(seq 1 "$t"); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done; return 1
 }
 regd() { labx "$1" "pjsip show registrations" | grep -q "Registered"; }
-waitfor 40 regd pa && pass "Poste 201 de cli a enregistré (via l'aiguilleur, domaine a.e2e.invalid)" || { labx pa "pjsip show registrations" >> "$OUT"; sudo journalctl -u kamailio -n 20 --no-pager | cut -c1-200 >> "$OUT"; fail "poste A non enregistré"; }
-waitfor 40 regd pb && pass "Poste 201 de cli b enregistré (même numéro, autre PBX)" || { labx pb "pjsip show registrations" >> "$OUT"; fail "poste B non enregistré"; }
+waitfor 40 regd pa && pass "Poste 201 de cli a enregistré (via l'aiguilleur, domaine a.e2e.invalid)" || { labx pa "pjsip show registrations" >> "$OUT"; sipdump clia; fail "poste A non enregistré"; }
+waitfor 40 regd pb && pass "Poste 201 de cli b enregistré (même numéro, autre PBX)" || { labx pb "pjsip show registrations" >> "$OUT"; sipdump clib; fail "poste B non enregistré"; }
 astx clia "pjsip show contacts" | grep -q "201/" && ! astx clib "pjsip show contacts" | grep -q "127.0.0.11" && pass "Chaque poste est connu de son seul PBX" || fail "contacts mélangés"
 sleep 8
 regd px && fail "poste pirate enregistré chez cli b avec les identifiants de cli a" || pass "Poste de cli a refusé par cli b (identifiants d'un autre PBX)"
@@ -238,7 +246,7 @@ sudo journalctl -u kamailio --no-pager | grep -q "CALLIKOE-AUTHFAIL 127.0.0.13" 
 labx px "module unload res_pjsip_outbound_registration.so" >/dev/null 2>&1 || true
 
 opreg() { labx op "pjsip show contacts" | grep -q "$1/"; }
-waitfor 60 opreg accta && waitfor 60 opreg acctb && pass "Trunks des deux clients enregistrés chez l'opérateur (via l'aiguilleur)" || { labx op "pjsip show contacts" >> "$OUT"; astx clia "pjsip show registrations" >> "$OUT"; fail "trunks non enregistrés"; }
+waitfor 60 opreg accta && waitfor 60 opreg acctb && pass "Trunks des deux clients enregistrés chez l'opérateur (via l'aiguilleur)" || { labx op "pjsip show contacts" >> "$OUT"; astx clia "pjsip show registrations" >> "$OUT"; sipdump clia; fail "trunks non enregistrés"; }
 labx op "pjsip show contacts" | grep -qE "cx[0-9a-f]{16}" && pass "Contact du trunk = jeton propre au client" || { labx op "pjsip show contacts" >> "$OUT"; fail "contact sans jeton"; }
 
 glob() { labx "$1" "dialplan show globals" | sed -nE "s/^\s*$2=(.*)$/\1/p" | head -n1; }
@@ -246,7 +254,7 @@ reset() { labx pa "dialplan set global RANG none" >/dev/null; labx pb "dialplan 
 
 # 5. Appels entrants : opérateur → trunk de A → poste 201 de A (et pas celui de B)
 reset; labx op "channel originate PJSIP/accta extension s@wait" >/dev/null; sleep 9
-[[ "$(glob pa RANG)" == 201 && "$(glob pb RANG)" == none ]] && pass "Entrant sur le trunk de cli a → poste 201 de cli a uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; astx clia "core show channels" >> "$OUT" 2>&1; fail "entrant A"; }
+[[ "$(glob pa RANG)" == 201 && "$(glob pb RANG)" == none ]] && pass "Entrant sur le trunk de cli a → poste 201 de cli a uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clia; fail "entrant A"; }
 [[ "$(glob pa RTPRX)" =~ ^[0-9]+$ && "$(glob pa RTPRX)" -gt 50 ]] && pass "Son reçu par le poste de cli a ($(glob pa RTPRX) paquets RTP)" || echo "   (RTP poste A : $(glob pa RTPRX))" >> "$OUT"
 reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null; sleep 9
 [[ "$(glob pb RANG)" == 201 && "$(glob pa RANG)" == none ]] && pass "Entrant sur le trunk de cli b → poste 201 de cli b uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; fail "entrant B"; }
@@ -256,7 +264,7 @@ reset; labx px "channel originate PJSIP/0465001540@pbx extension s@wait" >/dev/n
 
 # 6. Appels sortants : chaque poste sort par le trunk de son PBX
 reset; labx pa "channel originate PJSIP/0412345678@pbx extension s@wait" >/dev/null; sleep 8
-[[ "$(glob op LASTOUT)" == "accta:0412345678" ]] && pass "Sortant de cli a → opérateur, compte de cli a" || { echo "LASTOUT=$(glob op LASTOUT)" >> "$OUT"; astx clia "core show channels" >> "$OUT"; fail "sortant A"; }
+[[ "$(glob op LASTOUT)" == "accta:0412345678" ]] && pass "Sortant de cli a → opérateur, compte de cli a" || { echo "LASTOUT=$(glob op LASTOUT)" >> "$OUT"; sipdump clia; fail "sortant A"; }
 reset; labx pb "channel originate PJSIP/0412345678@pbx extension s@wait" >/dev/null; sleep 8
 [[ "$(glob op LASTOUT)" == "acctb:0412345678" ]] && pass "Sortant de cli b → opérateur, compte de cli b" || { echo "LASTOUT=$(glob op LASTOUT)" >> "$OUT"; fail "sortant B"; }
 astx clia "pjsip show endpoints" | grep -qE "Endpoint:\s+op" && ! astx clia "pjsip show endpoints" | grep -q "acctb" && pass "Le PBX de cli a ne voit que son trunk" || fail "endpoints A"
