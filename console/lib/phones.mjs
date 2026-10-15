@@ -232,7 +232,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("remote_phonebook.data.1.url", `${server.prov_url}phonebook.xml`),
     v("remote_phonebook.data.1.name", "Annuaire"),
     v("features.remote_phonebook.enable", 1),
-    v("features.remote_phonebook.flash_time", 3600),
+    v("features.remote_phonebook.flash_time", 300),
     "",
     ...(model?.screen && server.assets_url ? [
       "## Fond d'écran Callikoe",

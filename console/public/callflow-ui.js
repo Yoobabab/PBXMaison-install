@@ -84,7 +84,8 @@ function destText(d) {
 }
 
 function renderList(head, kind) {
-  const list = objs(kind);
+  // Les routages (éditeur visuel ou texte) sont aussi des règles entrantes : on les montre dans les deux onglets
+  const list = kind === "rule" ? [...objs("rule"), ...objs("flow")] : objs(kind);
   const tab = KIND_TAB[kind];
   const label = cf.options.kinds[kind];
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed">
@@ -92,9 +93,9 @@ function renderList(head, kind) {
       ${kind === "prompt" ? `<a class="btn" href="#/gestion/annonces/nouveau">+ Ajouter une annonce</a>` : kind === "flow" ? `<a class="btn" href="#/gestion/routages/nouveau">+ Nouveau routage</a>` : `<a class="btn" href="#/gestion/${tab}/nouveau">+ ${kind === "rule" ? "Nouvelle règle" : kind === "schedule" ? "Nouveaux horaires" : `Nouveau ${label.split(" (")[0].replace(/^Groupe/, "groupe").replace(/^File/, "file").replace(/^SVI/, "SVI").replace(/^Messagerie/, "messagerie").toLowerCase()}`}</a>`}</div>
     ${list.length ? `<div class="table-wrap"><table><thead><tr>${["rule", "schedule", "prompt", "flow"].includes(kind) ? "" : "<th>Numéro</th>"}<th>Nom</th><th>${kind === "prompt" ? "Écoute" : "Configuration"}</th><th></th></tr></thead><tbody>
       ${list.map((o) => `<tr>${["rule", "schedule", "prompt", "flow"].includes(kind) ? "" : `<td><strong>${esc(o.number)}</strong></td>`}
-        <td><a href="#/gestion/${tab}/${esc(o.id)}">${esc(o.name)}</a>${kind === "schedule" ? `<div>${stateBadge(o)}</div>` : ""}</td>
+        <td><a href="#/gestion/${KIND_TAB[o.kind]}/${esc(o.id)}">${esc(o.name)}</a>${kind === "rule" && o.kind === "flow" ? ' <span class="pill off">Routage</span>' : ""}${kind === "schedule" ? `<div>${stateBadge(o)}</div>` : ""}</td>
         <td>${kind === "prompt" ? `<audio controls preload="none" src="/api/prompts/${esc(o.id)}/audio"></audio> <span class="s">${o.data.duration} s</span>` : summary(o)}</td>
-        <td class="acts">${o.number ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.number)}">Tracer</a> ` : ""}${(kind === "rule" || kind === "flow") && o.data.dids[0] ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.data.dids[0])}">Tracer</a> ` : ""}<a class="btn ghost sm" href="#/gestion/${tab}/${esc(o.id)}">Modifier</a></td></tr>`).join("")}
+        <td class="acts">${o.number ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.number)}">Tracer</a> ` : ""}${(kind === "rule" || kind === "flow") && o.data.dids[0] ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.data.dids[0])}">Tracer</a> ` : ""}<a class="btn ghost sm" href="#/gestion/${KIND_TAB[o.kind]}/${esc(o.id)}">Modifier</a></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="empty">Aucun élément pour l'instant.</div>`}
   </div>`;
 }

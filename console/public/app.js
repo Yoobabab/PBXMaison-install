@@ -382,7 +382,7 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
   if (id && !existing) { app.innerHTML = `<div class="panel empty">Trunk introuvable. <a href="#/trunks">Retour</a></div>`; return; }
   const v = draft || (existing ? { name: existing.id, template: existing.template, number: existing.number, username: existing.username,
     host: existing.host, proxy: existing.proxy, cid_format: existing.cid_format, dial_format: existing.dial_format, caller_format: existing.caller_format,
-    dids: compactDids(existing.dids).join("\n") } : { template: "" });
+    dids: compactDids(existing.extra_dids || existing.dids).join("\n") } : { template: "" });
   const field = (name, label, input, hint, cls = "") => `<label class="${cls} ${errorField === name ? "has-err" : ""}">${label}${input}
     ${errorField === name ? `<span class="err">${esc(errorMsg)}</span>` : hint ? `<span class="hint">${hint}</span>` : ""}</label>`;
   const opts = (list, cur) => list.map(([val, lab]) => `<option value="${esc(val)}" ${String(val) === String(cur ?? "") ? "selected" : ""}>${esc(lab)}</option>`).join("");

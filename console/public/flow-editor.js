@@ -72,7 +72,7 @@ export function renderFlowEditor(helpers, cfData, head, id) {
     <div class="fx-pickhost" id="pickhost"></div>
     <div class="fx-msg" id="fmsg"></div>
   </div>
-  <div class="fx-drawer" id="side" aria-hidden="true"></div><div class="fx-scrim" id="scrim"></div>`;
+  <div class="fx-drawer" id="fxpop" aria-hidden="true"></div><div class="fx-scrim" id="scrim"></div>`;
   h.$("#fname").oninput = (e) => { flow.name = e.target.value; };
   h.$("#fdef").onchange = (e) => { flow.is_default = e.target.checked; drawDids(); };
   h.$("#fsave").onclick = save;
@@ -187,9 +187,8 @@ function addStep(type, at) {
   const st = { type, ...(type === "ring" ? { users: [], strategy: "all", time: 20 } : type === "group" ? { target: objs("group")[0]?.id || "", time: null } : type === "hangup" ? {} : { target: "" }) };
   if (["queue", "ivr", "prompt", "groupvm", "conf"].includes(type) && objs(type).length === 1) st.target = objs(type)[0].id;
   list.splice(at ?? list.length, 0, st);
-  adding = null; errAt = null; sel = at ?? list.length - 1;
+  adding = null; errAt = null; sel = null;
   draw();
-  if (!valid(st) || type === "ring" || type === "group") panel();
 }
 function valid(st) {
   switch (st.type) {
@@ -212,49 +211,92 @@ function describe(st) {
   }
 }
 
-// ---------------------------------------------------------------- Réglage d'une étape (panneau latéral)
-function closePanel() { h.$("#side")?.classList.remove("open"); h.$("#scrim")?.classList.remove("on"); }
+// ---------------------------------------------------------------- Réglage d'une étape (fenêtre au clic sur un cadre)
+const EDIT = { group: "groupe d'appel", queue: "file d'attente", groupvm: "messagerie de groupe", conf: "salle de réunion" };
+const RANGES = { group: 600, queue: 700, ivr: 800, groupvm: 900, conf: 500 };
+function nextNumber(kind) {
+  const used = new Set([...cf.objects.map((o) => o.number).filter(Boolean), ...cf.users.map((u) => u.id)]);
+  for (let n = RANGES[kind] || 600; n < 1000; n++) if (!used.has(String(n))) return String(n);
+  return "";
+}
+function closePanel() { h.$("#fxpop")?.classList.remove("open"); h.$("#scrim")?.classList.remove("on"); }
 function panel() {
-  const side = h.$("#side");
+  const side = h.$("#fxpop");
   const st = sel !== null && flow.branches[tab]?.[sel];
   if (!st) { closePanel(); return; }
-  const opt = (list, v, empty) => `<option value="">${esc(empty)}</option>${list.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("")}`;
+  const opt = (list, v, empty) => `${empty !== null ? `<option value="">${esc(empty)}</option>` : ""}${list.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("")}`;
   const objOpts = (kind) => objs(kind).map((o) => [o.id, `${o.number ? o.number + " · " : ""}${o.name}`]);
   const users = cf.users.map((u) => [u.id, `${u.id} · ${u.name}`]);
-  const create = { group: "groupes", queue: "files", ivr: "svi", groupvm: "messageries", conf: "reunions", prompt: "annonces" }[st.type];
-  let body = "";
-  if (st.type === "ring") {
-    body = `<div class="fx-f"><span class="dl">Qui sonne ?</span><input id="uq" type="search" placeholder="Rechercher" class="fx-uq">
-        <div class="fx-users">${cf.users.map((u) => `<label class="fx-u"><input type="checkbox" value="${esc(u.id)}" ${st.users.includes(u.id) ? "checked" : ""}><span><strong>${esc(u.name)}</strong> <span class="s">${esc(u.id)}</span></span></label>`).join("")}</div></div>
-      <label>Comment ?<select data-f="strategy"><option value="all" ${st.strategy !== "hunt" ? "selected" : ""}>Tous en même temps</option><option value="hunt" ${st.strategy === "hunt" ? "selected" : ""}>L'un après l'autre</option></select></label>
-      <label>Durée de sonnerie${st.strategy === "hunt" ? " par personne" : ""} (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || 20)}"></label>`;
-  } else if (st.type === "group") {
-    body = `<label>Groupe d'appel<select data-f="target">${opt(objOpts("group"), st.target, "— Choisir —")}</select></label>
-      <label>Durée de sonnerie (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || "")}" placeholder="Celle du groupe"></label>`;
-  } else if (["queue", "ivr", "groupvm", "conf", "prompt"].includes(st.type)) {
+  const memberList = (sel2) => `<input type="search" placeholder="Rechercher" class="fx-uq" data-uq><div class="fx-users">${cf.users.map((u) => `<label class="fx-u"><input type="checkbox" data-member value="${esc(u.id)}" ${sel2.includes(u.id) ? "checked" : ""}><span><strong>${esc(u.name)}</strong> <span class="s">${esc(u.id)}</span></span></label>`).join("")}</div>`;
+  let body = "", ed = null;
+  if (EDIT[st.type]) {
+    // Élément existant à modifier, ou nouveau créé ici même
+    const o = cf.objects.find((x) => x.kind === st.type && x.id === st.target);
+    ed = o ? { id: o.id, number: o.number, ...structuredClone(o.data) } : { id: "", number: nextNumber(st.type), name: "", members: [], strategy: st.type === "queue" ? "ringall" : "all", ring_time: 20, member_timeout: 15, max_wait: 300, pin: "" };
+    const list = objs(st.type);
+    body = `${list.length ? `<label>${esc(LABEL[st.type])}<select data-pick>${opt([["", `+ Nouveau ${EDIT[st.type]}`], ...objOpts(st.type)], ed.id, null)}</select></label>` : ""}
+      <div class="fx-g2"><label>Nom<input data-e="name" value="${esc(ed.name)}" placeholder="ex. Accueil"></label><label>Numéro interne<input data-e="number" value="${esc(ed.number)}" inputmode="numeric" maxlength="3"></label></div>`;
+    if (st.type === "group") body += `<div class="fx-g2"><label>Comment ça sonne<select data-e="strategy">${opt(Object.entries(cf.options.group_strategies).map(([k, v]) => [k, String(Array.isArray(v) ? v[0] : v).split(" (")[0]]), ed.strategy, null)}</select></label>
+        <label>Sonnerie (secondes)<input type="number" min="5" max="300" data-e="ring_time" value="${esc(ed.ring_time)}"></label></div>
+      <div class="fx-f"><span class="dl">Membres</span>${memberList(ed.members)}</div>`;
+    else if (st.type === "queue") body += `<div class="fx-g2"><label>Distribution<select data-e="strategy">${opt(Object.entries(cf.options.queue_strategies).map(([k, v]) => [k, String(Array.isArray(v) ? v[0] : v).split(" (")[0]]), ed.strategy, null)}</select></label>
+        <label>Sonnerie par agent (s)<input type="number" min="5" max="120" data-e="member_timeout" value="${esc(ed.member_timeout)}"></label></div>
+      <label>Attente maximum (secondes)<input type="number" min="10" max="3600" data-e="max_wait" value="${esc(ed.max_wait)}"></label>
+      <div class="fx-f"><span class="dl">Agents</span>${memberList(ed.members)}</div>
+      <p class="hint" style="margin:0">Musique d'attente et annonces : <a href="#/gestion/files${ed.id ? "/" + esc(ed.id) : ""}" target="_blank" rel="noopener">réglages complets de la file</a>.</p>`;
+    else if (st.type === "groupvm") body += `<label>Code PIN (4 à 8 chiffres)<input data-e="pin" inputmode="numeric" value="${esc(ed.pin)}" placeholder="généré si vide"></label>
+      <div class="fx-f"><span class="dl">Membres (voyant de messagerie)</span>${memberList(ed.members)}</div>`;
+    else if (st.type === "conf") body += `<label>Code PIN (facultatif)<input data-e="pin" inputmode="numeric" value="${esc(ed.pin)}" placeholder="aucun"></label>`;
+  } else if (st.type === "ring") {
+    body = `<div class="fx-f"><span class="dl">Qui sonne ?</span>${memberList(st.users)}</div>
+      <div class="fx-g2"><label>Comment ?<select data-f="strategy"><option value="all" ${st.strategy !== "hunt" ? "selected" : ""}>Tous ensemble</option><option value="hunt" ${st.strategy === "hunt" ? "selected" : ""}>L'un après l'autre</option></select></label>
+      <label>Sonnerie (secondes)<input type="number" min="5" max="300" data-f="time" value="${esc(st.time || 20)}"></label></div>`;
+  } else if (["ivr", "prompt"].includes(st.type)) {
     body = `<label>${esc(LABEL[st.type])}<select data-f="target">${opt(objOpts(st.type), st.target, "— Choisir —")}</select></label>
-      ${st.type === "prompt" && st.target ? `<audio controls src="/api/prompts/${esc(st.target)}/audio"></audio>` : ""}`;
+      ${st.type === "prompt" && st.target ? `<audio controls src="/api/prompts/${esc(st.target)}/audio"></audio>` : ""}
+      <p class="hint" style="margin:0"><a href="#/gestion/${st.type === "ivr" ? "svi" : "annonces"}/nouveau" target="_blank" rel="noopener">Créer ${st.type === "ivr" ? "un SVI (annonce et touches)" : "une annonce (fichier ou micro)"}</a> dans un nouvel onglet, puis rouvre ce cadre.</p>`;
   } else if (st.type === "user" || st.type === "user_vm") {
     body = `<label>Utilisateur<select data-f="target">${opt(users, st.target, "— Choisir —")}</select></label>
-      <p class="hint">${st.type === "user" ? "L'appel suit ensuite les renvois de sa fiche." : "L'appelant laisse un message dans sa boîte vocale."}</p>`;
+      <p class="hint" style="margin:0">${st.type === "user" ? "L'appel suit ensuite les renvois de sa fiche." : "L'appelant laisse un message dans sa boîte vocale."}</p>`;
   } else if (st.type === "external") {
     body = `<label>Numéro<input data-f="target" inputmode="tel" placeholder="06 12 34 56 78" value="${esc(fmtP(st.target))}"></label>`;
-  } else body = '<p class="hint">L\'appel est raccroché.</p>';
+  } else body = '<p class="hint" style="margin:0">L\'appel est raccroché.</p>';
   side.innerHTML = `<div class="fx-ph"><span class="fx-ci">${icon(st.type)}</span><strong>${esc(LABEL[st.type])}</strong><button type="button" class="fx-x" id="pclose2" aria-label="Fermer">${icon("x", 16)}</button></div>
-    <div class="fx-pb stack">${body}${create ? `<p class="hint"><a href="#/gestion/${create}/nouveau" target="_blank" rel="noopener">Créer un nouvel élément</a> (nouvel onglet), puis recharge cette page.</p>` : ""}</div>
-    <div class="fx-pf"><button type="button" class="btn ghost" id="pdel">Retirer l'étape</button><button type="button" class="btn" id="pok">Terminé</button></div>`;
+    <div class="fx-pb stack">${body}<div class="fx-perr" id="perr"></div></div>
+    <div class="fx-pf"><button type="button" class="btn ghost" id="pdel">Retirer l'étape</button><button type="button" class="btn" id="pok">${ed ? (ed.id ? "Enregistrer" : "Créer") : "Terminé"}</button></div>`;
   side.classList.add("open"); h.$("#scrim").classList.add("on");
-  side.querySelectorAll(".fx-u input").forEach((i) => i.onchange = () => { const id = i.value; st.users = i.checked ? [...st.users, id] : st.users.filter((x) => x !== id); draw(); });
-  h.$("#uq")?.addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); side.querySelectorAll(".fx-u").forEach((l) => { l.hidden = q && !l.textContent.toLowerCase().includes(q); }); });
-  side.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
-    const f = el.dataset.f; let v = el.value;
-    if (f === "time") v = v ? Number(v) : (st.type === "group" ? null : 20);
-    if (f === "target" && st.type === "external") v = v.replace(/[\s.]/g, "").replace(/^\+33/, "0");
-    st[f] = v; errAt = null; draw();
-    if (f === "strategy" || (f === "target" && st.type === "prompt")) panel();
-  }));
+  side.querySelector("[data-uq]")?.addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); side.querySelectorAll(".fx-u").forEach((l) => { l.hidden = q && !l.textContent.toLowerCase().includes(q); }); });
+  const members = () => [...side.querySelectorAll("[data-member]:checked")].map((i) => i.value);
+  if (!ed) {
+    side.querySelectorAll("[data-member]").forEach((i) => i.onchange = () => { st.users = members(); draw(); });
+    side.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+      const f = el.dataset.f; let v = el.value;
+      if (f === "time") v = v ? Number(v) : 20;
+      if (f === "target" && st.type === "external") v = v.replace(/[\s.]/g, "").replace(/^\+33/, "0");
+      st[f] = v; errAt = null; draw();
+      if (f === "target" && st.type === "prompt") panel();
+    }));
+  }
+  side.querySelector("[data-pick]")?.addEventListener("change", (e) => { st.target = e.target.value; panel(); });
   h.$("#pdel").onclick = () => { flow.branches[tab].splice(sel, 1); sel = null; closePanel(); draw(); };
-  h.$("#pok").onclick = h.$("#pclose2").onclick = () => { sel = null; closePanel(); draw(); };
+  h.$("#pclose2").onclick = () => { sel = null; closePanel(); draw(); };
+  h.$("#pok").onclick = async () => {
+    if (!ed) { sel = null; closePanel(); draw(); return; }
+    const val = (k) => side.querySelector(`[data-e="${k}"]`)?.value;
+    const body2 = { name: val("name"), number: val("number") };
+    if (st.type === "group") Object.assign(body2, { strategy: val("strategy"), ring_time: Number(val("ring_time")), members: members() });
+    if (st.type === "queue") Object.assign(body2, { strategy: val("strategy"), member_timeout: Number(val("member_timeout")), max_wait: Number(val("max_wait")), members: members() });
+    if (st.type === "groupvm") Object.assign(body2, { pin: val("pin"), members: members() });
+    if (st.type === "conf") Object.assign(body2, { pin: val("pin") });
+    const btn = h.$("#pok"); btn.disabled = true;
+    try {
+      const o = await h.api(ed.id ? "PUT" : "POST", `/api/callflow/${st.type}${ed.id ? "/" + ed.id : ""}`, body2);
+      const fresh = await h.api("GET", "/api/callflow");
+      cf.objects = fresh.objects;
+      st.target = o.id; if (st.type === "group") st.time = null;
+      sel = null; errAt = null; closePanel(); draw();
+    } catch (err) { h.$("#perr").textContent = err.message; btn.disabled = false; }
+  };
 }
 
 // ---------------------------------------------------------------- Texte → proposition

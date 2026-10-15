@@ -51,6 +51,8 @@ const genPassword = () => crypto.randomBytes(24).toString("base64").replace(/[^A
 const hostOk = (h) => /^[A-Za-z0-9.-]+$/.test(h) && h.includes(".");
 
 const WEB_CODECS = "g722,alaw,ulaw,vp8,h264";
+/** SDA d'un trunk : son numéro principal (au format national) puis les SDA ajoutées. */
+const trunkDidList = (row, cc = "33") => [...new Set([nationalNumber(row.number || "", cc) || "", ...(row.dids || [])].filter(Boolean))];
 
 export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   // Parties du plan de numérotation fournies par les autres modules (règles sortantes, sécurité, codes, enregistrement)
@@ -101,7 +103,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         host: r.host, number: r.number, outbound_cid: r.outbound_cid, username: r.username,
         proxy: r.outbound_proxy ? r.outbound_proxy.replace(/^sip:/, "").replace(/;lr$/, "") : "",
         codecs: (r.allow || "").split(","), transport: (r.transport || "").replace("transport-", ""),
-        cid_format: r.cid_format, dial_format: r.dial_format, caller_format: r.caller_format, dids: r.dids || [],
+        cid_format: r.cid_format, dial_format: r.dial_format, caller_format: r.caller_format, dids: trunkDidList(r, countryCode()), extra_dids: r.dids || [],
         status: { code: st?.state || "Unknown", label, cls, expires: st?.expires ?? null },
       };
     });
@@ -948,18 +950,18 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   }
 
   async function traceModel() {
-    const [users, objects, reg, routes, trunks] = await Promise.all([loadUsers(), loadObjects(), registrations(), getRoutes(), db.query("SELECT dids FROM pbxmaison_trunks")]);
+    const [users, objects, reg, routes, trunks] = await Promise.all([loadUsers(), loadObjects(), registrations(), getRoutes(), db.query("SELECT number, dids FROM pbxmaison_trunks")]);
     const registered = new Map();
     for (const [id, contacts] of reg) registered.set(id, [...new Set(contacts.map((c) => c.device?.label || "appareil"))]);
     return { users: new Map(users.map((u) => [u.id, u])), objects, registered, outboundTrunk: routes.outbound_trunk,
-      trunkDids: new Set(trunks.rows.flatMap((r) => r.dids || [])), legacyInbound: routes.inbound, cc: countryCode(), tz: tz(), now: new Date() };
+      trunkDids: new Set(trunks.rows.flatMap((r) => trunkDidList(r, countryCode()))), legacyInbound: routes.inbound, cc: countryCode(), tz: tz(), now: new Date() };
   }
   async function parseFlow(text) {
-    const [users, objects, trunks] = await Promise.all([loadUsers(), loadObjects(), db.query("SELECT dids FROM pbxmaison_trunks")]);
+    const [users, objects, trunks] = await Promise.all([loadUsers(), loadObjects(), db.query("SELECT number, dids FROM pbxmaison_trunks")]);
     return parseRouting(text, {
       users: users.map((u) => ({ id: u.id, name: displayName(u), first_name: u.first_name, last_name: u.last_name, mobile: u.mobile })),
       objects: objects.map((o) => ({ kind: o.kind, id: o.id, number: o.number, name: o.name })),
-      trunkDids: trunks.rows.flatMap((r) => r.dids || []), cc: countryCode(),
+      trunkDids: trunks.rows.flatMap((r) => trunkDidList(r, countryCode())), cc: countryCode(),
     });
   }
   async function trace(number) { return traceNumber(number, await traceModel()); }

@@ -540,7 +540,10 @@ function drawMsgs(scroll) {
 // ------------------------------------------------------------------ Contacts (collègues + annuaire de l'entreprise)
 let ctab = "all", csel = "";
 const PT = { work: "Bureau", mobile: "Mobile", home: "Domicile", other: "Autre" };
+let dirAt = Date.now();
 function pageContacts(el) {
+  // Annuaire relu à l'ouverture de la page (contacts ajoutés depuis la console)
+  if (Date.now() - dirAt > 10_000) { dirAt = Date.now(); loadDirectory().then(() => { if (page === "contacts") renderPage(); }); }
   el.innerHTML = `<div class="split ${csel ? "has-sel" : ""}">
     <section class="panel listp">
       <div class="pad-s" style="padding-top:12px"><label class="search">${I.search()}<input id="cq" type="search" placeholder="Nom, société ou numéro" autocomplete="off"></label></div>
