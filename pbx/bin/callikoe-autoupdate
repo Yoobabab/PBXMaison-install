@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Serveur multi-tenant : mise à jour automatique (lancée toutes les 5 minutes par callikoe-update.timer).
+# Installe la dernière version publiée si elle a changé, seulement quand aucun appel n'est en cours.
+set -uo pipefail
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+LOG=/var/log/callikoe-update.log
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+[[ -f /etc/callikoe/install.state ]] || exit 0
+set -a; . /etc/callikoe/install.state; set +a
+REPO="${REPO:-Yoobabab/PBXMaison-install}"; BRANCH="${REF:-main}"
+# Version installée exactement (commit) : on suit la branche (main)
+[[ "$BRANCH" =~ ^[0-9a-f]{40}$ ]] && BRANCH=main
+LATEST="$(curl -fsS --max-time 20 -H "Accept: application/vnd.github.sha" "https://api.github.com/repos/${REPO}/commits/${BRANCH}" 2>/dev/null | head -c 40)"
+[[ "$LATEST" =~ ^[0-9a-f]{40}$ ]] || exit 0
+[[ "$LATEST" == "${COMMIT:-}" ]] && exit 0
+# Pas pendant un appel
+busy=0
+for conf in /etc/callikoe/t/*/asterisk/asterisk.conf; do
+  [[ -f "$conf" ]] || continue
+  n="$(asterisk -C "$conf" -rx "core show channels count" 2>/dev/null | awk '/active call/ {print $1; exit}')"
+  [[ "${n:-0}" =~ ^[0-9]+$ ]] && (( n > 0 )) && busy=1
+done
+if (( busy )); then log "Nouvelle version ${LATEST:0:7} : appels en cours, mise à jour reportée"; exit 0; fi
+log "Mise à jour ${COMMIT:0:7} → ${LATEST:0:7}"
+if curl -fsSL --max-time 60 "https://raw.githubusercontent.com/${REPO}/${LATEST}/install.sh" -o /tmp/callikoe-install.sh \
+   && PBXM_REF="$LATEST" bash /tmp/callikoe-install.sh >> "$LOG" 2>&1; then
+  log "Mise à jour terminée (${LATEST:0:7})"
+else
+  log "Échec de la mise à jour (voir ci-dessus) ; nouvel essai dans 5 minutes"
+fi
+rm -f /tmp/callikoe-install.sh

@@ -32,7 +32,7 @@ sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_TRUSTED_KEY_FILE="$PWD/test-key.pem" 
   timeout 600 bash ../../install.sh --multi-tenant > install-sans.out 2>&1 && fail "installation acceptée sans configuration du serveur" \
   || pass "Installation refusée sans la configuration du serveur (commande incomplète)"
 # shellcheck disable=SC2024
-sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_TRUSTED_KEY_FILE="$PWD/test-key.pem" PBXM_NO_FIREWALL=1 PBXM_PUBLIC_IP="$IP" \
+sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_TRUSTED_KEY_FILE="$PWD/test-key.pem" PBXM_NO_FIREWALL=1 PBXM_NO_AUTOUPDATE=1 PBXM_PUBLIC_IP="$IP" \
   timeout 1200 bash ../../install.sh --multi-tenant --serveur "$(base64 -w0 cfg-srv.json)" > install.out 2>&1 || { grep -v -E '\.{10}' install.out | tail -n 40 | cut -c1-200 >> "$OUT"; fail "install.sh --multi-tenant a échoué"; }
 pass "install.sh --multi-tenant --serveur terminé en $(( SECONDS - T0 )) s"
 grep -q "Première connexion" install.out && pass "Lien de première connexion à la console du serveur affiché" || { tail -n 15 install.out >> "$OUT"; fail "lien de la console du serveur absent"; }

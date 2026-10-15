@@ -139,8 +139,33 @@ RandomizedDelaySec=15min
 [Install]
 WantedBy=timers.target
 EOF
+  # Mises à jour automatiques (toutes les 5 minutes, jamais pendant un appel)
+  cat > /etc/systemd/system/callikoe-update.service <<EOF
+[Unit]
+Description=Callikoe — mise à jour automatique du serveur multi-tenant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${APP}/pbx/bin/callikoe-autoupdate
+TimeoutStartSec=30min
+EOF
+  cat > /etc/systemd/system/callikoe-update.timer <<'EOF'
+[Unit]
+Description=Callikoe — recherche de mise à jour toutes les 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target
+EOF
   systemctl daemon-reload
   systemctl enable --now callikoe-dns.timer >/dev/null 2>&1 || true
+  [[ -n "${PBXM_NO_AUTOUPDATE:-}" ]] || systemctl enable --now callikoe-update.timer >/dev/null 2>&1 || true
 
   # Web : bloc par défaut (certificats Let's Encrypt), puis un bloc par PBX client
   install -d /var/www/letsencrypt
@@ -571,7 +596,9 @@ cmd_mettre_a_jour() {
     if [[ -f "$CX/t/$slug/pbx.env" ]]; then
       "$CONF" --tenant "$slug" render >/dev/null 2>&1 || { warn "${slug} : configuration non réécrite"; rc=1; }
       "$CONF" --tenant "$slug" nginx >/dev/null 2>&1 || true
-      systemctl restart "callikoe-asterisk@$slug" || rc=1
+      # Rechargement à chaud : les appels en cours ne sont pas coupés
+      if systemctl is-active --quiet "callikoe-asterisk@$slug"; then systemctl reload "callikoe-asterisk@$slug" || rc=1
+      else systemctl start "callikoe-asterisk@$slug" || rc=1; fi
     fi
     systemctl restart "callikoe-console@$slug" || rc=1
   done < <(reg_slugs)
