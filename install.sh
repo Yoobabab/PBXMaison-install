@@ -291,7 +291,7 @@ chmod 644 "$ETC/install.state"
 "$APP/pbx/bin/pbx-configure" nginx
 systemctl enable nginx >/dev/null 2>&1
 ok "IP publique ${PUBLIC_IP}$( ((BEHIND_NAT)) && echo " (machine derrière un routeur, IP locale ${LOCAL_IP})")"
-((BEHIND_NAT)) && warn "Derrière une box : rediriger vers ${LOCAL_IP} UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80/443, et désactiver le SIP ALG."
+((BEHIND_NAT)) && warn "Derrière une box : rediriger vers ${LOCAL_IP} UDP 5060, TCP 5060-5061, UDP 10000-20000, TCP 80/443/8822, et désactiver le SIP ALG."
 
 # =============================================================================
 step "Sécurité : pare-feu et fail2ban"
@@ -302,7 +302,7 @@ elif [[ "${PBXM_NO_FIREWALL:-0}" == 1 ]]; then
   warn "Pare-feu non configuré (PBXM_NO_FIREWALL=1)"
 elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
   ufw allow 5060/udp >/dev/null; ufw allow 5060:5061/tcp >/dev/null; ufw allow 10000:20000/udp >/dev/null
-  ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+  ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 8822/tcp >/dev/null
   ok "Règles ajoutées au pare-feu ufw existant"
 else
   apt_install nftables
@@ -320,7 +320,8 @@ table inet pbxmaison {
     ip protocol icmp accept
     ip6 nexthdr ipv6-icmp accept
     tcp dport { ${SSH_PORTS} } accept comment "SSH"
-    tcp dport { 80, 443 } accept comment "Console web"
+    tcp dport { 80, 443 } accept comment "Web public : softphone, appli, téléphones"
+    tcp dport 8822 accept comment "Console d'administration"
     udp dport 5060 accept comment "SIP UDP"
     tcp dport { 5060, 5061 } accept comment "SIP TCP/TLS"
     udp dport 10000-20000 accept comment "Audio RTP"
@@ -348,7 +349,7 @@ if [[ -f "$ETC/pbx.env" ]]; then
   "$APP/pbx/bin/pbx-configure" render
   systemctl restart asterisk 2>/dev/null || true
   set -a; . "$ETC/pbx.env"; set +a
-  URL="https://${PBX_FQDN}"; [[ -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]] || URL="http://${PUBLIC_IP}"
+  URL="https://${PBX_FQDN}:8822"; [[ -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]] || URL="http://${PUBLIC_IP}"
   ok "PBX déjà configuré (${PBX_NAME}) : mise à jour terminée"
 else
   [[ -s "$VAR/setup-token" ]] || { openssl rand -hex 12 > "$VAR/setup-token"; }

@@ -255,7 +255,7 @@ function wizApply() {
   let fails = 0, last = null;
   // Adresse HTTPS obtenue pendant l'installation : l'assistant continue là-bas (même jeton)
   const httpsUrl = (steps) => {
-    const m = /https:\/\/([A-Za-z0-9.-]+)/.exec((steps || []).find((x) => x.step === "certificat" && x.status === "ok")?.message || "");
+    const m = /https:\/\/([A-Za-z0-9.:-]+)/.exec((steps || []).find((x) => x.step === "certificat" && x.status === "ok")?.message || "");
     return m && location.protocol === "http:" ? `https://${m[1]}/?jeton=${encodeURIComponent(setupToken())}` : null;
   };
   const poll = async () => {
@@ -263,7 +263,7 @@ function wizApply() {
     try { p = await api("GET", "/api/setup/progress"); fails = 0; } catch (e) {
       // Le serveur web a pu basculer en HTTPS (certificat obtenu) : proposer d'y continuer
       if (++fails === 6) {
-        const u = httpsUrl(last?.steps) || (wiz.check?.pbx?.fqdn ? `https://${wiz.check.pbx.fqdn}/?jeton=${encodeURIComponent(setupToken())}` : null);
+        const u = httpsUrl(last?.steps) || (wiz.check?.pbx?.fqdn ? `https://${wiz.check.pbx.fqdn}:8822/?jeton=${encodeURIComponent(setupToken())}` : null);
         $("#prog").insertAdjacentHTML("beforeend", `<div class="pad" id="lost" style="border-top:1px solid var(--line)"><p style="margin-top:0"><strong>La page ne reçoit plus l'avancement.</strong> Le serveur web vient probablement de passer en HTTPS : l'installation continue de son côté.</p>
           ${u ? `<a class="btn" href="${esc(u)}">Continuer en HTTPS</a>` : `<button class="btn" onclick="location.reload()">Recharger la page</button>`}</div>`);
       }
@@ -324,7 +324,7 @@ async function wizDone() {
   let d = null;
   try { d = await api("GET", "/api/dashboard"); } catch {}
   const st = await api("GET", "/api/state"); Object.assign(state, st);
-  const httpsUrl = d?.network?.tls ? `https://${d.pbx.fqdn}` : null;
+  const httpsUrl = d?.network?.tls ? `https://${d.pbx.fqdn}:8822` : null;
   app.innerHTML = wizardFrame(5, `<div class="panel">
     <div class="ph"><h2>Le PBX est prêt</h2><span class="pill ok">Installé</span></div>
     <div class="pad stack">
@@ -1084,6 +1084,8 @@ async function wireAppQr(u) {
 function keyLayout(model) {
   const n = model?.keys || 10;
   const touch = /x(480|600)$/.test(model?.screen || "");
+  // Grands écrans tactiles (T57W, T48U, T77U…) : 6 touches à gauche, 5 à droite + « Show More » qui déploie 3 colonnes de 6 au centre
+  if (touch && n >= 27) return { n, touch, more: true, perSide: 6, sides: 2, perPage: n, pages: 1 };
   const perSide = n >= 24 ? 5 : n >= 12 ? 3 : n >= 4 ? 2 : n;
   const sides = n >= 4 ? 2 : 1;
   return { n, touch, perSide, sides, perPage: perSide * sides, pages: Math.ceil(n / (perSide * sides)) };
@@ -1098,7 +1100,10 @@ function wireKeys(u, users) {
   let mods = (u.phone.modules || []).map((m) => (m.keys || []).map((k) => ({ ...k })));
   const others = users.filter((x) => x.id !== u.id);
   const box = $("#keys");
-  let page = 0, cur = null; // cur = { m: -1 (téléphone) ou n° de module, i }
+  let page = 0, cur = null, showMore = false; // cur = { m: -1 (téléphone) ou n° de module, i }
+  // Écran « Show More » : ordre des touches donné par l'installateur (gauche, droite, puis colonnes 1, 2, 3 du centre)
+  const MORE = { left: [0, 1, 2, 3, 4, 5], right: [6, 7, 8, 9, 10], c1: [11, 12, 13, 14, 15, 16], c2: [17, 18, 19, 20, 21, 22], c3: [23, 24, 25, 26, 27, 28] };
+  const morePlace = (i) => i < 6 ? "colonne de gauche" : i < 11 ? "colonne de droite" : i < 17 ? "colonne 1 (« Show More »)" : i < 23 ? "colonne 2 (« Show More »)" : "colonne 3 (« Show More »)";
   const modPage = [0, 0, 0];
   const NONE = () => ({ type: "none", value: "", label: "" });
   const arr = (m) => m < 0 ? keys : mods[m];
@@ -1117,7 +1122,16 @@ function wireKeys(u, users) {
   const drawVisual = () => {
     const start = page * L.perPage;
     const col = (side) => Array.from({ length: L.perSide }, (_, r) => cell(-1, start + side * L.perSide + r, L.n, side === 1)).join("");
-    const phone = L.touch
+    const mcol = (list, extra = "") => `<div class="phv-col">${list.map((i) => cell(-1, i, L.n)).join("")}${extra}</div>`;
+    const phone = L.more
+      ? `<div class="phv touch"><div class="phv-head"><span class="phv-brand">${esc(model?.brand || "Téléphone")}</span><span class="phv-model">${esc(model?.label.replace(/^\S+\s/, "") || "")}</span></div>
+          <div class="phv-screen big"><div class="phv-bar"><span>${esc(u.id)}</span><span></span></div>
+            <div class="phv-tgrid five ${showMore ? "open" : ""}">${mcol(MORE.left)}
+              ${showMore ? `${mcol(MORE.c1)}${mcol(MORE.c3)}${mcol(MORE.c2)}` : `<div class="phv-mid"><span class="phv-clock">12:00</span></div>`}
+              ${mcol(MORE.right, `<button type="button" class="phv-k phv-more" id="showmore"><span>${showMore ? "Show Less" : "Show More"}</span></button>`)}</div>
+            <div class="phv-soft"><span>Historique</span><span>Annuaire</span><span>NPD</span><span>Menu</span></div></div>
+          <p class="phv-note">${showMore ? "Colonnes du centre dans l'ordre 1 (à gauche), 2 (à droite), 3 (au milieu)." : "Clique sur « Show More » pour voir et régler les 18 touches du centre."}</p></div>`
+      : L.touch
       ? `<div class="phv touch"><div class="phv-head"><span class="phv-brand">${esc(model?.brand || "Téléphone")}</span><span class="phv-model">${esc(model?.label.replace(/^\S+\s/, "") || "")}</span></div>
           <div class="phv-screen big"><div class="phv-bar"><span>${esc(u.id)}</span><span>${L.pages > 1 ? `${page + 1}/${L.pages}` : ""}</span></div>
             <div class="phv-tgrid"><div class="phv-col">${col(0)}</div><div class="phv-col r">${col(1)}</div></div>
@@ -1139,9 +1153,10 @@ function wireKeys(u, users) {
     }).join("") : "";
     $("#phv").innerHTML = `${EXP ? `<div class="phv-mods"><span>Modules d'extension ${esc(EXP.label)} (${EXP.perPage} touches × ${EXP.pages} pages)</span>${[0, 1, 2, 3].map((n) => `<button type="button" data-nmods="${n}" class="${mods.length === n ? "on" : ""}">${n === 0 ? "Aucun" : n}</button>`).join("")}</div>` : ""}
       <div class="phv-row">${phone}${modules}</div>
-      ${L.touch ? `<p class="hint" style="margin:8px 0 0">Écran tactile : les raccourcis s'affichent à l'écran, ${L.perPage} par page. La fonction « masquer » du téléphone les cache ou les montre tous : leur réglage ne change pas.</p>` : ""}`;
+      ${L.touch && !L.more ? `<p class="hint" style="margin:8px 0 0">Écran tactile : les raccourcis s'affichent à l'écran, ${L.perPage} par page.</p>` : ""}`;
     $("#phv").querySelectorAll("[data-key]").forEach((b) => b.onclick = () => { const [m, i] = b.dataset.key.split(":").map(Number); cur = { m, i }; drawVisual(); drawPanel(); });
     $("#phv").querySelectorAll("[data-page]").forEach((b) => b.onclick = () => { page = Number(b.dataset.page); drawVisual(); });
+    $("#showmore")?.addEventListener("click", () => { showMore = !showMore; drawVisual(); });
     $("#phv").querySelectorAll("[data-mpage]").forEach((b) => b.onclick = () => { modPage[Number(b.dataset.mpage)] = Number(b.dataset.p); drawVisual(); });
     $("#phv").querySelectorAll("[data-nmods]").forEach((b) => b.onclick = () => {
       const n = Number(b.dataset.nmods);
@@ -1155,7 +1170,7 @@ function wireKeys(u, users) {
     const pnl = $("#phvpanel");
     if (!cur) { pnl.innerHTML = `<div class="phv-empty">Clique sur une touche ${EXP ? "du téléphone ou d'un module " : "du téléphone "}pour choisir ce qu'elle fait : <strong>BLF</strong> (supervision d'un collègue), <strong>Statut</strong> (Ne pas déranger), <strong>numérotation rapide</strong> ou <strong>ligne</strong>.</div>`; return; }
     const { m, i } = cur, k = K(m, i);
-    const where = m < 0 ? `${L.pages > 1 ? `page ${Math.floor(i / L.perPage) + 1}, ` : ""}${(i % L.perPage) < L.perSide ? "à gauche" : "à droite"}`
+    const where = m < 0 && L.more ? morePlace(i) : m < 0 ? `${L.pages > 1 ? `page ${Math.floor(i / L.perPage) + 1}, ` : ""}${(i % L.perPage) < L.perSide ? "à gauche" : "à droite"}`
       : `module ${m + 1}, page ${Math.floor(i / EXP.perPage) + 1}, ${(i % EXP.perPage) < EXP.perPage / 2 ? "à gauche" : "à droite"}`;
     pnl.innerHTML = `<div class="phv-ph"><strong>Touche ${i + 1}</strong><span class="s">${where}</span></div>
       <div class="phv-types">${Object.entries(o.key_types).filter(([t]) => m < 0 || t !== "line").map(([t, l]) => `<button type="button" data-t="${t}" class="${k.type === t ? "on" : ""}">${esc(l.split(" (")[0])}</button>`).join("")}</div>

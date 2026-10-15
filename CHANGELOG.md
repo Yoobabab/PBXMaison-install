@@ -1,5 +1,9 @@
 # Nouveautés de Callikoe
 
+## 1.4.0
+- Console d'administration sur son propre port HTTPS 8822 (réservable aux adresses de l'installateur) ; le 443 ne sert plus qu'au softphone, à l'appli et aux téléphones
+- Yealink T57W, T48U, T77U : écran « Show More » dessiné (6 touches à gauche, 5 à droite, 3 colonnes de 6 au centre)
+
 ## 1.3.1
 - Touches : modules d'extension Yealink EXP43, EXP50 et EXP55 (jusqu'à 3), écrans tactiles (T57W, T48U, T58) dessinés avec leurs raccourcis à l'écran, dessin du poste sans le clavier
 

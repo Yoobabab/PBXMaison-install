@@ -612,3 +612,10 @@ body.no-side .shell{margin-left:0}
 .phv-empty{color:var(--muted);font-size:14px;line-height:1.5}
 .phv-list summary{cursor:pointer;color:var(--muted);margin:6px 0}
 @media (max-width:560px){.phv-col{flex-basis:96px}.phv-k span{font-size:11px;padding:4px}}
+.phv-tgrid.five{align-items:stretch}
+.phv-tgrid.five>.phv-col{flex:1 1 0;justify-content:flex-start}
+.phv-tgrid.five .phv-mid{flex:3 1 0}
+.phv-tgrid.five.open>.phv-col:nth-child(2),.phv-tgrid.five.open>.phv-col:nth-child(3),.phv-tgrid.five.open>.phv-col:nth-child(4){background:#ffffff10;border-radius:8px;padding:2px}
+.phv-more{justify-content:center}
+.phv-more span{background:#ffffff33!important;text-align:center;font-weight:600}
+.phv-note{margin:8px 0 0;font-size:12px;color:#a3a6b0;text-align:center}
