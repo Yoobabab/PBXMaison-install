@@ -230,6 +230,7 @@ sipdump() { # sipdump <PBX client> : diagnostics dans multi-diag.txt (publiés �
     echo "== SIP vu par $1"
     sudo grep -E "^(REGISTER|SIP/2.0|Route|Path|To|Supported)|Transmitting|Received" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | cut -c1-160 | head -n 30
     sudo grep -E "WARNING|ERROR" "/var/log/callikoe/$1/messages" 2>/dev/null | grep -v pjsip_wizard | tail -n 8 | cut -c1-200
+    echo "== opérateur simulé"; sudo tail -n 12 "$LAB/op/log/messages" 2>/dev/null | cut -c1-200
   } >> "$D" 2>&1 || true
 }
 mkast pa "$(PHONE 127.0.0.11 a.e2e.invalid "${AUTH[a]}" "${PW[a]}")" "$ANSWER" 31000
