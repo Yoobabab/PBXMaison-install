@@ -67,7 +67,7 @@ export function buildShortcodesDialplan(c) {
   L.push(`exten => _${lit(c.pickup)}XXX,1,Pickup(\${EXTEN:${c.pickup.length}}@PICKUPMARK)`, " same => n,Hangup()");
   L.push(`exten => ${lit(c.pickup_any)},1,Pickup()`, " same => n,Hangup()");
   L.push(`exten => _${lit(c.hide_cid)}X.,1,Set(CALLERID(pres)=prohib)`, ` same => n,Goto(from-internal,\${EXTEN:${c.hide_cid.length}},1)`);
-  L.push(`exten => _${lit(c.intercom)}XXX,1,Set(LOCAL(T)=\${EXTEN:${c.intercom.length}})`,
+  L.push(`exten => _${lit(c.intercom)}XXX,1,Set(T=\${EXTEN:${c.intercom.length}})`,
     " same => n,GotoIf($[${DIALPLAN_EXISTS(users,${T},1)} = 0]?bad)",
     " same => n,Dial(PJSIP/${T}&PJSIP/${T}-web,30,b(page-headers^s^1))", " same => n,Hangup()",
     " same => n(bad),Playback(pbx-invalid)", " same => n,Hangup()");

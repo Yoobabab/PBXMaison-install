@@ -134,7 +134,7 @@ test("groupe cyclique, heures de bureau d'un groupe, SDA directe, file avancée"
   const q = m.objects.find((o) => o.id === "q1");
   Object.assign(q.data, { moh: "p1", periodic: ["p1"], periodic_freq: 40, announce_holdtime: true });
   const t = buildCallflowDialplan(m);
-  assert.match(t, /Set\(LOCAL\(MEMBERS\)=201&202\)/);
+  assert.match(t, /Set\(MEMBERS=201&202\)/);
   assert.match(t, /Set\(GLOBAL\(RR_600\)=\$\[\$\{I\} \+ 1\]\)/);
   assert.match(t, /Dial\(PJSIP\/\$\{M\}&PJSIP\/\$\{M\}-web,20/);
   assert.match(t, /exten => 600,1[\s\S]*Gosub\(sched-s1,s,1\)[\s\S]*GotoIf\(\$\["\$\{GOSUB_RETVAL\}" = "closed"\]\?of-closed\)/);

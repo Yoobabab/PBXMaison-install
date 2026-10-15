@@ -31,6 +31,6 @@ test("plan de numérotation des règles sortantes (ordre, secours)", () => {
   assert.match(t, /GotoIf\(\$\[\$\{REGEX\("\^\(06\|07\)" \$\{N\}\)\} & \(\$\{LEN\(\$\{N\}\)\} = 10\)\]\?r1-1\)/);
   assert.match(t, /GotoIf\(1\?r2-1\)/);
   assert.match(t, /n\(r1-1\),NoOp[\s\S]*Gosub\(out-cid,s,1\(user,,0465001530,e164\)\)\n same => n,Dial\(PJSIP\/\$\{D\}@dstny,120,T\)\n same => n,GotoIf\([^)]*CHANUNAVAIL[^)]*\?r1-2\)/);
-  assert.match(t, /n\(r2-1\)[\s\S]*Set\(LOCAL\(D\)=33\$\{N:1\}\)/);
+  assert.match(t, /n\(r2-1\)[\s\S]*Set\(D=33\$\{N:1\}\)/);
   assert.equal(buildOutboundDialplan([], new Map()).includes("exten"), false);
 });

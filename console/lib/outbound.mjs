@@ -86,8 +86,8 @@ const esc = (s) => String(s).replace(/[\\^$.|?*+()[\]{}]/g, (c) => `\\${c}`);
 export function buildOutboundDialplan(rules, trunks) {
   const L = ["", "; Règles sortantes — écrit par la console web", "[out-rules]"];
   if (!rules.length) return L.join("\n") + "\n";
-  L.push("exten => _X.,1,Set(LOCAL(N)=${EXTEN})",
-    " same => n,Set(LOCAL(SRC)=${CUT(CUT(CHANNEL(name),/,2),-,1)})",
+  L.push("exten => _X.,1,Set(N=${EXTEN})",
+    " same => n,Set(SRC=${CUT(CUT(CHANNEL(name),/,2),-,1)})",
     " same => n,ExecIf($[\"${SRC}\" = \"\" | ${REGEX(\"[^0-9]\" ${SRC})}]?Set(SRC=0))");
   rules.forEach((r, i) => {
     const cond = [];
@@ -102,9 +102,9 @@ export function buildOutboundDialplan(rules, trunks) {
       const t = trunks.get(rt.trunk) || { dial_format: "national", cid_format: "national", outbound_cid: "" };
       const lbl = `r${i + 1}-${k + 1}`;
       L.push(` same => n(${lbl}),NoOp(Règle sortante ${i + 1} « ${String(r.name).replace(/[(),]/g, " ")} », route ${k + 1} : ${rt.trunk})`,
-        ` same => n,Set(LOCAL(D)=${rt.prepend}\${N:${rt.strip}})`,
+        ` same => n,Set(D=${rt.prepend}\${N:${rt.strip}})`,
         ` same => n,Gosub(fmt-num,s,1(\${D},${t.dial_format}))`,
-        " same => n,Set(LOCAL(D)=${GOSUB_RETVAL})",
+        " same => n,Set(D=${GOSUB_RETVAL})",
         ` same => n,Gosub(out-cid,s,1(${rt.cid_mode},${rt.cid},${t.outbound_cid || ""},${t.cid_format}))`,
         ` same => n,Dial(PJSIP/\${D}@${rt.trunk},120,T)`);
       const next = k + 1 < r.routes.length ? `r${i + 1}-${k + 2}` : "";

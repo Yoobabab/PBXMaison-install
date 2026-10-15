@@ -246,6 +246,11 @@ echo "$R" | grep -q '"summary":"numéros commençant par 06, 07, de 10 chiffres"
 sleep 1
 D="$(sudo /usr/sbin/asterisk -rx 'dialplan show out-rules')"
 echo "$D" | grep -q "PJSIP/\${D}@unyc" && echo "$D" | grep -q "CHANUNAVAIL" && pass "Règle sortante : route de secours dans le plan de numérotation" || { echo "$D" | head -30 >> "$OUT"; fail "out-rules"; }
+# Appel réel à travers la règle : le numéro composé doit arriver au trunk (variables du plan de numérotation)
+sudo /usr/sbin/asterisk -rx "channel originate Local/0612345678@outbound application Wait 1" >/dev/null 2>&1 || true
+sleep 6
+LD="$(sudo -u postgres psql -d asterisk -tAc "select lastdata from cdr where dst='0612345678' and lastapp='Dial' order by id desc limit 1")"
+[[ "$LD" == PJSIP/0612345678@dstny* || "$LD" == PJSIP/0612345678@unyc* ]] && pass "Règle sortante : le numéro composé part bien au trunk ($LD)" || { echo "lastdata : $LD" >> "$OUT"; fail "numéro composé perdu dans la règle sortante"; }
 R="$(api PUT /api/security '{"intl":["32","41"],"in_block":[{"number":"0899*"},{"number":"0612000000","label":"Démarcheur"}],"out_block":["0144556677"],"max_user_calls":3}')"
 echo "$R" | grep -q '"intl":\["32","41"\]' && pass "Sécurité : pays autorisés et numéros bloqués enregistrés" || fail "sécurité : $R"
 sleep 1

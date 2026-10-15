@@ -494,12 +494,12 @@ export function buildCallflowDialplan(m) {
     } else if (ring.length) {
       if (d.strategy === "hunt" || d.strategy === "rotate") {
         // Un membre après l'autre ; en cyclique, on démarre au suivant du dernier appel (variable globale)
-        L.push(` same => n,Set(LOCAL(MEMBERS)=${ring.join("&")})`);
-        if (d.strategy === "rotate") L.push(` same => n,Set(LOCAL(I)=$[0\${RR_${o.number}} % ${ring.length}])`, ` same => n,Set(GLOBAL(RR_${o.number})=$[\${I} + 1])`);
-        else L.push(" same => n,Set(LOCAL(I)=0)");
-        L.push(" same => n,Set(LOCAL(K)=0)",
+        L.push(` same => n,Set(MEMBERS=${ring.join("&")})`);
+        if (d.strategy === "rotate") L.push(` same => n,Set(I=$[0\${RR_${o.number}} % ${ring.length}])`, ` same => n,Set(GLOBAL(RR_${o.number})=$[\${I} + 1])`);
+        else L.push(" same => n,Set(I=0)");
+        L.push(" same => n,Set(K=0)",
           ` same => n(next),GotoIf($[\${K} >= ${ring.length}]?done)`,
-          ` same => n,Set(LOCAL(M)=\${CUT(MEMBERS,&,$[(\${I} + \${K}) % ${ring.length} + 1])})`,
+          ` same => n,Set(M=\${CUT(MEMBERS,&,$[(\${I} + \${K}) % ${ring.length} + 1])})`,
           ` same => n,Dial(PJSIP/\${M}&PJSIP/\${M}-web,${d.ring_time},tb(pickup-mark^s^1))`,
           ' same => n,GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)',
           " same => n,Set(K=$[${K} + 1])", " same => n,Goto(next)", " same => n(done),NoOp(Personne n'a répondu)");
@@ -643,9 +643,9 @@ function stepLines(st, m, tag) {
       if (d.strategy === "rotate") {
         const ring = ringers(d.members, m.users);
         if (!ring.length) { add("NoOp(Aucun membre disponible)"); break; }
-        add(`Set(LOCAL(MEMBERS)=${ring.join("&")})`); add(`Set(LOCAL(I)=$[0\${RR_${g.number}} % ${ring.length}])`); add(`Set(GLOBAL(RR_${g.number})=$[\${I} + 1])`); add("Set(LOCAL(K)=0)");
+        add(`Set(MEMBERS=${ring.join("&")})`); add(`Set(I=$[0\${RR_${g.number}} % ${ring.length}])`); add(`Set(GLOBAL(RR_${g.number})=$[\${I} + 1])`); add("Set(K=0)");
         add(`GotoIf($[\${K} >= ${ring.length}]?done-${tag})`, `next-${tag}`);
-        add(`Set(LOCAL(M)=\${CUT(MEMBERS,&,$[(\${I} + \${K}) % ${ring.length} + 1])})`);
+        add(`Set(M=\${CUT(MEMBERS,&,$[(\${I} + \${K}) % ${ring.length} + 1])})`);
         add(`Dial(PJSIP/\${M}&PJSIP/\${M}-web,${time},tb(pickup-mark^s^1))`);
         add('GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)');
         add("Set(K=$[${K} + 1])"); add(`Goto(next-${tag})`); add("NoOp()", `done-${tag}`);
