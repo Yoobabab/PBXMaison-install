@@ -561,12 +561,27 @@ body.no-side .shell{margin-left:0}
 .fx-keys td{padding:6px 4px}.fx-keys .dest .row>*{min-width:150px}
 
 /* Touches : téléphone dessiné comme sur la notice */
-.phv-wrap{display:grid;grid-template-columns:minmax(0,620px) minmax(240px,1fr);gap:20px;align-items:start}
-@media (max-width:900px){.phv-wrap{grid-template-columns:1fr}}
+.phv-wrap{display:grid;grid-template-columns:minmax(0,auto) minmax(260px,340px);gap:20px;align-items:start;justify-content:start}
+.phv-row{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.phv-row>.phv:first-child{width:min(620px,100%)}
+.phv-exp{width:340px;padding:12px}
+.phv-exp .phv-col{flex:1 1 0;min-width:0}
+.phv-screen.exp{min-height:0;padding:8px 6px}
+.phv-screen.big{min-height:260px}
+.phv-tgrid{display:flex;gap:8px;align-items:center;padding:8px;flex:1}
+.phv-tgrid .phv-col{flex:1 1 0;min-width:0}
+.phv-tgrid .phv-clock{font-size:22px;opacity:.85}
+.phv.touch .phv-k span{background:#ffffff1f}
+.phv-mods{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;font-size:14px;color:var(--muted)}
+.phv-mods span{margin-right:6px}
+.phv-mods button{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:999px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
+.phv-mods button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+@media (max-width:1100px){.phv-wrap{grid-template-columns:1fr}}
 .phv{background:linear-gradient(#2b2d33,#1d1f24);border-radius:22px;padding:14px 16px 16px;color:#e9eaee;box-shadow:0 10px 30px rgba(0,0,0,.18)}
 .phv-head{display:flex;justify-content:center;gap:8px;align-items:baseline;margin-bottom:8px}
 .phv-brand{font-weight:800;letter-spacing:.5px}.phv-model{font-size:12px;color:#a3a6b0}
 .phv-top{display:flex;gap:10px;align-items:stretch}
+.phv-pages{margin-top:10px}
 .phv-col{display:flex;flex-direction:column;gap:6px;flex:0 0 150px;justify-content:center}
 .phv-k{display:flex;align-items:center;gap:7px;border:0;background:none;color:inherit;padding:0;cursor:pointer;font:inherit;text-align:left;min-height:30px}
 .phv-col.r .phv-k{flex-direction:row-reverse;text-align:right}
@@ -586,9 +601,6 @@ body.no-side .shell{margin-left:0}
 .phv-soft{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;padding:4px;font-size:10px;text-align:center}
 .phv-soft span{background:#00000055;border-radius:4px;padding:4px 0}
 .phv.touch .phv-k i{display:none}
-.phv-hard{display:flex;justify-content:center;gap:34px;margin:12px 0 10px;color:#8c909b;font-size:14px}
-.phv-pad{display:grid;grid-template-columns:repeat(3,44px);gap:6px;justify-content:center}
-.phv-pad span{background:#3a3d45;border-radius:9px;text-align:center;padding:5px 0;font-size:13px;color:#cfd1d7}
 .phv-pages{display:flex;justify-content:center;gap:6px;margin-top:12px}
 .phv-pages button{border:1px solid #5d606a;background:none;color:#e9eaee;border-radius:999px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer}
 .phv-pages button.on{background:#fff;color:#1d1f24}
