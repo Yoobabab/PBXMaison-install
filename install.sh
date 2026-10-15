@@ -194,7 +194,15 @@ install -d -o pbxmaison -g asterisk -m 2750 "$VAR"
 install -d -o pbxmaison -g pbxmaison -m 0700 "$VAR/staging"
 install -d -o pbxmaison -g asterisk -m 2750 "$VAR/sounds"
 [[ -f "$VAR/extensions_routes.conf" ]] || install -o pbxmaison -g asterisk -m 0640 /dev/null "$VAR/extensions_routes.conf"
-(cd "$APP/console" && PATH="/usr/bin:$PATH" npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null 2>&1)
+# Modules Node.js : réinstallés seulement s'ils ont changé (npm ci repart de zéro et prend 1 à 2 min sur un petit VPS)
+LOCKSUM="$(sha256sum "$APP/console/package-lock.json" | cut -c1-64)"
+if [[ "$(cat "$APP/console/node_modules/.callikoe-lock" 2>/dev/null)" == "$LOCKSUM" ]]; then
+  ok "Modules de la console déjà à jour"
+else
+  echo "  … installation des modules de la console (1 à 2 minutes)"
+  (cd "$APP/console" && PATH="/usr/bin:$PATH" npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null 2>&1)
+  echo "$LOCKSUM" > "$APP/console/node_modules/.callikoe-lock"
+fi
 if [[ -n "${PBXM_TRUSTED_KEY_FILE:-}" ]]; then install -m 0644 "$PBXM_TRUSTED_KEY_FILE" "$ETC/trusted-key.pem"; fi
 cat > /etc/sudoers.d/pbxmaison <<EOF
 # La console web peut appliquer la configuration système, et rien d'autre
