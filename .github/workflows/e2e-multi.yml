@@ -45,7 +45,7 @@ jobs:
           split -C 3500 "$f" diag-part-
           for p in diag-part-*; do msg="$(sed -e 's/%/%25/g' "$p" | awk '{printf "%s%%0A", $0}')"; echo "::warning title=Diagnostic ${p#diag-part-}::${msg}"; done
       - name: Diagnostics complets (branche e2e-diag, lisible sans les journaux d'Actions)
-        if: always()
+        if: failure() || cancelled()
         shell: bash
         run: |
           mkdir -p /tmp/diag && cd /tmp/diag
