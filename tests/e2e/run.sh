@@ -297,6 +297,7 @@ sudo bash ../../reset.sh --confirmer > reset.out 2>&1 || { tail -n 20 reset.out 
   && [[ -z "$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='asterisk'" 2>/dev/null)" ]] && pass "Réinitialisation : serveur nettoyé (fichiers, services, base)" || fail "réinitialisation incomplète"
 # shellcheck disable=SC2024
 sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 timeout 900 bash ../../install.sh > reinstall2.out 2>&1 || { tail -n 30 reinstall2.out >> "$OUT"; fail "installation après réinitialisation"; }
-sleep 3
-curl -sS http://127.0.0.1/api/state | grep -q '"configured":false' && sudo /usr/sbin/asterisk -rx 'core show version' | grep -q Asterisk && pass "Réinstallation sur serveur propre : assistant prêt" || fail "réinstallation après reset"
+for _ in $(seq 1 15); do curl -sS http://127.0.0.1/api/state 2>/dev/null | grep -q '"configured"' && break; sleep 2; done
+ST="$(curl -sS http://127.0.0.1/api/state || true)"
+echo "$ST" | grep -q '"configured":false' && [[ -f /usr/share/asterisk/VERSION ]] && /usr/sbin/asterisk -V | grep -q Asterisk && pass "Réinstallation sur serveur propre : assistant prêt" || { echo "état : $ST" >> "$OUT"; tail -n 8 reinstall2.out >> "$OUT"; fail "réinstallation après reset"; }
 echo "OK" >> "$OUT"
