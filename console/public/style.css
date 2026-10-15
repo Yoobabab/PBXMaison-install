@@ -619,3 +619,12 @@ body.no-side .shell{margin-left:0}
 .phv-more{justify-content:center}
 .phv-more span{background:#ffffff33!important;text-align:center;font-weight:600}
 .phv-note{margin:8px 0 0;font-size:12px;color:#a3a6b0;text-align:center}
+
+/* Serveur multi-tenant : sélecteur de PBX (comptes IRT) */
+.pbxsw{position:relative}
+.pbxsw-menu{position:absolute;right:0;top:calc(100% + 6px);width:min(340px,90vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.14);padding:10px;z-index:60;display:flex;flex-direction:column;gap:8px}
+.pbxsw-list{max-height:320px;overflow:auto;display:flex;flex-direction:column}
+.pbxsw-list a{display:flex;flex-direction:column;padding:7px 9px;border-radius:8px;color:var(--ink);text-decoration:none}
+.pbxsw-list a small{color:var(--muted);font-size:12px}
+.pbxsw-list a:hover,.pbxsw-list a.on{background:var(--accent-soft)}
+.pbxsw-all{font-size:13px;padding:6px 9px;border-top:1px solid var(--line)}

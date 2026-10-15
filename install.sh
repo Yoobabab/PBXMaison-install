@@ -16,11 +16,12 @@
 # =============================================================================
 set -Eeuo pipefail
 
-MULTI=0; RESTORE_FILE=""
+MULTI=0; RESTORE_FILE=""; SERVER_ARG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --multi-tenant) MULTI=1 ;;
     --restaurer) RESTORE_FILE="${2:-}"; shift ;;
+    --serveur) SERVER_ARG="${2:-}"; shift ;;
   esac
   shift
 done
@@ -50,6 +51,8 @@ echo "${B}Callikoe — installation$( ((MULTI)) && echo " du serveur multi-tenan
 if ((MULTI)); then
   [[ -f /etc/pbxmaison/pbx.env ]] && die "Ce serveur héberge déjà un PBX seul. Le serveur multi-tenant s'installe sur un VPS neuf ; le PBX actuel y sera importé avec sa sauvegarde (callikoe-host importer)."
   [[ -z "$RESTORE_FILE" || -f "$RESTORE_FILE" ]] || die "Sauvegarde introuvable : ${RESTORE_FILE}"
+  [[ -n "$SERVER_ARG$RESTORE_FILE" || -f /etc/callikoe/server-config.json ]] \
+    || die "Il manque la configuration du serveur : copie la commande d'installation complète depuis le portail (onglet Serveurs multi-tenant)."
   ETC=/etc/callikoe
 fi
 export DEBIAN_FRONTEND=noninteractive
@@ -323,6 +326,20 @@ COMMIT='${COMMIT}'
 EOF
 chmod 644 "$ETC/install.state"
 if ((MULTI)); then
+  if [[ -n "$SERVER_ARG" ]]; then
+    # Configuration du serveur signée par le portail (adresse de la console du serveur, compte super administrateur)
+    SRVTMP="$(mktemp)"
+    if [[ -f "$SERVER_ARG" ]]; then cp "$SERVER_ARG" "$SRVTMP"; else printf '%s' "$SERVER_ARG" | tr -d ' \n\r' | base64 -d > "$SRVTMP" 2>/dev/null || die "Configuration du serveur illisible : copie la commande en entier depuis le portail."; fi
+    KEY="$APP/pbx/portal-public-key.pem"; [[ -f "$ETC/trusted-key.pem" ]] && KEY="$ETC/trusted-key.pem"
+    node --input-type=module -e '
+      import fs from "node:fs";const {verifySignature}=await import(process.argv[3]);
+      let c;try{c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch{console.error("JSON illisible");process.exit(1)}
+      if(!verifySignature(c,fs.readFileSync(process.argv[2],"utf8"))){console.error("signature invalide");process.exit(1)}
+      if(c.kind!=="server"||!c.pbx?.fqdn||!c.admin?.email){console.error("ce n est pas une configuration de serveur");process.exit(1)}' \
+      "$SRVTMP" "$KEY" "$APP/pbx/lib/verify-config.mjs" 2>/dev/null || { rm -f "$SRVTMP"; die "Configuration du serveur refusée (signature ou contenu) : copie la commande depuis le portail."; }
+    install -m 0644 "$SRVTMP" "$ETC/server-config.json"; rm -f "$SRVTMP"
+    ok "Configuration du serveur vérifiée ($(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).pbx.fqdn)' "$ETC/server-config.json"))"
+  fi
   "$APP/pbx/bin/callikoe-host" init || die "Préparation du serveur multi-tenant impossible."
 else
   "$APP/pbx/bin/pbx-configure" nginx
@@ -400,7 +417,9 @@ if ((MULTI)); then
   echo
   "$APP/pbx/bin/callikoe-host" liste || true
   echo
-  echo "  Créer un PBX client : colle ici la commande « callikoe-host creer … » donnée par le portail (onglet Serveurs multi-tenant)."
+  "$APP/pbx/bin/callikoe-host" console || true
+  echo
+  echo "  Ensuite : connecte-toi à la console du serveur et crée les PBX clients (bouton « Nouveau PBX »)."
   echo
   exit 0
 fi

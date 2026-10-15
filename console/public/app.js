@@ -146,8 +146,32 @@ function setNav(active) {
   const [g, l] = NAV_LABEL[active] || ["", ""];
   $("#crumb").innerHTML = on && l ? `${g ? `<span>${g}</span><b>›</b>` : ""}<strong>${l}</strong>` : "";
   $("#pbx-name").textContent = state?.pbx?.name || "Console PBX";
+  pbxSwitcher(on);
   document.title = state?.pbx?.name ? `${l ? l + " · " : ""}${state.pbx.name}` : "Console Callikoe";
 }
+/** Serveur multi-tenant (compte IRT) : passer d'un PBX à l'autre sans se reconnecter, comme Omada. */
+function pbxSwitcher(on) {
+  const top = $("#topact");
+  top.querySelector(".pbxsw")?.remove();
+  if (!on || !state?.hub || !state.hub_url) return;
+  const cur = (state.pbx_list || []).find((p) => p.slug === state.current);
+  const box = document.createElement("div");
+  box.className = "pbxsw";
+  box.innerHTML = `<button type="button" class="btn ghost sm" id="pbxswb" aria-haspopup="true">PBX : <strong>${esc(cur?.name || state.current)}</strong> ▾</button>
+    <div class="pbxsw-menu" hidden><input type="search" placeholder="Rechercher un PBX…" autocomplete="off">
+      <div class="pbxsw-list"></div><a class="pbxsw-all" href="${esc(state.hub_url)}/#/">Console du serveur · tous les PBX</a></div>`;
+  top.prepend(box);
+  const menu = box.querySelector(".pbxsw-menu"), list = box.querySelector(".pbxsw-list"), q = box.querySelector("input");
+  const draw = () => {
+    const s = q.value.trim().toLowerCase();
+    const items = (state.pbx_list || []).filter((p) => !s || `${p.name} ${p.slug} ${p.fqdn}`.toLowerCase().includes(s)).slice(0, 60);
+    list.innerHTML = items.map((p) => `<a href="${esc(state.hub_url)}/ouvrir/${encodeURIComponent(p.slug)}" class="${p.slug === state.current ? "on" : ""}">
+      <strong>${esc(p.name)}</strong><small>${esc(p.fqdn)}</small></a>`).join("") || `<div class="hint" style="padding:8px">Aucun PBX.</div>`;
+  };
+  box.querySelector("#pbxswb").onclick = () => { menu.hidden = !menu.hidden; if (!menu.hidden) { draw(); q.focus(); } };
+  q.oninput = draw;
+}
+document.addEventListener("click", (e) => { const b = $(".pbxsw"); if (b && !b.contains(e.target)) b.querySelector(".pbxsw-menu").hidden = true; });
 document.addEventListener("click", (e) => {
   if (e.target.closest("#burger")) document.body.classList.toggle("side-open");
   else if (e.target.closest("#sidescrim") || e.target.closest("#nav a")) document.body.classList.remove("side-open");
@@ -351,7 +375,8 @@ function renderLogin(ticket = null) {
         <button class="btn">Valider</button><button type="button" class="btn link" id="back">Recommencer</button>`
       : `<label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
         <label>Mot de passe<input type="password" name="password" autocomplete="current-password" required></label>
-        <button class="btn">Se connecter</button>`}</form></div></div>`;
+        <button class="btn">Se connecter</button>
+        ${state?.tenant && state.hub_url ? `<p class="hint" style="margin:0">Compte IRT : <a href="${esc(state.hub_url)}/">connecte-toi par la console du serveur</a>.</p>` : ""}`}</form></div></div>`;
   $("#back")?.addEventListener("click", () => renderLogin());
   $("#login").onsubmit = async (e) => {
     e.preventDefault();
@@ -1420,7 +1445,10 @@ async function route() {
     const inv = /^#\/invitation\/([\w-]+)$/.exec(location.hash);
     if (inv && !state.logged_in) return renderInvite(inv[1]);
     if (!state.logged_in) return renderLogin();
-    if (!state.email || state.need_totp === undefined) { const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; state.role = me.role; }
+    if (!state.email || state.need_totp === undefined) {
+      const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; state.role = me.role;
+      Object.assign(state, { hub: !!me.hub, hub_url: me.hub_url || state.hub_url, pbx_list: me.pbx_list || [], current: me.current || "" });
+    }
     if (state.need_totp) return renderTotpRequired();
     const h = location.hash || "#/";
     let m;

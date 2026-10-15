@@ -54,6 +54,7 @@ export function checkConfig(cfg, publicKeyPem, now = new Date()) {
     return problems; // le reste n'est pas fiable si la signature est fausse
   }
   if (cfg.version !== 1) problems.push(`Version de fichier non prise en charge : ${cfg.version}.`);
+  if (cfg.kind === "server") { problems.push("Ce fichier configure un serveur multi-tenant, pas un PBX."); return problems; }
   const p = cfg.pbx ?? {}, l = cfg.license ?? {}, a = cfg.admin ?? {};
   for (const [k, v] of Object.entries({
     "pbx.id": p.id, "pbx.name": p.name, "pbx.fqdn": p.fqdn, "pbx.phone": p.phone,

@@ -46,6 +46,13 @@ const cfg = {
   license: { key: licenseKey(), edition: "pro", simultaneous_calls: 4, expires_at: new Date(Date.now() + 30 * 86400000).toISOString() },
   issued_at: new Date().toISOString(),
 };
+// Configuration de serveur multi-tenant (console du serveur) : node make-config.mjs <dossier> <fqdn> <fichier> --serveur
+if (process.argv.includes("--serveur")) {
+  cfg.kind = "server";
+  cfg.pbx = { id: cfg.pbx.id, name: "Serveur de test", company: "Serveur multi-tenant", fqdn: FQDN };
+  cfg.admin = { email: "irt-admin@test.invalid" };
+  cfg.license = { ...cfg.license, edition: "server", simultaneous_calls: 0 };
+}
 cfg.signature = crypto.sign(null, Buffer.from(canonical(cfg)), privateKey).toString("base64");
 fs.writeFileSync(path.join(dir, "test-key.pem"), publicKey.export({ type: "spki", format: "pem" }));
 fs.writeFileSync(path.join(dir, OUTFILE), JSON.stringify(cfg, null, 2));

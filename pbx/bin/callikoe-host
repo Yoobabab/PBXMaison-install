@@ -9,6 +9,7 @@
 #    callikoe-host supprimer <nom> --confirmer            supprime un PBX client et toutes ses données
 #    callikoe-host sauvegarder [--enregistrements]        sauvegarde du serveur entier (tous les PBX)
 #    callikoe-host restaurer <sauvegarde-serveur.tar.gz>  restaure le serveur entier (VPS neuf, après installation)
+#    callikoe-host console                                adresse de la console du serveur (et lien de 1re connexion)
 #    callikoe-host init | mettre-a-jour | dns | aiguilleur   usage interne (installeur, tâches planifiées)
 #
 #  Chaque PBX client a son moteur (callikoe-asterisk@<nom>), sa console (callikoe-console@<nom>), sa base (cx_<nom>),
@@ -31,6 +32,7 @@ warn() { echo "  ${Y}⚠${N} $*"; }
 die()  { echo "${R}✖ $*${N}" >&2; exit 1; }
 trap 'die "Erreur ligne $LINENO : $BASH_COMMAND"' ERR
 [[ $EUID -eq 0 ]] || die "callikoe-host doit être lancé en root (sudo)."
+[[ -f "$CX/install.state" ]] && { set -a; . "$CX/install.state"; set +a; }
 
 valid_slug() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{1,23}$ ]]; }
 reg_json() { node -e "$1" "$REG" "${@:2}"; }
@@ -200,6 +202,153 @@ EOF
   fi
   systemctl restart fail2ban >/dev/null 2>&1 || warn "fail2ban n'a pas redémarré (journalctl -u fail2ban)"
   ok "Protection anti-intrusion sur l'aiguilleur SIP"
+  hub_init
+}
+
+# ----------------------------------------------------------------------------- Console du serveur (comptes IRT, tous les PBX)
+HUB_ETC="$CX/hub"; HUB_VAR=/var/lib/callikoe/hub; SRV_CFG="$CX/server-config.json"
+hub_fqdn() { node -e 'try{process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).pbx.fqdn||"")}catch{}' "$SRV_CFG"; }
+hub_url() {
+  local f; f="$(hub_fqdn)"
+  if [[ -f "/etc/letsencrypt/live/$f/fullchain.pem" ]]; then echo "https://$f:8822"; else echo "http://$f"; fi
+}
+hub_init() {
+  [[ -f "$SRV_CFG" ]] || { warn "Console du serveur : configuration absente (relance l'installeur avec --serveur, commande donnée par le portail)"; return 0; }
+  local fqdn; fqdn="$(hub_fqdn)"
+  getent group callikoe-hub >/dev/null || groupadd --system callikoe-hub
+  id callikoe-hub >/dev/null 2>&1 || useradd --system --gid callikoe-hub --home-dir "$HUB_VAR" --no-create-home --shell /usr/sbin/nologin callikoe-hub
+  install -d -o root -g callikoe-hub -m 0750 "$HUB_ETC"
+  install -d -o callikoe-hub -g callikoe-hub -m 0755 "$HUB_VAR"
+  # Clé de signature des ouvertures de PBX : privée pour la console du serveur, publique pour les PBX
+  if [[ ! -f "$HUB_ETC/sso-key.pem" ]]; then
+    openssl genpkey -algorithm ed25519 -out "$HUB_ETC/sso-key.pem" 2>/dev/null
+  fi
+  chown callikoe-hub:callikoe-hub "$HUB_ETC/sso-key.pem"; chmod 600 "$HUB_ETC/sso-key.pem"
+  openssl pkey -in "$HUB_ETC/sso-key.pem" -pubout -out "$CX/hub-sso.pem" 2>/dev/null; chmod 644 "$CX/hub-sso.pem"
+  if [[ ! -f "$HUB_ETC/hub.env" ]]; then
+    ( umask 077; printf "SESSION_SECRET='%s'\nHUB_DB_PASSWORD='%s'\n" "$(openssl rand -hex 32)" "$(openssl rand -hex 24)" > "$HUB_ETC/hub.env" )
+  fi
+  chown root:callikoe-hub "$HUB_ETC/hub.env"; chmod 640 "$HUB_ETC/hub.env"
+  local pw; pw="$(. "$HUB_ETC/hub.env"; echo "$HUB_DB_PASSWORD")"
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -q <<SQL >/dev/null
+DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'callikoe_hub') THEN CREATE ROLE callikoe_hub LOGIN PASSWORD '${pw}';
+  ELSE ALTER ROLE callikoe_hub WITH LOGIN PASSWORD '${pw}'; END IF;
+END \$\$;
+SQL
+  [[ "$(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='callikoe_hub'")" == 1 ]] || runuser -u postgres -- createdb -O callikoe_hub callikoe_hub
+  runuser -u postgres -- psql -q -c "REVOKE ALL ON DATABASE callikoe_hub FROM PUBLIC" >/dev/null
+  # La console du serveur ne peut lancer que la création et la suppression de PBX
+  cat > /etc/sudoers.d/callikoe-hub <<EOF
+callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *
+EOF
+  chmod 440 /etc/sudoers.d/callikoe-hub
+  visudo -cq -f /etc/sudoers.d/callikoe-hub || { rm -f /etc/sudoers.d/callikoe-hub; die "Règle sudo invalide (console du serveur)."; }
+  cat > /etc/systemd/system/callikoe-hub.service <<EOF
+[Unit]
+Description=Callikoe — console du serveur multi-tenant
+After=network-online.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=callikoe-hub
+Group=callikoe-hub
+UMask=0022
+EnvironmentFile=${HUB_ETC}/hub.env
+Environment=NODE_ENV=production PORT=8800 HOST=127.0.0.1
+WorkingDirectory=${APP}/console
+ExecStart=/usr/bin/node ${APP}/console/hub/server.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable callikoe-hub >/dev/null 2>&1; systemctl restart callikoe-hub
+  # Adresse (service DNS Callikoe pour <nom>.callikoe.fr), certificat, Nginx
+  if [[ "$fqdn" =~ \.callikoe\.(fr|com)$ ]]; then
+    local out; out="$(curl -4 -sS --max-time 25 -X POST "${PBXM_DNS_API:-https://api.callikoe.fr}/v1/register" -H "content-type: application/json" \
+      --data-binary "$(node -e 'process.stdout.write(JSON.stringify({config:JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))}))' "$SRV_CFG")" 2>&1 || true)"
+    [[ "$out" == *'"ok":true'* ]] && ok "Adresse ${fqdn} → ${PUBLIC_IP}" || warn "Adresse ${fqdn} non mise à jour : ${out:0:160}"
+  fi
+  hub_nginx
+  if [[ ! -f "/etc/letsencrypt/live/$fqdn/fullchain.pem" ]] && ! getent ahostsv4 "$fqdn" 2>/dev/null | awk '{print $1}' | grep -qx "${PUBLIC_IP}"; then
+    warn "${fqdn} ne pointe pas encore vers ${PUBLIC_IP} : console du serveur en HTTP en attendant ; relance l'installeur une fois le DNS en place pour le certificat."
+  elif [[ ! -f "/etc/letsencrypt/live/$fqdn/fullchain.pem" ]]; then
+    local mail; mail="$(node -e 'try{process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).admin.email||"")}catch{}' "$SRV_CFG")"
+    if certbot certonly --webroot -w /var/www/letsencrypt -d "$fqdn" -n --agree-tos -m "$mail" --keep-until-expiring >/dev/null 2>&1; then
+      hub_nginx; ok "Certificat HTTPS pour ${fqdn}"
+    else warn "Pas de certificat pour ${fqdn} (le DNS doit pointer vers ${PUBLIC_IP}) : console du serveur en HTTP en attendant ; relance l'installeur ensuite."; fi
+  fi
+  printf '{"url":"%s","fqdn":"%s"}\n' "$(hub_url)" "$fqdn" > "$CX/hub.json"; chmod 644 "$CX/hub.json"
+  # Jeton de première connexion tant qu'aucun compte n'existe
+  for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:8800/api/state && break; sleep 1; done
+  if curl -fsS http://127.0.0.1:8800/api/state 2>/dev/null | grep -q '"setup_needed":true'; then
+    [[ -s "$HUB_VAR/setup-token" ]] || openssl rand -hex 16 > "$HUB_VAR/setup-token"
+    chown callikoe-hub:callikoe-hub "$HUB_VAR/setup-token"; chmod 600 "$HUB_VAR/setup-token"
+  fi
+  ok "Console du serveur : $(hub_url)"
+}
+hub_nginx() {
+  local fqdn site=/etc/nginx/sites-available/callikoe-hub; fqdn="$(hub_fqdn)"
+  local proxy="        proxy_pass http://127.0.0.1:8800;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$remote_addr;"
+  if [[ -f "/etc/letsencrypt/live/$fqdn/fullchain.pem" ]]; then
+    cat > "$site" <<EOF
+# Callikoe — console du serveur multi-tenant (écrit par callikoe-host)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${fqdn};
+    server_tokens off;
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location / { return 301 https://${fqdn}:8822\$request_uri; }
+}
+server {
+    listen 8822 ssl http2;
+    listen [::]:8822 ssl http2;
+    server_name ${fqdn};
+    server_tokens off;
+    ssl_certificate /etc/letsencrypt/live/${fqdn}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${fqdn}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 1m;
+    location / {
+${proxy}
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+EOF
+  else
+    cat > "$site" <<EOF
+# Callikoe — console du serveur multi-tenant (écrit par callikoe-host) — HTTP en attendant le certificat
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${fqdn};
+    server_tokens off;
+    client_max_body_size 1m;
+    location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+    location / {
+${proxy}
+        proxy_set_header X-Forwarded-Proto http;
+    }
+}
+EOF
+  fi
+  ln -sf "$site" /etc/nginx/sites-enabled/callikoe-hub
+  nginx -t -q && systemctl reload nginx
+}
+cmd_console() {
+  [[ -f "$SRV_CFG" ]] || die "Console du serveur non configurée (installeur avec --serveur)."
+  echo "  ${B}Console du serveur :${N} $(hub_url)"
+  [[ -s "$HUB_VAR/setup-token" ]] && echo "  ${B}Première connexion (compte super administrateur) :${N} $(hub_url)/?jeton=$(cat "$HUB_VAR/setup-token")"
+  return 0
 }
 
 # ----------------------------------------------------------------------------- Création d'un PBX client
@@ -311,7 +460,7 @@ aiguilleur() {
 # Lit un pbx-config.json (fichier ou base64) et le vérifie ; écrit le fichier dans $2
 read_config() { # read_config <fichier|base64> <destination>
   local src="$1" dst="$2"
-  if [[ -f "$src" ]]; then cp "$src" "$dst"
+  if [[ -f "$src" && "${SUDO_USER:-}" != callikoe-hub ]]; then cp "$src" "$dst"
   else printf '%s' "$src" | tr -d ' \n\r' | base64 -d > "$dst" 2>/dev/null || die "Configuration illisible : copie la commande en entier depuis le portail."
   fi
   local key="$APP/pbx/portal-public-key.pem"; [[ -f "$CX/trusted-key.pem" ]] && key="$CX/trusted-key.pem"
@@ -350,16 +499,14 @@ cmd_creer() {
   reg_add "$slug" "$n" "$fqdn" "$name" "$id"
   ok "PBX n°${n} : base, comptes et dossiers prêts"
   local var="$TVAR/$slug"
-  openssl rand -hex 12 > "$var/setup-token"; chown "cx-$slug:cx-$slug" "$var/setup-token"; chmod 600 "$var/setup-token"
+  rm -f "$var/setup-token"
   install -o "cx-$slug" -g "cx-$slug" -m 0600 "$tmp" "$var/staging/pbx-config.json"; rm -f "$tmp"
   systemctl enable "callikoe-console@$slug" >/dev/null 2>&1
   systemctl restart "callikoe-console@$slug"
   apply_tenant "$slug" "$var/staging/pbx-config.json" || warn "Configuration incomplète : voir les messages ci-dessus."
   aiguilleur
   echo
-  local url="http://${fqdn}/?jeton=$(cat "$var/setup-token")"
-  [[ -f "/etc/letsencrypt/live/${fqdn}/fullchain.pem" ]] && url="https://${fqdn}:8822/?jeton=$(cat "$var/setup-token")"
-  echo "  ${B}Crée le compte administrateur de ce PBX :${N} ${url}"
+  echo "  ${B}PBX prêt :${N} ouvre-le depuis la console du serveur ($( [[ -f "$SRV_CFG" ]] && hub_url || echo "—" )) ; les comptes des clients se créent dans sa console (Administration › Comptes)."
 }
 
 cmd_importer() {
@@ -379,7 +526,7 @@ cmd_importer() {
     [[ -n "$status" ]] || continue; msg="${status#*	}"; status="${status%%	*}"
     case "$status" in ok) ok "$msg" ;; warn) warn "$msg" ;; error) echo "  ${R}✖${N} $msg" ;; esac
   done < <("$CONF" --tenant "$slug" restore "$var/staging/import.tar.gz" || true)
-  rm -f "$var/staging/import.tar.gz" "$var/setup-token"
+  rm -f "$var/staging/import.tar.gz"
   "$CONF" --tenant "$slug" nginx >/dev/null 2>&1 || true
   aiguilleur
   ok "PBX importé : mêmes utilisateurs, comptes de console et réglages qu'avant"
@@ -459,6 +606,12 @@ cmd_sauvegarder() {
     ok "PBX ${slug}"
   done < <(reg_slugs)
   cp -a "$REG" "$tmp/tenants.json"
+  if [[ -f "$SRV_CFG" ]]; then
+    mkdir -p "$tmp/hub"; cp -a "$SRV_CFG" "$tmp/hub/server-config.json"
+    [[ -d "$HUB_ETC" ]] && cp -a "$HUB_ETC/." "$tmp/hub/etc/"
+    runuser -u postgres -- pg_dump --no-owner callikoe_hub > "$tmp/hub/hub.sql" 2>/dev/null || warn "Comptes de la console du serveur non sauvegardés"
+    ok "Console du serveur (comptes, clés)"
+  fi
   [[ -f "$CX/trusted-key.pem" ]] && cp -a "$CX/trusted-key.pem" "$tmp/"
   [[ -d /etc/letsencrypt ]] && tar -C / -czf "$tmp/letsencrypt.tar.gz" etc/letsencrypt
   printf '{"format":"callikoe-serveur-1","created_at":"%s","version":"%s"}\n' "$(date -Is)" "$(cat "$APP/VERSION" 2>/dev/null || echo ?)" > "$tmp/manifest.json"
@@ -480,6 +633,23 @@ cmd_restaurer() {
   echo "${B}Restauration du serveur multi-tenant${N}"
   [[ -f "$tmp/letsencrypt.tar.gz" ]] && tar -C / -xzf "$tmp/letsencrypt.tar.gz" && ok "Certificats HTTPS restaurés"
   [[ -f "$tmp/trusted-key.pem" ]] && install -m 0644 "$tmp/trusted-key.pem" "$CX/trusted-key.pem"
+  if [[ -f "$tmp/hub/server-config.json" ]]; then
+    install -m 0644 "$tmp/hub/server-config.json" "$SRV_CFG"
+    getent group callikoe-hub >/dev/null || groupadd --system callikoe-hub
+    install -d -o root -g callikoe-hub -m 0750 "$HUB_ETC"
+    [[ -d "$tmp/hub/etc" ]] && cp -a "$tmp/hub/etc/." "$HUB_ETC/"
+    hub_init >/dev/null
+    if [[ -s "$tmp/hub/hub.sql" ]]; then
+      systemctl stop callikoe-hub
+      runuser -u postgres -- psql -q -c "DROP DATABASE IF EXISTS callikoe_hub" >/dev/null
+      runuser -u postgres -- createdb -O callikoe_hub callikoe_hub
+      runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -d callikoe_hub -f "$tmp/hub/hub.sql" >/dev/null
+      runuser -u postgres -- psql -q -d callikoe_hub -c "DO \$\$ DECLARE r record; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP EXECUTE format('ALTER TABLE %I OWNER TO callikoe_hub', r.tablename); END LOOP; FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname='public' LOOP EXECUTE format('ALTER SEQUENCE %I OWNER TO callikoe_hub', r.sequencename); END LOOP; END \$\$;" >/dev/null
+      rm -f "$HUB_VAR/setup-token"
+      systemctl start callikoe-hub
+    fi
+    ok "Console du serveur restaurée (comptes IRT)"
+  fi
   local slug n line status msg
   while read -r slug; do
     [[ -n "$slug" ]] || continue
@@ -519,5 +689,6 @@ case "${1:-}" in
   mettre-a-jour) cmd_mettre_a_jour ;;
   dns) cmd_dns ;;
   aiguilleur) aiguilleur; ok "Tables de l'aiguilleur SIP rechargées" ;;
+  console) set -a; . "$CX/install.state"; set +a; cmd_console ;;
   *) sed -n '3,15p' "$0" | sed 's/^#//'; exit 2 ;;
 esac
