@@ -425,6 +425,30 @@ cmd_update() {
     "set -o pipefail; curl -fsSL https://raw.githubusercontent.com/${repo}/${ref}/install.sh | bash >> $UPD_LOG 2>&1; echo \"FIN code=\$?\" >> $UPD_LOG" >/dev/null
   echo '{"ok":true,"running":true}'
 }
+# Capture réseau des appels (SIP + audio RTP) au format pcap, lisible dans Wireshark
+CAPDIR="$VAR/captures"
+cmd_capture() {
+  install -d -o pbxmaison -g pbxmaison -m 0750 "$CAPDIR"
+  case "${1:-status}" in
+    start)
+      local secs="${2:-60}" mode="${3:-sip}" filter name
+      [[ "$secs" =~ ^[0-9]+$ ]] && ((secs >= 5 && secs <= 600)) || { echo '{"ok":false,"error":"Durée : entre 5 et 600 secondes."}'; exit 1; }
+      pgrep -f "tcpdump.*$CAPDIR" >/dev/null && { echo '{"ok":false,"error":"Une capture est déjà en cours."}'; exit 1; }
+      command -v tcpdump >/dev/null || apt-get install -y -q --no-install-recommends tcpdump >/dev/null 2>&1 || { echo '{"ok":false,"error":"tcpdump introuvable."}'; exit 1; }
+      filter="port 5060 or port 5061"
+      [[ "$mode" == all ]] && filter="port 5060 or port 5061 or (udp portrange 10000-20000)"
+      name="capture-$(date +%Y%m%d-%H%M%S)-${mode}.pcap"
+      # Détachée : la console récupère la main tout de suite ; fichier rendu lisible par la console à la fin
+      setsid bash -c "timeout $secs tcpdump -i any -n -s 0 -c 500000 -Z root -w '$CAPDIR/$name' $filter >/dev/null 2>&1; chown pbxmaison:pbxmaison '$CAPDIR/$name'; chmod 640 '$CAPDIR/$name'" </dev/null >/dev/null 2>&1 &
+      # Garde 20 captures au plus
+      { ls -1t "$CAPDIR"/capture-*.pcap 2>/dev/null | tail -n +21 | xargs -r rm -f; } || true
+      echo "{\"ok\":true,\"file\":\"$name\",\"seconds\":$secs}" ;;
+    stop) pkill -INT -f "tcpdump.*$CAPDIR" || true; sleep 1; chown pbxmaison:pbxmaison "$CAPDIR"/*.pcap 2>/dev/null || true; echo '{"ok":true}' ;;
+    status) if pgrep -f "tcpdump.*$CAPDIR" >/dev/null; then echo '{"running":true}'; else echo '{"running":false}'; fi ;;
+    *) echo '{"ok":false,"error":"Action inconnue."}'; exit 1 ;;
+  esac
+}
+
 cmd_update_status() {
   local active=0; systemctl is-active --quiet pbxmaison-update 2>/dev/null && active=1
   UPD_ACTIVE="$active" node -e '
@@ -468,6 +492,7 @@ case "${1:-}" in
   restore) shift; cmd_restore "$@" ;;
   update) shift; cmd_update "$@" ;;
   update-status) cmd_update_status ;;
+  capture) shift; cmd_capture "$@" ;;
   dns)    [[ -f "$ETC/pbx.env" ]] || exit 0
           set -a; . "$ETC/pbx.env"; set +a
           is_managed_fqdn "$PBX_FQDN" || { echo "Adresse ${PBX_FQDN} non gérée par Callikoe : rien à faire."; exit 0; }
@@ -475,9 +500,16 @@ case "${1:-}" in
             echo "Adresse ${PBX_FQDN} → ${ip}"
             [[ "$ip" == "${PUBLIC_IP:-}" ]] || echo "Attention : l'IP publique a changé (${PUBLIC_IP:-?} → ${ip}). Relance la commande d'installation pour mettre à jour la téléphonie." >&2
           else echo "Échec : ${ip}" >&2; exit 1; fi ;;
+  license) # Nouvelle clé de licence (portail) : vérifiée, écrite dans pbx.env, appliquée au moteur sans coupure
+          src="$(readlink -f "${2:-}")"
+          [[ "$src" == "$STAGING/"* && -f "$src" ]] || { echo '{"ok":false,"error":"Fichier refusé."}'; exit 1; }
+          rc=0; res="$(node "$APP/pbx/lib/license-token.mjs" "$src" "$TRUSTED_KEY" "$ETC/pbx.env")" || rc=$?; rm -f "$src"
+          echo "$res"; ((rc == 0)) || exit 1
+          set -a; . "$ETC/pbx.env"; set +a; render_asterisk >/dev/null 2>&1 || true
+          /usr/sbin/asterisk -rx "dialplan reload" >/dev/null 2>&1 || true ;;
   render) [[ -f "$ETC/pbx.env" ]] || { echo "PBX pas encore configuré" >&2; exit 1; }
           set -a; . "$ETC/pbx.env"; set +a; render_asterisk ;;
   nginx) set -a; . "$ETC/pbx.env" 2>/dev/null || true; set +a
          if [[ -n "${PBX_FQDN:-}" && -f "/etc/letsencrypt/live/${PBX_FQDN}/fullchain.pem" ]]; then nginx_write "$PBX_FQDN" 1; else nginx_write "" 0; fi ;;
-  *) echo "Usage : pbx-configure apply <fichier> | render | dns | nginx | f2b … | backup | restore <fichier> | update | update-status" >&2; exit 2 ;;
+  *) echo "Usage : pbx-configure apply <fichier> | license <fichier> | render | dns | nginx | f2b … | backup | restore <fichier> | update | update-status" >&2; exit 2 ;;
 esac

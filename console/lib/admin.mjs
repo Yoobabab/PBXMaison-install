@@ -319,6 +319,52 @@ export function createAdminService({ db, ami, pbx }) {
     };
   }
 
+  // ---------------------------------------------------------------- Capture réseau (pcap pour Wireshark)
+  const CAP_DIR = path.join(VAR, "captures");
+  const capPath = (name) => /^capture-\d{8}-\d{6}-(sip|all)\.pcap$/.test(String(name || "")) ? path.join(CAP_DIR, name) : null;
+  async function listCaptures() {
+    const st = (await runConfigure(["capture", "status"], { timeout: 15_000 })).lines[0] || { running: false };
+    let files = [];
+    try {
+      files = fs.readdirSync(CAP_DIR).filter((f) => capPath(f)).map((f) => {
+        const s2 = fs.statSync(path.join(CAP_DIR, f));
+        let ready = true; try { fs.accessSync(path.join(CAP_DIR, f), fs.constants.R_OK); } catch { ready = false; }
+        return { name: f, size: s2.size, at: s2.mtime.toISOString(), mode: f.includes("-all.") ? "all" : "sip", ready };
+      }).sort((x, y) => y.name.localeCompare(x.name));
+    } catch { /* pas encore de capture */ }
+    return { running: !!st.running, files };
+  }
+  async function startCapture({ seconds = 60, mode = "sip" } = {}) {
+    const secs = Number(seconds);
+    if (!Number.isInteger(secs) || secs < 5 || secs > 600) throw new UserError("Durée : entre 5 et 600 secondes.", "seconds");
+    const r = await runConfigure(["capture", "start", String(secs), mode === "all" ? "all" : "sip"], { timeout: 60_000 });
+    const res = r.lines[0];
+    if (!res?.ok) throw new UserError(res?.error || sysError(r, "Capture impossible").message);
+    return res;
+  }
+  async function stopCapture() { await runConfigure(["capture", "stop"], { timeout: 20_000 }); return listCaptures(); }
+  function captureFile(name) {
+    const f = capPath(name);
+    if (!f || !fs.existsSync(f)) throw Object.assign(new UserError("Capture introuvable."), { status: 404 });
+    return f;
+  }
+  function deleteCapture(name) { fs.rmSync(captureFile(name), { force: true }); return { ok: true }; }
+
+  /** Nouvelle clé de licence (générée par le portail) : vérifiée et appliquée par pbx-configure (root). */
+  async function setLicense(token) {
+    const t = String(token || "").replace(/\s+/g, "");
+    if (!/^CLK1\.[A-Za-z0-9_-]{40,4000}$/.test(t)) throw new UserError("Clé de licence illisible : copie-la en entier depuis le portail (elle commence par CLK1.).", "token");
+    const dir = path.join(VAR, "staging");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `license-${crypto.randomBytes(6).toString("hex")}.txt`);
+    fs.writeFileSync(file, t, { mode: 0o640 });
+    const r = await runConfigure(["license", file], { timeout: 60_000 });
+    try { fs.unlinkSync(file); } catch { /* déjà supprimé par pbx-configure */ }
+    const res = r.lines[0];
+    if (!res?.ok) throw new UserError(res?.error || sysError(r, "Licence non appliquée").message, "token");
+    return getLicense();
+  }
+
   // ---------------------------------------------------------------- Alertes
   const alertSettings = () => get("alerts", defaultAlerts());
   async function logAlert(event, text) {
@@ -507,7 +553,7 @@ export function createAdminService({ db, ami, pbx }) {
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,
     getShortcodes, setShortcodes, pollStatusCodes,
     getBackups, setBackups, runBackup, testRemote, restoreBackup, restoreStatus, stageUpload,
-    getUpdates, startUpdate, updateStatus, getLicense,
+    getUpdates, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, deleteCapture,
     getAlerts, setAlerts, clearAlerts, logAlert, monitor,
     listGateways, saveGateway, deleteGateway, gatewaySetup,
     getSystem, firewallCheck, systemAction, purgeCdr,

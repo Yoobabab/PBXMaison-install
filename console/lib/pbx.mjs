@@ -308,6 +308,14 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   async function ensureWebEndpoints() {
     // Vidéo (appels vidéo, réunions) : VP8 / H.264, jusqu'à 16 flux vidéo pour les réunions
     await db.query(`UPDATE ps_endpoints SET allow = '${WEB_CODECS}', max_video_streams = 16 WHERE id LIKE '%-web' AND (allow IS DISTINCT FROM '${WEB_CODECS}' OR max_video_streams IS DISTINCT FROM 16)`);
+    // Trunks : G.729 retiré (le moteur ne sait pas le convertir, l'appel serait muet côté softphone), A-law en premier
+    const tr = await db.query("SELECT id, allow FROM ps_endpoints WHERE context = 'from-trunk' AND allow LIKE '%g729%'");
+    for (const r of tr.rows) {
+      const list = r.allow.split(",").map((x) => x.trim()).filter((x) => x && x !== "g729");
+      const fixed = ["alaw", ...list.filter((x) => x !== "alaw")];
+      if (!fixed.includes("ulaw")) fixed.push("ulaw");
+      await db.query("UPDATE ps_endpoints SET allow = $2 WHERE id = $1", [r.id, fixed.join(",")]);
+    }
     const missing = await db.query(`SELECT x.* FROM pbxmaison_extensions x
       WHERE EXISTS (SELECT 1 FROM ps_endpoints e WHERE e.id = x.id)
         AND NOT EXISTS (SELECT 1 FROM ps_endpoints w WHERE w.id = x.id || '-web')`);

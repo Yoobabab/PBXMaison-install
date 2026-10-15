@@ -59,7 +59,7 @@ ok "${PRETTY_NAME} · ${MEM_MB} Mo de RAM · ${DISK_GB} Go libres$( ((IS_WSL)) &
 step "Paquets système"
 # =============================================================================
 apt-get update -q >/dev/null
-apt_install ca-certificates curl gnupg dnsutils iproute2 sudo tar openssl
+apt_install ca-certificates curl gnupg dnsutils iproute2 sudo tar openssl tcpdump
 # Node.js du système (/usr/bin/node) : c'est lui qu'utilisent la console et pbx-configure
 if [[ ! -x /usr/bin/node ]] || [[ "$(/usr/bin/node -p 'process.versions.node.split(".")[0]')" -lt $NODE_MAJOR ]]; then
   install -d -m 0755 /etc/apt/keyrings
