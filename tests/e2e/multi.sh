@@ -133,6 +133,7 @@ OPACCT() { cat <<EOF
 [$1]
 type = endpoint
 context = op-in
+callerid = Client <0612345678>
 aors = $1
 auth = $1
 disallow = all
@@ -228,11 +229,13 @@ sipdump() { # sipdump <PBX client> : diagnostics dans multi-diag.txt (publiés �
     sudo ls -la /run/kamailio 2>&1; systemctl cat kamailio 2>/dev/null | grep -E "^(Exec|User|Protect|ReadWrite|Environment)"
     sudo journalctl -u kamailio --no-pager | grep -iE "htable|db_text|dbt_|error|CALLIKOE" | grep -v reparse_on | tail -n 12 | cut -c1-220
     echo "== SIP vu par $1"
-    sudo grep -E "^(REGISTER|SIP/2.0|Route|Path|To|Supported)|Transmitting|Received" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | cut -c1-160 | head -n 30
+    sudo grep -E "^(REGISTER|INVITE|SIP/2.0|Route|Path|To|Contact|Supported)|Transmitting|Received" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | grep -v OPTIONS | cut -c1-160 | tail -n 40
+    sudo grep -E "Executing|NOTICE|WARNING" "/var/log/callikoe/$1/sipdebug" 2>/dev/null | grep -v pjsip_wizard | tail -n 15 | cut -c1-200
     sudo grep -E "WARNING|ERROR" "/var/log/callikoe/$1/messages" 2>/dev/null | grep -v pjsip_wizard | tail -n 8 | cut -c1-200
-    echo "== opérateur simulé"; sudo tail -n 12 "$LAB/op/log/messages" 2>/dev/null | cut -c1-200
+    echo "== opérateur simulé"; sudo grep -E "^(INVITE|SIP/2.0|To|Contact)|Transmitting|Received|NOTICE|WARNING" "$LAB/op/log/messages" 2>/dev/null | grep -v -E "OPTIONS|declined" | tail -n 25 | cut -c1-200
   } >> "$D" 2>&1 || true
 }
+labx op "core set verbose 3" >/dev/null 2>&1 || true; labx op "pjsip set logger on" >/dev/null 2>&1 || true
 mkast pa "$(PHONE 127.0.0.11 a.e2e.invalid "${AUTH[a]}" "${PW[a]}")" "$ANSWER" 31000
 mkast pb "$(PHONE 127.0.0.12 b.e2e.invalid "${AUTH[b]}" "${PW[b]}")" "$ANSWER" 31100
 # Poste pirate : identifiants de cli a, présentés au domaine de cli b
