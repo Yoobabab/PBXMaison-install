@@ -103,7 +103,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       return {
         id: r.id, template: r.template, operator: tpl[r.template]?.label || r.template,
         host: r.host, number: r.number, outbound_cid: r.outbound_cid, username: r.username,
-        proxy: CX_MODE === "tenant" ? (r.op_proxy || "") : r.outbound_proxy ? r.outbound_proxy.replace(/^sip:/, "").replace(/;lr$/, "") : "",
+        proxy: CX_MODE === "tenant" ? (r.op_proxy || "") : r.outbound_proxy ? r.outbound_proxy.replace(/^sip:/, "").replace(/(;|\^3B)lr$/, "") : "",
         codecs: (r.allow || "").split(","), transport: (r.transport || "").replace("transport-", ""),
         cid_format: r.cid_format, dial_format: r.dial_format, caller_format: r.caller_format, dids: trunkDidList(r, countryCode()), extra_dids: r.dids || [],
         status: { code: st?.state || "Unknown", label, cls, expires: st?.expires ?? null },
@@ -156,7 +156,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const old = input.replace ? (await db.query("SELECT contact_user FROM pbxmaison_trunks WHERE id = $1", [name])).rows[0]?.contact_user : null;
       contactUser = old || `cx${crypto.randomBytes(8).toString("hex")}`;
     }
-    const proxyUri = tenant ? KAMAILIO_URI : proxy ? `sip:${proxy.host}:${proxy.port};lr` : null;
+    const proxyUri = tenant ? KAMAILIO_URI : proxy ? `sip:${proxy.host}:${proxy.port}^3Blr` : null;
     const transport = `transport-${t.transport}`;
     const expiration = Math.max(60, t.registration.interval);
 
@@ -338,13 +338,17 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
   }
   async function ensureWebEndpoints() {
+    // Proxy enregistré avec « ;lr » : Asterisk coupait la valeur au « ; » (proxy refusé) → « ^3B »
+    for (const t of ["ps_endpoints", "ps_registrations"]) {
+      await db.query(`UPDATE ${t} SET outbound_proxy = regexp_replace(outbound_proxy, ';lr$', '^3Blr') WHERE outbound_proxy LIKE '%;lr'`);
+    }
     if (CX_MODE === "tenant") {
       // PBX importé d'un serveur seul : ses trunks passent par l'aiguilleur SIP (jeton de Contact, proxy de l'opérateur gardé à part)
       const old = await db.query(`SELECT t.id, t.contact_user, r.outbound_proxy, r.server_uri, r.transport FROM pbxmaison_trunks t
         JOIN ps_registrations r ON r.id = t.id WHERE t.contact_user IS NULL OR r.outbound_proxy IS DISTINCT FROM $1`, [KAMAILIO_URI]);
       for (const r of old.rows) {
         const cu = r.contact_user || `cx${crypto.randomBytes(8).toString("hex")}`;
-        const opProxy = r.outbound_proxy && r.outbound_proxy !== KAMAILIO_URI ? r.outbound_proxy.replace(/^sip:/, "").replace(/;lr$/, "") : null;
+        const opProxy = r.outbound_proxy && r.outbound_proxy !== KAMAILIO_URI ? r.outbound_proxy.replace(/^sip:/, "").replace(/(;|\^3B)lr$/, "") : null;
         const m = /^sip:[^:;]+(?::(\d+))?/.exec(r.server_uri || "");
         await db.query(`UPDATE pbxmaison_trunks SET contact_user = $2, op_proxy = COALESCE(op_proxy, $3), port = COALESCE(port, $4), transport = COALESCE(transport, $5) WHERE id = $1`,
           [r.id, cu, opProxy, Number(m?.[1]) || 5060, String(r.transport || "transport-udp").replace("transport-", "")]);
