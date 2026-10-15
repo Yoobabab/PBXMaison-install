@@ -331,6 +331,22 @@ export async function buildApp({ db } = {}) {
     await audit(req, `Licence créée : ${cfg.license.key} (${EDITIONS[cfg.license.edition]}, ${sc} appels, ${DURATIONS[months]})`, true, `${slug} · ${fqdn}`);
     return runHost(["creer", slug, Buffer.from(JSON.stringify(cfg)).toString("base64")], `Création du PBX ${slug} (${fqdn})`, req);
   });
+  // Import d'une sauvegarde de PBX (PBX installé seul, ou PBX supprimé de ce serveur) comme nouveau PBX client
+  app.register(async (scope) => {
+    scope.addContentTypeParser("application/octet-stream", { bodyLimit: 4 * 1024 ** 3 }, (req, payload, done) => done(null, payload));
+    scope.post("/api/pbx/import", { preHandler: requireRole("super", "admin"), bodyLimit: 4 * 1024 ** 3 }, async (req) => {
+      const slug = String(req.query?.slug || "").trim().toLowerCase();
+      if (!SLUG_RE.test(slug)) throw new UserError("Nom sur le serveur : 2 à 24 caractères (minuscules, chiffres, tirets).", "slug");
+      if ((readJson(TENANTS, {}).tenants || []).some((t) => t.slug === slug)) throw new UserError("Ce nom est déjà utilisé sur ce serveur.", "slug");
+      const dir = path.join(VAR, "uploads"); fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
+      const file = path.join(dir, `import-${crypto.randomBytes(8).toString("hex")}.tar.gz`);
+      await new Promise((resolve, reject) => { const out = fs.createWriteStream(file, { mode: 0o640 }); req.body.pipe(out); out.on("finish", resolve); out.on("error", reject); req.body.on("error", reject); });
+      const head = Buffer.alloc(2); const fd = fs.openSync(file, "r"); fs.readSync(fd, head, 0, 2, 0); fs.closeSync(fd);
+      if (head[0] !== 0x1f || head[1] !== 0x8b) { fs.rmSync(file, { force: true }); throw new UserError("Ce fichier n'est pas une sauvegarde Callikoe (.tar.gz).", "file"); }
+      etatCache.at = 0;
+      return runHost(["importer", slug, file], `Import du PBX ${slug} depuis une sauvegarde`, req);
+    });
+  });
   app.get("/api/pbx/:slug/config", { preHandler: requireRole("super", "admin") }, async (req, reply) => {
     if (!SLUG_RE.test(req.params.slug)) throw new UserError("PBX inconnu.", null, 404);
     let txt; try { txt = fs.readFileSync(path.join(VAR, "configs", `${req.params.slug}.json`), "utf8"); } catch { throw new UserError("Fichier de configuration non conservé pour ce PBX.", null, 404); }
@@ -372,7 +388,8 @@ export async function buildApp({ db } = {}) {
     await audit(req, `Ouverture du PBX ${t.slug}`);
     const tls = fs.existsSync(`/etc/letsencrypt/live/${t.fqdn}/fullchain.pem`);
     const base = process.env.HUB_PBX_URL_TEMPLATE ? process.env.HUB_PBX_URL_TEMPLATE.replace("{fqdn}", t.fqdn) : tls ? `https://${t.fqdn}:8822` : `http://${t.fqdn}`;
-    return reply.redirect(`${base}/api/sso?t=${encodeURIComponent(ticket)}`);
+    const page = /^[a-z-]{2,30}$/.test(String(req.query?.page || "")) ? `&page=${req.query.page}` : "";
+    return reply.redirect(`${base}/api/sso?t=${encodeURIComponent(ticket)}${page}`);
   });
 
   // ---------------------------------------------------------------- Comptes du serveur (super administrateur)

@@ -225,7 +225,9 @@ async function renderList() {
         ${p.suspended ? "" : `<a class="btn sm" href="/ouvrir/${encodeURIComponent(p.slug)}">Ouvrir</a>`}
         ${can("super", "admin") ? (p.suspended ? `<button class="btn ghost sm" data-react="${esc(p.slug)}">Réactiver</button>`
           : `<button class="btn ghost sm" data-susp="${esc(p.slug)}">Désactiver</button>`) : ""}
-        ${can("super", "admin") ? `<a class="btn ghost sm" href="/api/pbx/${encodeURIComponent(p.slug)}/config" title="Fichier pbx-config.json signé (réinstallation)">⬇ Config</a>` : ""}
+        ${!p.suspended && can("super", "admin", "tech") ? `<a class="btn ghost sm" href="/ouvrir/${encodeURIComponent(p.slug)}?page=sauvegardes" title="Sauvegarder ou restaurer ce PBX">Sauvegardes</a>` : ""}
+        ${can("super", "admin") ? `<a class="btn ghost sm" href="/api/pbx/${encodeURIComponent(p.slug)}/config" title="Fichier pbx-config.json signé (réinstallation)">⬇ Config</a>
+          <button class="btn link sm" data-del="${esc(p.slug)}" style="color:var(--bad)">Supprimer</button>` : ""}
       </div></div>`;
   };
   const draw = () => {
@@ -252,6 +254,18 @@ async function renderList() {
   $("#q").oninput = (e) => { pbxFilter = e.target.value; draw(); };
   $("#st").onchange = (e) => { pbxStatus = e.target.value; draw(); };
   app.onclick = async (e) => {
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      const slug = del.dataset.del;
+      const conf = prompt(`Supprimer définitivement le PBX « ${slug} » (utilisateurs, messages, enregistrements) ?\nFais d'abord une sauvegarde. Pour confirmer, tape son nom : ${slug}`);
+      if (conf === null) return;
+      const code = prompt("Code de double authentification (Psono) :");
+      if (code === null) return;
+      try { const j = await api("DELETE", `/api/pbx/${encodeURIComponent(slug)}`, { confirm: conf.trim(), code: code.trim() }); app.innerHTML = `<div id="job"></div>`;
+        followJob(j.id, () => `<div class="actions"><a class="btn" href="#/" onclick="setTimeout(()=>location.reload(),50)">Retour au tableau de bord</a></div>`); }
+      catch (err) { flash = { cls: "bad", text: err.message }; renderList(); }
+      return;
+    }
     const s = e.target.closest("[data-susp]"), r = e.target.closest("[data-react]");
     if (!s && !r) return;
     const slug = (s || r).dataset.susp || (s || r).dataset.react;
@@ -270,12 +284,37 @@ async function renderList() {
 
 // ---------------------------------------------------------------- Nouveau PBX (licence créée et signée ici)
 const toSlug = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").replace(/--+/g, "-").slice(0, 24).replace(/-+$/, "");
+function importPanel() {
+  return `<details class="panel" style="margin-top:20px" id="imp"><summary class="ph" style="cursor:pointer"><h2>Ou restaurer un PBX depuis une sauvegarde</h2><span class="hint">PBX installé seul, ou PBX supprimé de ce serveur</span></summary>
+      <form id="if" class="stack pad" novalidate><div class="form-msg"></div>
+        <p class="hint" style="margin:0">Sauvegarde faite depuis la console du PBX (Administration › Sauvegardes) : fichier <code>pbxmaison-….tar.gz</code>. Utilisateurs, trunks, messages, comptes et licence reviennent tels quels.</p>
+        <label>Fichier de sauvegarde<input type="file" name="file" accept=".gz,.tgz,application/gzip"></label>
+        <label>Nom sur le serveur<input name="slug" maxlength="24" spellcheck="false" autocapitalize="off" placeholder="boulangerie-dupont"></label>
+        <div class="form-near"></div>
+        <div class="actions"><button class="btn">Restaurer le PBX</button></div></form></details>`;
+}
+function bindImport() {
+  const imp = $("#if");
+  imp.file.addEventListener("change", () => { const n = imp.file.files[0]?.name || ""; if (!imp.slug.value) imp.slug.value = toSlug(n.replace(/^pbxmaison-|\.tar\.gz$|\.tgz$/g, "").replace(/-?\d{8}-\d{6}$/, "")).slice(0, 24); });
+  bindForm(imp, async (f) => {
+    const file = imp.file.files[0];
+    if (!file) throw Object.assign(new Error("Choisis le fichier de sauvegarde."), { field: "file" });
+    const res = await fetch(`/api/pbx/import?slug=${encodeURIComponent(String(f.slug || "").trim().toLowerCase())}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: file });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || `Erreur ${res.status}`), { field: data.field });
+    $("#imp").hidden = true; const nfp = $("#nf")?.closest(".panel"); if (nfp) nfp.hidden = true;
+    followJob(data.id, (j) => j.ok ? `<div class="actions"><a class="btn" href="/ouvrir/${encodeURIComponent(String(f.slug).trim().toLowerCase())}">Ouvrir la console du PBX</a><a class="btn ghost" href="#/">Tableau de bord</a></div>`
+      : `<div class="actions"><a class="btn ghost" href="#/nouveau" onclick="setTimeout(()=>location.reload(),50)">Réessayer</a></div>`);
+  });
+}
 async function renderNew() {
   setNav("add", "Nouveau PBX");
   let o; try { o = await api("GET", "/api/pbx/options"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
   if (!o.signing.configured) {
     app.innerHTML = `<h1>Nouveau PBX</h1><div class="panel pad stack"><div class="flash warn" style="margin:0">La clé de signature des licences n'est pas encore installée sur ce serveur.</div>
-      ${can("super") ? `<p>Installe-la une fois (fichier <code>pbx-cle-privee.pem</code> rangé dans Psono) : <a class="btn sm" href="#/cle">Clé de signature</a></p>` : `<p>Demande au super administrateur de l'installer.</p>`}</div>`;
+      ${can("super") ? `<p>Installe-la une fois (fichier <code>pbx-cle-privee.pem</code> rangé dans Psono) : <a class="btn sm" href="#/cle">Clé de signature</a></p>` : `<p>Demande au super administrateur de l'installer.</p>`}</div>
+      ${importPanel()}<div id="job"></div>`;
+    bindImport();
     return;
   }
   const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
@@ -307,7 +346,9 @@ async function renderNew() {
       </fieldset>
       <div class="form-near full"></div>
       <div class="actions"><a class="btn ghost" href="#/">Annuler</a><button class="btn">Créer le PBX</button></div></form></div>
+    ${importPanel()}
     <div id="job"></div>`;
+  bindImport();
   const form = $("#nf");
   for (const k of ["label", "slug"]) form[k].addEventListener("keydown", () => { form[k].dataset.touched = "1"; });
   const auto = () => {

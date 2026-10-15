@@ -275,7 +275,7 @@ SQL
   runuser -u postgres -- psql -q -c "REVOKE ALL ON DATABASE callikoe_hub FROM PUBLIC" >/dev/null
   # La console du serveur ne peut lancer que la création et la suppression de PBX
   cat > /etc/sudoers.d/callikoe-hub <<EOF
-callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *
+callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *
 EOF
   chmod 440 /etc/sudoers.d/callikoe-hub
   visudo -cq -f /etc/sudoers.d/callikoe-hub || { rm -f /etc/sudoers.d/callikoe-hub; die "Règle sudo invalide (console du serveur)."; }
@@ -543,10 +543,14 @@ cmd_creer() {
 cmd_importer() {
   local slug="${1:-}" src="${2:-}"
   valid_slug "$slug" || die "Nom du PBX invalide."
+  if [[ "${SUDO_USER:-}" == callikoe-hub ]]; then
+    src="$(readlink -f "$src" 2>/dev/null || true)"
+    [[ "$src" == "$HUB_VAR/uploads/"* ]] || die "Fichier refusé (emplacement non autorisé)."
+  fi
   [[ -f "$src" ]] || die "Sauvegarde introuvable : ${src}"
   local tmp; tmp="$(mktemp -d)"
-  tar -C "$tmp" -xzf "$src" ./etc/pbx-config.json ./manifest.json 2>/dev/null || { rm -rf "$tmp"; die "Ce fichier n'est pas une sauvegarde Callikoe."; }
-  cmd_creer "$slug" "$tmp/etc/pbx-config.json"
+  tar -C "$tmp" -xzf "$src" ./etc/pbx-config.json ./manifest.json 2>/dev/null || { rm -rf "$tmp"; die "Ce fichier n'est pas une sauvegarde de PBX Callikoe (pbxmaison-….tar.gz, faite depuis la console du PBX)."; }
+  cmd_creer "$slug" "$(base64 -w0 "$tmp/etc/pbx-config.json")"
   rm -rf "$tmp"
   local var="$TVAR/$slug"
   install -o "cx-$slug" -g "cx-$slug" -m 0600 "$src" "$var/staging/import.tar.gz"
@@ -558,6 +562,7 @@ cmd_importer() {
     case "$status" in ok) ok "$msg" ;; warn) warn "$msg" ;; error) echo "  ${R}✖${N} $msg" ;; esac
   done < <("$CONF" --tenant "$slug" restore "$var/staging/import.tar.gz" || true)
   rm -f "$var/staging/import.tar.gz"
+  [[ "$src" == "$HUB_VAR/uploads/"* ]] && rm -f "$src"
   "$CONF" --tenant "$slug" nginx >/dev/null 2>&1 || true
   aiguilleur
   ok "PBX importé : mêmes utilisateurs, comptes de console et réglages qu'avant"
@@ -691,6 +696,9 @@ cmd_sauvegarder() {
   if [[ -f "$SRV_CFG" ]]; then
     mkdir -p "$tmp/hub"; cp -a "$SRV_CFG" "$tmp/hub/server-config.json"
     [[ -d "$HUB_ETC" ]] && cp -a "$HUB_ETC/." "$tmp/hub/etc/"
+    mkdir -p "$tmp/hub/var"
+    [[ -f "$HUB_VAR/portal-key.pem" ]] && cp -a "$HUB_VAR/portal-key.pem" "$tmp/hub/var/"
+    [[ -d "$HUB_VAR/configs" ]] && cp -a "$HUB_VAR/configs" "$tmp/hub/var/"
     runuser -u postgres -- pg_dump --no-owner callikoe_hub > "$tmp/hub/hub.sql" 2>/dev/null || warn "Comptes de la console du serveur non sauvegardés"
     ok "Console du serveur (comptes, clés)"
   fi
@@ -721,6 +729,11 @@ cmd_restaurer() {
     install -d -o root -g callikoe-hub -m 0750 "$HUB_ETC"
     [[ -d "$tmp/hub/etc" ]] && cp -a "$tmp/hub/etc/." "$HUB_ETC/"
     hub_init >/dev/null
+    if [[ -d "$tmp/hub/var" ]]; then
+      [[ -f "$HUB_VAR/portal-key.pem" ]] || { [[ -f "$tmp/hub/var/portal-key.pem" ]] && install -o callikoe-hub -g callikoe-hub -m 0600 "$tmp/hub/var/portal-key.pem" "$HUB_VAR/portal-key.pem"; }
+      [[ -d "$tmp/hub/var/configs" ]] && { install -d -o callikoe-hub -g callikoe-hub -m 0700 "$HUB_VAR/configs"; cp -an "$tmp/hub/var/configs/." "$HUB_VAR/configs/"; chown -R callikoe-hub:callikoe-hub "$HUB_VAR/configs"; }
+      systemctl restart callikoe-hub
+    fi
     local nusers; nusers="$(runuser -u postgres -- psql -tAq -d callikoe_hub -c "SELECT count(*) FROM hub_users" 2>/dev/null || echo 0)"
     if [[ "${nusers:-0}" -gt 0 ]]; then
       warn "Console du serveur déjà en service sur ce serveur : ses comptes actuels sont gardés"

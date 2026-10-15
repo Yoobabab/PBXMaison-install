@@ -350,7 +350,8 @@ export async function buildApp({ db, ami } = {}) {
     }
     await audit(req, "Connexion depuis la console du serveur", true, t.role, t.email);
     reply.setCookie(COOKIE, createSession(t.email, settings.sessionSecret, { mfa: true, mfa_at: Date.now(), hub: true }), cookieOpts(req));
-    return reply.redirect("/");
+    const page = String(req.query?.page || "");
+    return reply.redirect(/^[a-z-]{2,30}$/.test(page) ? `/#/${page}` : "/");
   });
   app.get("/api/me", { preHandler: requireLogin }, async (req) => {
     const u = currentUser(req);

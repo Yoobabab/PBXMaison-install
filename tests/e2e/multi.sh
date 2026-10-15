@@ -76,7 +76,7 @@ R="$(hapi POST /api/signing "{\"pem\":$OTHER,\"code\":\"$(otp "$HTOTP")\"}")"
 [[ "$R" == *"pas reconnue"* ]] && pass "Clé de signature étrangère refusée (pas celle d'IRT)" || fail "clé étrangère acceptée : $R"
 R="$(hapi POST /api/signing "{\"pem\":$KEYJSON,\"code\":\"$(otp "$HTOTP")\"}")"
 [[ "$R" == *'"configured":true'* ]] && pass "Clé de signature des licences installée sur la console du serveur" || fail "clé : $R"
-sudo -u cx-clia true 2>/dev/null; sudo test "$(sudo stat -c '%U %a' /var/lib/callikoe/hub/portal-key.pem)" == "callikoe-hub 600" && pass "Clé de signature lisible par la console du serveur seulement" || fail "droits de la clé : $(sudo stat -c '%U %a' /var/lib/callikoe/hub/portal-key.pem)"
+sudo test "$(sudo stat -c '%U %a' /var/lib/callikoe/hub/portal-key.pem)" == "callikoe-hub 600" && pass "Clé de signature lisible par la console du serveur seulement" || fail "droits de la clé : $(sudo stat -c '%U %a' /var/lib/callikoe/hub/portal-key.pem)"
 NEWPBX() { # NEWPBX <slug> <fqdn> <nom>
   printf '{"slug":"%s","name":"%s","company":"%s SARL","phone":"04 12 34 56 78","domain":"custom","fqdn":"%s","country":"FR","timezone":"Europe/Paris","language":"fr","edition":"pro","simultaneous_calls":"8","duration_months":"12","admin_email":"contact@%s"}' "$1" "$3" "$3" "$2" "$2"
 }
@@ -415,6 +415,14 @@ R="$(hapi POST /api/login/totp "{\"ticket\":\"$T\",\"code\":\"$(otp "$HTOTP")\"}
 [[ "$R" == *'"ok":true'* ]] && pass "Compte de la console du serveur retrouvé après restauration" || fail "login console du serveur après restauration : $R"
 LOC="$(curl -sS -b "$HJAR" -o /dev/null -w '%{redirect_url}' "$HUB/ouvrir/clib")"
 [[ "$(curl -sS -c "$LAB/jar-b2" -o /dev/null -w '%{http_code}' "http://127.0.0.1:9002/api/sso?t=${LOC#*t=}")" == 302 ]]   && [[ "$(curl -sS -b "$LAB/jar-b2" http://127.0.0.1:9002/api/extensions)" == *'"201"'* ]] && pass "cli b restauré ouvert depuis la console du serveur (poste 201 présent)" || fail "ouverture de clib après restauration"
+
+# 8. Console du serveur : suppression de cli b, puis restauration de sa sauvegarde de PBX comme nouveau PBX client
+R="$(hapi DELETE /api/pbx/clib "{\"confirm\":\"clib\",\"code\":\"$(otp "$HTOTP")\"}")"
+JID="$(echo "$R" | jget id)"; [[ -n "$JID" ]] && hjob "$JID" && pass "cli b supprimé depuis la console du serveur (code exigé)" || fail "suppression depuis la console du serveur : $R"
+sudo tar -xzOf "$BK" ./tenants/clib.tar.gz > "$LAB/clib-bk.tar.gz"
+R="$(curl -sS -b "$HJAR" -X POST "$HUB/api/pbx/import?slug=clib" -H 'content-type: application/octet-stream' --data-binary @"$LAB/clib-bk.tar.gz")"
+JID="$(echo "$R" | jget id)"; [[ -n "$JID" ]] && hjob "$JID" && pass "Sauvegarde de cli b restaurée depuis la console du serveur" || fail "import : $R"
+waitfor 30 sudo systemctl is-active --quiet callikoe-asterisk@clib && waitfor 60 regd pb && pass "cli b importé : moteur actif, poste 201 de nouveau enregistré" || fail "clib après import"
 
 for d in op pa pb px; do labx "$d" "core stop now" >/dev/null 2>&1 || true; done
 pass "Serveur multi-tenant validé"
