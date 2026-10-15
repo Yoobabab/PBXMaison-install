@@ -114,7 +114,7 @@ async function pageOutbound(sub) {
 async function pageSecurity(sub = "apercu") {
   H.setNav("sec");
   const { settings: s, f2b, countries } = await H.api("GET", "/api/security");
-  const T = [["apercu", "Vue d'ensemble"], ["ip", "Adresses IP"], ["numeros", "Numéros bloqués"], ["pays", "International"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"]];
+  const T = [["apercu", "Vue d'ensemble"], ["ip", "Adresses IP"], ["numeros", "Numéros bloqués"], ["pays", "International"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"], ["journal", "Connexions et journal"]];
   const banned = [...(f2b.manual || []).map((ip) => ({ ip, manual: true })), ...(f2b.auto || []).map((ip) => ({ ip, manual: false }))];
   let body = "";
   if (sub === "apercu") {
@@ -199,6 +199,15 @@ async function pageSecurity(sub = "apercu") {
       </div></div>
       <div class="actions"><button class="btn">Enregistrer</button></div></form>`;
   }
+  if (sub === "journal") {
+    const [{ entries }, me] = await Promise.all([H.api("GET", "/api/audit"), H.api("GET", "/api/me")]);
+    body = `<div class="kpis">${kpi("lock", "Double authentification", me.totp ? "Activée" : "Désactivée", me.totp ? `${me.recovery_left} code(s) de secours restant(s)` : "", me.totp ? "good" : "warn")}
+      ${kpi("user", "Connexions refusées (200 dernières actions)", entries.filter((e) => !e.ok).length, "mauvais mot de passe ou mauvais code")}</div>
+      <div class="panel" style="margin-bottom:16px"><div class="ph"><h2>Double authentification</h2><button class="btn ghost sm" id="totpnew">Changer d'appareil / nouveaux codes de secours</button></div><div class="pad" id="totparea"><p class="hint" style="margin:0">Chaque connexion demande le mot de passe puis le code à 6 chiffres de Psono. Les actions sensibles (sécurité, trunks, règles sortantes, restauration, mise à jour) redemandent le code s'il date de plus de 15 minutes.</p></div></div>
+      <div class="panel"><div class="ph"><h2>Journal : connexions et modifications</h2></div>
+      ${entries.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Compte</th><th>Adresse IP</th><th>Action</th></tr></thead><tbody>
+        ${entries.map((e) => `<tr><td>${fmtDT(e.at)}</td><td>${H.esc(e.email)}</td><td class="mono">${H.esc(e.ip)}</td><td>${e.ok ? "" : pill("bad", "Refusé")} ${H.esc(e.action)}${e.detail ? `<div class="s mono">${H.esc(e.detail)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Rien pour l\'instant.</div>'}</div>`;
+  }
   H.app.innerHTML = head("Sécurité", "Protège le standard contre les intrusions, la fraude et les appels indésirables.") + tabs("#/securite", sub, T) + `<div class="cx-body">${body}</div>`;
   const save = async (v, msg = "Réglages de sécurité enregistrés.") => {
     const r = await H.api("PUT", "/api/security", v);
@@ -211,6 +220,18 @@ async function pageSecurity(sub = "apercu") {
   H.$("#f2bf") && onSubmit(H.$("#f2bf"), (v) => save({ f2b: v.f2b, whitelist: lines(v.whitelist) }));
   H.$("#numf") && onSubmit(H.$("#numf"), (v) => save({ in_block: parseNums(v.in_block), out_block: parseNums(v.out_block), block_anonymous: v.block_anonymous }));
   H.$("#rgf") && onSubmit(H.$("#rgf"), (v) => save({ ...v, max_per_hour: Number(v.max_per_hour), max_intl_day: Number(v.max_intl_day), max_user_calls: Number(v.max_user_calls), max_duration: Number(v.max_duration) }));
+  H.$("#totpnew")?.addEventListener("click", async () => {
+    const area = H.$("#totparea");
+    try {
+      const t = await H.api("POST", "/api/totp/setup");
+      area.innerHTML = `<div class="totp"><div class="totp-qr">${t.qr}</div><div class="totp-steps"><p style="margin-top:0">Scanne ce nouveau QR code dans Psono (l'ancien code cessera de fonctionner), puis tape le code affiché.</p>
+        <label>Code<input id="ntc" inputmode="numeric" maxlength="6" placeholder="123456"></label><div class="err" id="nte"></div><button class="btn" id="ntok" style="margin-top:10px">Valider</button></div></div>`;
+      H.$("#ntok").onclick = async () => {
+        try { const r = await H.api("POST", "/api/totp/confirm", { code: H.$("#ntc").value }); area.innerHTML = `<div class="note"><strong>Nouveaux codes de secours</strong> (les anciens ne marchent plus) :<pre class="code">${r.recovery_codes.map(H.esc).join("\n")}</pre></div>`; }
+        catch (e) { H.$("#nte").textContent = e.message; }
+      };
+    } catch (e) { area.innerHTML = `<div class="flash bad">${H.esc(e.message)}</div>`; }
+  });
   const ccf = H.$("#ccf");
   if (ccf) {
     const sync = () => { ccf.querySelector('[data-for="ca"]').hidden = ccf.elements.ca_mode.value !== "list"; ccf.querySelector('[data-for="sa"]').hidden = ccf.elements.sa_mode.value !== "list"; };

@@ -8,6 +8,7 @@ import { UserError } from "./users.mjs";
 
 /** id → [libellé, gravité, description] */
 export const ALERT_EVENTS = {
+  admin_login: ["Connexion à la console depuis une nouvelle adresse", "warning", "Quelqu'un s'est connecté à la console d'administration depuis une adresse IP jamais vue."],
   fraud: ["Plafond anti-fraude atteint", "critical", "Des appels externes ont été refusés parce que le plafond par heure (ou d'appels internationaux par jour) est dépassé : signe possible de piratage."],
   emergency: ["Numéro d'urgence composé", "critical", "Un poste a appelé le 15, 17, 18, 112, 114, 115, 119, 116000, 191, 196 ou 197."],
   trunk_down: ["Trunk désenregistré", "critical", "Un trunk n'est plus enregistré chez l'opérateur depuis plus de 2 minutes : plus d'appels entrants."],

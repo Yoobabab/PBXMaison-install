@@ -12,7 +12,8 @@ import qrcode from "qrcode-generator";
 import { settings, VAR, TEMPLATES_FILE, pbxEnv, installState, setupState, isConfigured, activationCode } from "./lib/config.mjs";
 import { createDb } from "./lib/db.mjs";
 import { Ami } from "./lib/ami.mjs";
-import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken } from "./lib/auth.mjs";
+import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken,
+  newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
@@ -62,9 +63,21 @@ export async function buildApp({ db, ami } = {}) {
 
   const userCount = async () => Number((await db.query("SELECT count(*) FROM pbxmaison_users")).rows[0].count);
   const currentUser = (req) => readSession(req.cookies[COOKIE], settings.sessionSecret);
+  // Console : session valide ET double authentification faite (sinon seule la mise en place de la double authentification est permise)
   const requireUser = async (req, reply) => {
-    if (!currentUser(req)) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
+    const u = currentUser(req);
+    if (!u) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
+    if (!u.mfa) return reply.code(403).send({ error: "Active d'abord la double authentification.", need_totp_setup: true });
   };
+  const requireLogin = async (req, reply) => { if (!currentUser(req)) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." }); };
+  // Actions sensibles (sécurité, trunks, règles sortantes, restauration, mise à jour) : code de double authentification de moins de 15 min
+  const MFA_FRESH = 15 * 60_000;
+  const requireFreshMfa = async (req, reply) => {
+    const r = await requireUser(req, reply); if (r) return r;
+    if (Date.now() - currentUser(req).mfa_at > MFA_FRESH) return reply.code(403).send({ error: "Confirme avec ton code de double authentification.", need_reauth: true });
+  };
+  const audit = (req, action, ok = true, detail = "", email = currentUser(req)?.email || "") =>
+    db.query("INSERT INTO pbxmaison_audit (email, ip, action, ok, detail) VALUES ($1, $2, $3, $4, $5)", [email, String(req.ip || ""), action, ok, String(detail).slice(0, 300)]).catch(() => {});
   // Assistant : jeton d'installation tant qu'aucun administrateur n'existe, session ensuite
   const requireSetup = async (req, reply) => {
     if (currentUser(req)) return;
@@ -78,6 +91,19 @@ export async function buildApp({ db, ami } = {}) {
     if (!req.url.startsWith("/api/") || req.url.startsWith("/api/u/") || req.url === "/api/health") return;
     const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
     if (!admin.consoleAllowed(ip)) return reply.code(403).send({ error: `Accès à la console refusé depuis ${ip} (Sécurité › Accès à la console).` });
+  });
+  // Journal d'audit : toute modification faite depuis la console (qui, quand, d'où, quoi)
+  const AUDIT_LABEL = [[/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
+    [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
+    [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"]];
+  app.addHook("onResponse", async (req, reply) => {
+    if (req.method === "GET" || !req.url.startsWith("/api/") || reply.statusCode >= 400) return;
+    if (/^\/api\/(login|logout|reauth|u\/|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
+    const u = currentUser(req); if (!u) return;
+    const path = req.url.split("?")[0];
+    const label = AUDIT_LABEL.find(([re]) => re.test(path))?.[1] || "Console";
+    const verb = { POST: "ajout / action", PUT: "modification", DELETE: "suppression" }[req.method] || req.method;
+    await audit(req, `${label} : ${verb}`, true, path);
   });
   const clientIp = (req) => String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
 
@@ -125,38 +151,119 @@ export async function buildApp({ db, ami } = {}) {
     ...applyStatus(), activation_code: activationCode(), setup: setupState(),
   }));
 
+  // Mot de passe administrateur + double authentification, en une seule étape
+  let pendingSetupTotp = null;
+  app.post("/api/setup/totp", { preHandler: requireSetup }, async () => {
+    if (!isConfigured()) throw new UserError("Termine d'abord la configuration.");
+    const email = pbxEnv().PBX_ADMIN_EMAIL.toLowerCase();
+    pendingSetupTotp = pendingSetupTotp || newTotpSecret();
+    const uri = otpauthUri(pendingSetupTotp, email, `Callikoe ${pbxEnv().PBX_NAME || ""}`.trim());
+    return { secret: pendingSetupTotp, uri, qr: qrSvg(uri) };
+  });
   app.post("/api/setup/admin", { preHandler: requireSetup }, async (req, reply) => {
     if (!isConfigured()) throw new UserError("Termine d'abord la configuration.");
     if ((await userCount()) > 0) throw new UserError("Le compte administrateur existe déjà.");
     const problem = passwordProblem(req.body?.password);
     if (problem) throw new UserError(problem, "password");
+    if (!pendingSetupTotp) throw new UserError("Scanne d'abord le QR code de double authentification.", "totp_code");
+    const step = verifyTotp(pendingSetupTotp, req.body?.totp_code);
+    if (step === null) throw new UserError("Code incorrect : tape le code à 6 chiffres affiché par Psono (ou ton application).", "totp_code");
     const email = pbxEnv().PBX_ADMIN_EMAIL.toLowerCase();
-    await db.query("INSERT INTO pbxmaison_users (email, password_hash, last_login_at) VALUES ($1, $2, now())",
-      [email, hashPassword(req.body.password)]);
+    const rec = newRecoveryCodes();
+    await db.query("INSERT INTO pbxmaison_users (email, password_hash, last_login_at, totp_secret, totp_last_step, recovery) VALUES ($1, $2, now(), $3, $4, $5)",
+      [email, hashPassword(req.body.password), pendingSetupTotp, step, JSON.stringify(rec.hashes)]);
+    pendingSetupTotp = null;
     consumeToken();
-    reply.setCookie(COOKIE, createSession(email, settings.sessionSecret), cookieOpts(req));
-    return { ok: true, email };
+    await audit(req, "Création du compte administrateur (double authentification activée)", true, "", email);
+    reply.setCookie(COOKIE, createSession(email, settings.sessionSecret, { mfa: true, mfa_at: Date.now() }), cookieOpts(req));
+    return { ok: true, email, recovery_codes: rec.codes };
   });
 
-  // ---------------------------------------------------------------- Connexion
+  // ---------------------------------------------------------------- Connexion (mot de passe puis code de double authentification)
   const failures = new Map();
+  const tooMany = (ip) => { const f = failures.get(ip); return f && f.count >= 5 && f.until > Date.now(); };
+  const fail = (ip) => { const f = failures.get(ip); const fresh = !f || f.until < Date.now(); failures.set(ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 15 * 60_000 }); };
+  const seenIp = async (email, ip) => (await db.query("SELECT 1 FROM pbxmaison_audit WHERE email = $1 AND ip = $2 AND ok AND action LIKE 'Connexion%' LIMIT 1", [email, ip])).rowCount > 0;
+  async function openSession(req, reply, email, mfa) {
+    const known = await seenIp(email, String(req.ip));
+    await db.query("UPDATE pbxmaison_users SET last_login_at = now() WHERE email = $1", [email]);
+    await audit(req, mfa ? "Connexion à la console" : "Connexion à la console (double authentification à activer)", true, "", email);
+    if (!known) admin.logAlert("admin_login", `Connexion à la console de ${email} depuis une nouvelle adresse : ${req.ip}. Si ce n'est pas toi, change le mot de passe et la double authentification tout de suite.`).catch(() => {});
+    reply.setCookie(COOKIE, createSession(email, settings.sessionSecret, mfa ? { mfa: true, mfa_at: Date.now() } : {}), cookieOpts(req));
+  }
   app.post("/api/login", async (req, reply) => {
-    const f = failures.get(req.ip);
-    if (f && f.count >= 5 && f.until > Date.now()) return reply.code(429).send({ error: "Trop de tentatives : réessaie dans 15 minutes." });
+    if (tooMany(req.ip)) return reply.code(429).send({ error: "Trop de tentatives : réessaie dans 15 minutes." });
     const email = String(req.body?.email || "").trim().toLowerCase();
-    const r = await db.query("SELECT password_hash FROM pbxmaison_users WHERE email = $1", [email]);
+    const r = await db.query("SELECT password_hash, totp_secret FROM pbxmaison_users WHERE email = $1", [email]);
     if (!r.rowCount || !verifyPassword(req.body?.password, r.rows[0].password_hash)) {
-      const fresh = !f || f.until < Date.now();
-      failures.set(req.ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 15 * 60_000 });
+      fail(req.ip); await audit(req, "Connexion refusée : mauvais mot de passe", false, "", email);
       return reply.code(401).send({ error: "E-mail ou mot de passe incorrect." });
     }
+    if (r.rows[0].totp_secret) return { need_totp: true, ticket: createToken({ email, mfa_ticket: 1 }, settings.sessionSecret, 0.1) };
     failures.delete(req.ip);
-    await db.query("UPDATE pbxmaison_users SET last_login_at = now() WHERE email = $1", [email]);
-    reply.setCookie(COOKIE, createSession(email, settings.sessionSecret), cookieOpts(req));
-    return { ok: true, email };
+    await openSession(req, reply, email, false);
+    return { ok: true, email, need_totp_setup: true };
   });
+  app.post("/api/login/totp", async (req, reply) => {
+    if (tooMany(req.ip)) return reply.code(429).send({ error: "Trop de tentatives : réessaie dans 15 minutes." });
+    const t = readToken(req.body?.ticket, settings.sessionSecret);
+    if (!t?.mfa_ticket) return reply.code(401).send({ error: "Délai dépassé : reconnecte-toi." });
+    const r = await db.query("SELECT totp_secret, totp_last_step, recovery FROM pbxmaison_users WHERE email = $1", [t.email]);
+    const row = r.rows[0];
+    const code = String(req.body?.code || "").trim();
+    let ok = false;
+    const step = row && verifyTotp(row.totp_secret, code, Number(row.totp_last_step));
+    if (step !== null && step !== undefined) { ok = true; await db.query("UPDATE pbxmaison_users SET totp_last_step = $2 WHERE email = $1", [t.email, step]); }
+    else if (row && code.length > 6) {
+      const h = recoveryHash(code), list = row.recovery || [];
+      if (list.includes(h)) { ok = true; await db.query("UPDATE pbxmaison_users SET recovery = $2 WHERE email = $1", [t.email, JSON.stringify(list.filter((x) => x !== h))]); await audit(req, "Code de secours utilisé", true, `${list.length - 1} restant(s)`, t.email); }
+    }
+    if (!ok) { fail(req.ip); await audit(req, "Connexion refusée : mauvais code de double authentification", false, "", t.email); return reply.code(401).send({ error: "Code incorrect." }); }
+    failures.delete(req.ip);
+    await openSession(req, reply, t.email, true);
+    return { ok: true, email: t.email };
+  });
+  // Nouveau code pour une action sensible
+  app.post("/api/reauth", { preHandler: requireUser }, async (req, reply) => {
+    if (tooMany(req.ip)) return reply.code(429).send({ error: "Trop de tentatives : réessaie dans 15 minutes." });
+    const email = currentUser(req).email;
+    const row = (await db.query("SELECT totp_secret, totp_last_step FROM pbxmaison_users WHERE email = $1", [email])).rows[0];
+    const step = row && verifyTotp(row.totp_secret, req.body?.code, Number(row.totp_last_step));
+    if (step === null || step === undefined) { fail(req.ip); await audit(req, "Code de confirmation refusé", false); return reply.code(401).send({ error: "Code incorrect." }); }
+    await db.query("UPDATE pbxmaison_users SET totp_last_step = $2 WHERE email = $1", [email, step]);
+    reply.setCookie(COOKIE, createSession(email, settings.sessionSecret, { mfa: true, mfa_at: Date.now() }), cookieOpts(req));
+    return { ok: true };
+  });
+  // Mise en place (ou remplacement) de la double authentification
+  const pendingTotp = new Map();
+  app.post("/api/totp/setup", { preHandler: requireLogin }, async (req, reply) => {
+    const u = currentUser(req);
+    if (u.mfa && Date.now() - u.mfa_at > MFA_FRESH) return reply.code(403).send({ error: "Confirme avec ton code actuel.", need_reauth: true });
+    const secret = newTotpSecret(); pendingTotp.set(u.email, secret);
+    const uri = otpauthUri(secret, u.email, `Callikoe ${pbxEnv().PBX_NAME || ""}`.trim());
+    return { secret, uri, qr: qrSvg(uri) };
+  });
+  app.post("/api/totp/confirm", { preHandler: requireLogin }, async (req, reply) => {
+    const u = currentUser(req), secret = pendingTotp.get(u.email);
+    if (!secret) throw new UserError("Recommence la mise en place.");
+    const step = verifyTotp(secret, req.body?.code);
+    if (step === null) throw new UserError("Code incorrect : tape le code à 6 chiffres affiché par Psono (ou ton application).", "code");
+    const rec = newRecoveryCodes();
+    await db.query("UPDATE pbxmaison_users SET totp_secret = $2, totp_last_step = $3, recovery = $4 WHERE email = $1", [u.email, secret, step, JSON.stringify(rec.hashes)]);
+    pendingTotp.delete(u.email);
+    await audit(req, "Double authentification activée");
+    reply.setCookie(COOKIE, createSession(u.email, settings.sessionSecret, { mfa: true, mfa_at: Date.now() }), cookieOpts(req));
+    return { ok: true, recovery_codes: rec.codes };
+  });
+  app.get("/api/audit", { preHandler: requireUser }, async () => ({
+    entries: (await db.query("SELECT at, email, ip, action, ok, detail FROM pbxmaison_audit ORDER BY id DESC LIMIT 200")).rows,
+  }));
   app.post("/api/logout", async (req, reply) => { reply.clearCookie(COOKIE, { path: "/" }); return { ok: true }; });
-  app.get("/api/me", { preHandler: requireUser }, async (req) => ({ email: currentUser(req).email }));
+  app.get("/api/me", { preHandler: requireLogin }, async (req) => {
+    const u = currentUser(req);
+    const row = (await db.query("SELECT totp_secret IS NOT NULL AS totp, jsonb_array_length(recovery) AS recovery_left FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
+    return { email: u.email, totp: !!row?.totp, mfa: u.mfa, recovery_left: row?.recovery_left ?? 0 };
+  });
 
   // ---------------------------------------------------------------- Console
   app.get("/api/dashboard", { preHandler: requireUser }, async () => {
@@ -183,10 +290,10 @@ export async function buildApp({ db, ami } = {}) {
 
   app.get("/api/templates", { preHandler: requireUser }, async () => pbx.templates());
   app.get("/api/trunks", { preHandler: requireUser }, async () => pbx.listTrunks());
-  app.post("/api/trunks", { preHandler: requireUser }, async (req) => pbx.createTrunk(req.body || {}));
-  app.put("/api/trunks/:id", { preHandler: requireUser }, async (req) =>
+  app.post("/api/trunks", { preHandler: requireFreshMfa }, async (req) => pbx.createTrunk(req.body || {}));
+  app.put("/api/trunks/:id", { preHandler: requireFreshMfa }, async (req) =>
     pbx.createTrunk({ ...(req.body || {}), name: req.params.id, replace: true }));
-  app.delete("/api/trunks/:id", { preHandler: requireUser }, async (req) => { await pbx.deleteTrunk(req.params.id); return { ok: true }; });
+  app.delete("/api/trunks/:id", { preHandler: requireFreshMfa }, async (req) => { await pbx.deleteTrunk(req.params.id); return { ok: true }; });
 
   app.get("/api/extensions", { preHandler: requireUser }, async () => ({
     extensions: await pbx.listExtensions(), next: await pbx.nextFreeExtension(),
@@ -446,16 +553,16 @@ export async function buildApp({ db, ami } = {}) {
 
   // ---------------------------------------------------------------- Règles sortantes
   app.get("/api/outbound", { preHandler: requireUser }, async () => admin.listOutbound());
-  app.post("/api/outbound", { preHandler: requireUser }, async (req) => admin.saveOutbound(null, req.body || {}));
-  app.put("/api/outbound/:id", { preHandler: requireUser }, async (req) => admin.saveOutbound(req.params.id, req.body || {}));
-  app.delete("/api/outbound/:id", { preHandler: requireUser }, async (req) => admin.deleteOutbound(req.params.id));
-  app.put("/api/outbound-order", { preHandler: requireUser }, async (req) => admin.orderOutbound(req.body?.ids));
+  app.post("/api/outbound", { preHandler: requireFreshMfa }, async (req) => admin.saveOutbound(null, req.body || {}));
+  app.put("/api/outbound/:id", { preHandler: requireFreshMfa }, async (req) => admin.saveOutbound(req.params.id, req.body || {}));
+  app.delete("/api/outbound/:id", { preHandler: requireFreshMfa }, async (req) => admin.deleteOutbound(req.params.id));
+  app.put("/api/outbound-order", { preHandler: requireFreshMfa }, async (req) => admin.orderOutbound(req.body?.ids));
 
   // ---------------------------------------------------------------- Sécurité
   app.get("/api/security", { preHandler: requireUser }, async () => admin.getSecurity());
-  app.put("/api/security", { preHandler: requireUser }, async (req) => admin.setSecurity(req.body || {}, clientIp(req)));
+  app.put("/api/security", { preHandler: requireFreshMfa }, async (req) => admin.setSecurity(req.body || {}, clientIp(req)));
   app.post("/api/security/ban", { preHandler: requireUser }, async (req) => admin.banIp(req.body?.ip, true));
-  app.post("/api/security/unban", { preHandler: requireUser }, async (req) => admin.banIp(req.body?.ip, false));
+  app.post("/api/security/unban", { preHandler: requireFreshMfa }, async (req) => admin.banIp(req.body?.ip, false));
 
   // ---------------------------------------------------------------- Enregistrements
   app.get("/api/recording", { preHandler: requireUser }, async () => admin.getRecording());
@@ -475,10 +582,10 @@ export async function buildApp({ db, ami } = {}) {
 
   // ---------------------------------------------------------------- Sauvegardes
   app.get("/api/backups", { preHandler: requireUser }, async () => admin.getBackups());
-  app.put("/api/backups", { preHandler: requireUser }, async (req) => admin.setBackups(req.body || {}));
+  app.put("/api/backups", { preHandler: requireFreshMfa }, async (req) => admin.setBackups(req.body || {}));
   app.post("/api/backups/run", { preHandler: requireUser }, async () => admin.runBackup("manual"));
   app.post("/api/backups/test-remote", { preHandler: requireUser }, async (req) => admin.testRemote(req.body || {}));
-  app.post("/api/backups/restore", { preHandler: requireUser }, async (req) => admin.restoreBackup(String(req.body?.file || "")));
+  app.post("/api/backups/restore", { preHandler: requireFreshMfa }, async (req) => admin.restoreBackup(String(req.body?.file || "")));
   app.get("/api/backups/restore", { preHandler: requireUser }, async () => admin.restoreStatus());
   app.get("/api/backups/file/:file", { preHandler: requireUser }, async (req, reply) => {
     const f = (await import("./lib/backup.mjs")).backupPath(req.params.file);
@@ -492,7 +599,7 @@ export async function buildApp({ db, ami } = {}) {
 
   // ---------------------------------------------------------------- Mises à jour, licence
   app.get("/api/updates", { preHandler: requireUser }, async (req) => admin.getUpdates({ check: req.query?.check === "1" }));
-  app.post("/api/updates/start", { preHandler: requireUser }, async () => admin.startUpdate());
+  app.post("/api/updates/start", { preHandler: requireFreshMfa }, async () => admin.startUpdate());
   app.get("/api/updates/status", { preHandler: requireUser }, async () => admin.updateStatus());
   app.get("/api/license", { preHandler: requireUser }, async () => admin.getLicense());
 

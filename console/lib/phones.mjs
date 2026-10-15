@@ -201,7 +201,11 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("account.1.codec.g729.enable", 0),
     v("account.1.dtmf.type", 1),
     v("features.pickup.direct_pickup_enable", 1),
-    v("features.pickup.direct_pickup_code", "**"),
+    v("features.pickup.direct_pickup_code", server.codes?.pickup || "**"),
+    // Ne pas déranger depuis le téléphone : envoyé au PBX (statut visible dans la console, le softphone et sur les BLF)
+    v("features.dnd.allow", 1),
+    v("account.1.dnd.on_code", server.codes?.st_dnd || "*32"),
+    v("account.1.dnd.off_code", server.codes?.st_available || "*30"),
     "",
     "## Langue, date et heure",
     v("lang.gui", LANGUAGES[st.language]?.[1] || "French"),
@@ -227,6 +231,8 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("static.auto_provision.repeat.enable", 1),
     v("static.auto_provision.repeat.minutes", 1440),
     v("static.auto_provision.pnp_enable", 0),
+    // Reprovisionner sans redémarrer : le poste applique la config à chaud (seuls les réglages réseau imposent un redémarrage)
+    v("static.auto_provision.reboot_force.enable", 0),
     "",
     "## Annuaire de l'entreprise (collègues + contacts), aussi utilisé pour afficher le nom des appelants",
     v("remote_phonebook.data.1.url", `${server.prov_url}phonebook.xml`),

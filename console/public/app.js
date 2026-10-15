@@ -28,8 +28,53 @@ async function api(method, path, body) {
   let data = null;
   try { data = await res.json(); } catch { data = null; }
   if (res.status === 401 && path !== "/api/login") { state.logged_in = false; route(); throw new Error(data?.error || "Session expirée"); }
+  if (res.status === 403 && data?.need_reauth && !path.startsWith("/api/reauth")) {
+    if (await askCode()) return api(method, path, body);
+    throw new Error("Action annulée : code de double authentification requis.");
+  }
+  if (res.status === 403 && data?.need_totp_setup) { state.need_totp = true; route(); throw new Error(data.error); }
   if (!res.ok) { const e = new Error(data?.error || `Erreur ${res.status}`); e.field = data?.field; throw e; }
   return data;
+}
+
+/** Fenêtre « code de double authentification » pour une action sensible. Résout true si le code est accepté. */
+function askCode() {
+  return new Promise((resolve) => {
+    const box = document.createElement("div");
+    box.className = "mfa-modal";
+    box.innerHTML = `<div class="mfa-card" role="dialog" aria-modal="true" aria-label="Confirmation"><h2>Confirme avec ton code</h2>
+      <p class="hint">Action sensible (sécurité, trunks, règles sortantes…) : tape le code à 6 chiffres de Psono ou de ton application.</p>
+      <input id="mfac" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"><div class="err" id="mfae"></div>
+      <div class="actions"><button type="button" class="btn ghost" id="mfax">Annuler</button><button type="button" class="btn" id="mfao">Confirmer</button></div></div>`;
+    document.body.append(box);
+    const inp = box.querySelector("#mfac"); inp.focus();
+    const done = (v) => { box.remove(); resolve(v); };
+    const go = async () => {
+      try { await api("POST", "/api/reauth", { code: inp.value }); done(true); }
+      catch (e) { box.querySelector("#mfae").textContent = e.message; inp.select(); }
+    };
+    box.querySelector("#mfao").onclick = go;
+    inp.onkeydown = (e) => { if (e.key === "Enter") go(); if (e.key === "Escape") done(false); };
+    box.querySelector("#mfax").onclick = () => done(false);
+  });
+}
+
+/** Mise en place de la double authentification (QR code pour Psono, Google Authenticator…). */
+async function totpSetupBox(el, { setup = false, onDone }) {
+  const t = await api("POST", setup ? "/api/setup/totp" : "/api/totp/setup");
+  el.innerHTML = `<div class="totp">
+    <div class="totp-qr">${t.qr}</div>
+    <div class="totp-steps"><ol>
+      <li>Dans <strong>Psono</strong> : nouvelle entrée de type <em>TOTP</em> (ou ouvre Google Authenticator, Microsoft Authenticator…), puis scanne ce QR code.</li>
+      <li>Sans scanner : saisis cette clé <code class="mono">${esc(t.secret.replace(/(.{4})/g, "$1 ").trim())}</code> <button type="button" class="copy" data-copy="${esc(t.secret)}">Copier</button></li>
+      <li>Tape le code à 6 chiffres affiché :</li></ol>
+      <label>Code de vérification<input name="totp_code" id="totpc" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></label></div></div>`;
+  copyButtons(el);
+  if (onDone) el.querySelector("#totpc").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); onDone(); } };
+}
+function recoveryBox(codes) {
+  return `<div class="note"><strong>Codes de secours</strong> — à garder dans Psono avec le mot de passe. Chacun remplace une fois le code à 6 chiffres si tu perds ton téléphone.
+    <pre class="code">${codes.map(esc).join("\n")}</pre><button type="button" class="copy" data-copy="${esc(codes.join("\n"))}">Copier les codes</button></div>`;
 }
 
 let state = null;
@@ -247,18 +292,26 @@ async function wizAdmin() {
       <p class="full hint" style="margin:0">Identifiant de connexion : <strong>${esc(email)}</strong></p>
       <label>Mot de passe<input type="password" name="password" autocomplete="new-password" required minlength="10"><span class="hint">10 caractères minimum, lettres et chiffres.</span></label>
       <label>Confirmation<input type="password" name="confirm" autocomplete="new-password" required></label>
+      <div class="full"><h3 style="margin:8px 0 4px;font-size:15px">Double authentification (obligatoire)</h3>
+        <p class="hint" style="margin:0 0 10px">À chaque connexion, en plus du mot de passe, un code à 6 chiffres affiché par Psono (ou une application d'authentification). Même avec le mot de passe, personne ne peut entrer sans ce code.</p>
+        <div id="totpbox"></div></div>
       <div class="actions"><button class="btn">Créer le compte et ouvrir la console</button></div>
     </form></div>`);
+  totpSetupBox($("#totpbox"), { setup: true }).catch((e) => { $("#totpbox").innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; });
   $("#adm").onsubmit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     if (f.password !== f.confirm) { flash = { cls: "bad", text: "Les deux mots de passe sont différents." }; return wizAdmin(); }
     try {
-      const r = await api("POST", "/api/setup/admin", { password: f.password });
+      const r = await api("POST", "/api/setup/admin", { password: f.password, totp_code: f.totp_code });
       sessionStorage.removeItem("pbxm_setup_token");
       Object.assign(state, { has_admin: true, logged_in: true, email: r.email });
+      wiz.recovery = r.recovery_codes;
       wiz.step = 5; renderWizard();
-    } catch (err) { flash = { cls: "bad", text: err.message }; wizAdmin(); }
+    } catch (err) {
+      if (err.field === "totp_code" || err.field === "password") { const b = document.createElement("div"); b.className = "flash bad"; b.textContent = err.message; $("#adm").prepend(b); setTimeout(() => b.remove(), 6000); return; }
+      flash = { cls: "bad", text: err.message }; wizAdmin();
+    }
   };
 }
 
@@ -270,6 +323,7 @@ async function wizDone() {
   app.innerHTML = wizardFrame(5, `<div class="panel">
     <div class="ph"><h2>Le PBX est prêt</h2><span class="pill ok">Installé</span></div>
     <div class="pad stack">
+      ${wiz.recovery ? recoveryBox(wiz.recovery) : ""}
       <div><strong>Dernière étape côté portail</strong>
         <p class="hint" style="margin:4px 0 10px">Dans le portail, fiche du PBX → « Enregistrer l'installation » → colle ce code :</p>
         <pre class="code">${esc(d?.activation_code || "—")}</pre>
@@ -282,21 +336,52 @@ async function wizDone() {
 }
 
 // ---------------------------------------------------------------- Connexion
-function renderLogin() {
+function renderLogin(ticket = null) {
   setNav();
   clearInterval(timer);
   app.innerHTML = `<div class="login"><div class="panel"><div class="ph"><h2>Connexion</h2></div>
     <form method="post" id="login">${takeFlash()}
-      <label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
-      <label>Mot de passe<input type="password" name="password" autocomplete="current-password" required></label>
-      <button class="btn">Se connecter</button></form></div></div>`;
+      ${ticket ? `<p class="hint" style="margin:0">Tape le code à 6 chiffres affiché par Psono (ou ton application d'authentification). Code perdu : utilise un code de secours.</p>
+        <label>Code de double authentification<input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus placeholder="123456"></label>
+        <button class="btn">Valider</button><button type="button" class="btn link" id="back">Recommencer</button>`
+      : `<label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
+        <label>Mot de passe<input type="password" name="password" autocomplete="current-password" required></label>
+        <button class="btn">Se connecter</button>`}</form></div></div>`;
+  $("#back")?.addEventListener("click", () => renderLogin());
   $("#login").onsubmit = async (e) => {
     e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
     try {
-      const r = await api("POST", "/api/login", Object.fromEntries(new FormData(e.target)));
-      Object.assign(state, { logged_in: true, email: r.email }); route();
-    } catch (err) { flash = { cls: "bad", text: err.message }; renderLogin(); }
+      if (ticket) {
+        const r = await api("POST", "/api/login/totp", { ticket, code: f.code });
+        Object.assign(state, { logged_in: true, email: r.email, need_totp: false }); route(); return;
+      }
+      const r = await api("POST", "/api/login", f);
+      if (r.need_totp) return renderLogin(r.ticket);
+      Object.assign(state, { logged_in: true, email: r.email, need_totp: !!r.need_totp_setup }); route();
+    } catch (err) { flash = { cls: "bad", text: err.message }; renderLogin(ticket); }
   };
+}
+
+/** Compte sans double authentification (installation d'avant) : mise en place obligatoire avant d'utiliser la console. */
+async function renderTotpRequired() {
+  setNav();
+  clearInterval(timer);
+  app.innerHTML = `<div class="wizard"><h1>Double authentification</h1>
+    <p class="sub">Obligatoire pour protéger la console : sans le code affiché par ton téléphone, personne ne peut entrer, même avec le mot de passe.</p>
+    <div class="panel pad stack"><form id="tf" novalidate class="stack"><div id="totpbox"></div><div class="err" id="terr"></div>
+      <div class="actions"><button type="button" class="btn ghost" id="tlogout">Se déconnecter</button><button class="btn">Activer</button></div></form></div></div>`;
+  const submit = async () => {
+    try {
+      const r = await api("POST", "/api/totp/confirm", { code: $("#totpc").value });
+      state.need_totp = false;
+      $(".wizard .panel").innerHTML = `${recoveryBox(r.recovery_codes)}<div class="actions" style="margin-top:14px"><a class="btn" href="#/">Ouvrir la console</a></div>`;
+      copyButtons(); $(".wizard .panel a.btn").onclick = (e) => { e.preventDefault(); location.hash = "#/"; route(); };
+    } catch (e) { $("#terr").textContent = e.message; }
+  };
+  await totpSetupBox($("#totpbox"), { onDone: submit });
+  $("#tf").onsubmit = (e) => { e.preventDefault(); submit(); };
+  $("#tlogout").onclick = async () => { await api("POST", "/api/logout"); state.logged_in = false; renderLogin(); };
 }
 
 // ---------------------------------------------------------------- Tableau de bord
@@ -459,7 +544,7 @@ function compactDids(list = []) {
 
 // ---------------------------------------------------------------- Icônes d'appareils
 const DEV_ICONS = {
-  phone: '<path d="M4 4h16v9H4z M7 16h10v4H7z M9 13v3 M15 13v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+  phone: '<g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5C4 7 7.6 5 12 5s8 2 8 4.5v.8a1 1 0 0 1-1 1h-2.4a1 1 0 0 1-1-1v-.9a11 11 0 0 0-7.2 0v.9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M7 13.2h10l1.6 6.3H5.4z"/><path d="M10 15.6h.01M12 15.6h.01M14 15.6h.01M10 17.6h.01M12 17.6h.01M14 17.6h.01" stroke-width="2.2"/></g>',
   pc: '<path d="M3 4h18v12H3z M8 20h8 M12 16v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
   mobile: '<path d="M7 2h10v20H7z M11 18h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
   web: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18 M12 3c3 3.5 3 14.5 0 18 M12 3c-3 3.5-3 14.5 0 18" fill="none" stroke="currentColor" stroke-width="1.5"/>',
@@ -1142,7 +1227,8 @@ async function route() {
     if (!state) state = await api("GET", "/api/state");
     if (!state.configured || !state.has_admin) return renderWizard();
     if (!state.logged_in) return renderLogin();
-    if (!state.email) state.email = (await api("GET", "/api/me")).email;
+    if (!state.email || state.need_totp === undefined) { const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; }
+    if (state.need_totp) return renderTotpRequired();
     const h = location.hash || "#/";
     let m;
     if (h === "#/trunks") await renderTrunks();

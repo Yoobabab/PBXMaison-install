@@ -536,3 +536,16 @@ body.no-side .shell{margin-left:0}
 
 .fx-g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .fx-perr{color:var(--bad);font-size:13px;font-weight:500}
+
+/* Double authentification */
+.totp{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+.totp-qr{width:180px;height:180px;background:#fff;border-radius:12px;padding:8px;border:1px solid var(--line);flex:none}
+.totp-qr svg{width:100%;height:100%}
+.totp-steps{flex:1;min-width:240px}
+.totp-steps ol{margin:0 0 12px;padding-left:20px}
+.totp-steps li{margin:6px 0}
+.mfa-modal{position:fixed;inset:0;background:rgba(10,10,20,.4);display:grid;place-items:center;z-index:2000;padding:16px}
+.mfa-card{background:var(--panel);border-radius:16px;padding:22px;width:min(400px,100%);box-shadow:0 24px 60px rgba(0,0,0,.25)}
+.mfa-card h2{font-size:18px;margin:0 0 6px}
+.mfa-card input{font-size:22px;letter-spacing:.3em;text-align:center;margin:10px 0 4px}
+.mfa-card .actions{border:0;padding-top:10px}

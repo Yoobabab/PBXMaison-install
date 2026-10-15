@@ -12,6 +12,13 @@ export function createDb(cfg) {
         created_at timestamptz NOT NULL DEFAULT now(),
         last_login_at timestamptz
       );
+      ALTER TABLE pbxmaison_users ADD COLUMN IF NOT EXISTS totp_secret text;
+      ALTER TABLE pbxmaison_users ADD COLUMN IF NOT EXISTS totp_last_step bigint NOT NULL DEFAULT 0;
+      ALTER TABLE pbxmaison_users ADD COLUMN IF NOT EXISTS recovery jsonb NOT NULL DEFAULT '[]';
+      CREATE TABLE IF NOT EXISTS pbxmaison_audit (
+        id bigserial PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), email text NOT NULL DEFAULT '', ip text NOT NULL DEFAULT '',
+        action text NOT NULL, ok boolean NOT NULL DEFAULT true, detail text NOT NULL DEFAULT ''
+      );
       CREATE TABLE IF NOT EXISTS pbxmaison_settings (
         key text PRIMARY KEY,
         value jsonb NOT NULL,

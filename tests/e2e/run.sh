@@ -23,8 +23,18 @@ pass "install.sh terminé en $(( SECONDS - T0 )) s"
 grep -q "jeton=" install.out && pass "URL de l'assistant affichée : $(grep -o 'http://[^ ]*jeton=[0-9a-f]*' install.out | sed 's/jeton=.*/jeton=…/')"
 TOKEN="$(sudo cat /var/lib/pbxmaison/setup-token)"
 
-api() { # api <méthode> <chemin> [json]
-  curl -sS -b "$JAR" -c "$JAR" -X "$1" "$API$2" -H "x-setup-token: $TOKEN" ${3:+-H "content-type: application/json" -d "$3"}
+# Double authentification : code TOTP calculé comme une appli (Psono…), jamais deux fois le même pas de 30 s
+LASTSTEP_FILE="$(mktemp)"; echo 0 > "$LASTSTEP_FILE"; TOTP=""
+otp() {
+  local st; while :; do st=$(( $(date +%s) / 30 )); (( st > $(cat "$LASTSTEP_FILE") )) && break; sleep 2; done
+  echo "$st" > "$LASTSTEP_FILE"
+  node -e 'import(process.argv[1]).then((a) => console.log(a.totpCode(process.argv[2], Number(process.argv[3]))))' "$PWD/../../console/lib/auth.mjs" "$TOTP" "$st"
+}
+raw_api() { curl -sS -b "$JAR" -c "$JAR" -X "$1" "$API$2" -H "x-setup-token: $TOKEN" ${3:+-H "content-type: application/json" -d "$3"}; }
+api() { # api <méthode> <chemin> [json] — redemande un code si l'action est sensible
+  local r; r="$(raw_api "$@")"
+  if [[ "$r" == *'"need_reauth":true'* ]]; then raw_api POST /api/reauth "{\"code\":\"$(otp)\"}" >/dev/null; r="$(raw_api "$@")"; fi
+  printf '%s' "$r"
 }
 CFG="$(cat pbx-config.json)"
 
@@ -42,8 +52,12 @@ done
 echo "$P" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const x of JSON.parse(s).steps)console.log(`   [${x.status}] ${x.step} : ${x.message.slice(0,140)}`)})' | tee -a "$OUT"
 echo "$P" | grep -q '"ok":true' || fail "Configuration échouée"
 pass "Assistant : configuration appliquée"
-R="$(api POST /api/setup/admin '{"password":"MotDePasse2026"}')"
-echo "$R" | grep -q '"ok":true' && pass "Assistant : compte administrateur créé" || fail "admin : $R"
+TOTP="$(api POST /api/setup/totp | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).secret))')"
+[[ "$TOTP" =~ ^[A-Z2-7]{32}$ ]] && pass "Assistant : QR code de double authentification proposé" || fail "totp setup : $TOTP"
+R="$(api POST /api/setup/admin '{"password":"MotDePasse2026","totp_code":"000000"}')"
+echo "$R" | grep -q "Code incorrect" && pass "Assistant : mauvais code de double authentification refusé" || fail "code faux accepté : $R"
+R="$(api POST /api/setup/admin "{\"password\":\"MotDePasse2026\",\"totp_code\":\"$(otp)\"}")"
+echo "$R" | grep -q '"ok":true' && echo "$R" | grep -q '"recovery_codes":\[' && pass "Assistant : compte administrateur créé avec double authentification et codes de secours" || fail "admin : $R"
 curl -sS -X POST "$API/api/setup/check" -H "x-setup-token: $TOKEN" -H "content-type: application/json" -d '{"config":{}}' | grep -q "invalide" \
   && pass "Jeton d'installation désactivé après création du compte" || fail "le jeton fonctionne encore"
 
@@ -55,8 +69,15 @@ sudo /usr/sbin/asterisk -rx "odbc show asterisk" | grep -qi "active connections:
 sudo /usr/sbin/asterisk -rx "core show settings" | grep -i "language" | head -1 | sed 's/^ */   /' >> "$OUT" || true
 
 # 4. Console
-curl -sS -c "$JAR" -X POST "$API/api/login" -H "content-type: application/json" -d '{"email":"admin@test.invalid","password":"MotDePasse2026"}' | grep -q '"ok":true' \
-  && pass "Connexion à la console" || fail "connexion"
+: > "$JAR"
+R="$(curl -sS -c "$JAR" -X POST "$API/api/login" -H "content-type: application/json" -d '{"email":"admin@test.invalid","password":"MotDePasse2026"}')"
+TICKET="$(echo "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).ticket||"")}catch{console.log("")}})')"
+[[ -n "$TICKET" ]] && [[ "$(raw_api GET /api/trunks)" == *"double authentification"* || "$(raw_api GET /api/trunks)" == *"Session"* ]] && pass "Connexion : le mot de passe seul ne donne pas accès à la console" || fail "connexion sans code : $R"
+curl -sS -b "$JAR" -c "$JAR" -X POST "$API/api/login/totp" -H "content-type: application/json" -d "{\"ticket\":\"$TICKET\",\"code\":\"$(otp)\"}" | grep -q '"ok":true' \
+  && pass "Connexion à la console (mot de passe + code de double authentification)" || fail "connexion"
+raw_api GET /api/audit | grep -q "Connexion à la console" && pass "Journal d'audit : connexion notée (IP, date)" || fail "audit"
+R="$(raw_api PUT /api/security '{"max_per_hour":100}')"
+[[ "$R" == *'"need_reauth":true'* || "$R" == *'"settings"'* ]] && pass "Action sensible : code redemandé après 15 min (ou accepté s'il est récent)" || fail "reauth : $R"
 R="$(api POST /api/trunks '{"template":"dstny","name":"dstny","number":"0465001530","username":"testuser","password":"testpass"}')"
 echo "$R" | grep -q '"id":"dstny"' && pass "Trunk Dstny créé depuis le modèle" || fail "trunk : $R"
 R="$(api POST /api/trunks '{"template":"unyc","name":"unyc","number":"0465000800","username":"10000","password":"x","host":"pbx.eqinoxe.com"}')"

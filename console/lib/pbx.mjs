@@ -605,7 +605,11 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     if (model?.format === "fanvil") text = buildFanvilCfg(acc, srv);
     else if (model?.format === "snom") text = buildSnomXml(acc, srv);
     else if (model?.format === "grandstream") text = buildGrandstreamXml(u.phone.mac || "", acc, srv);
-    else text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/` }, names);
+    else {
+      // Codes de statut (Codes raccourcis) : le bouton NPD du téléphone prévient le PBX, le statut se voit partout
+      const codes = { st_available: "*30", st_dnd: "*32", pickup: "**", ...(await db.getSetting("shortcodes", {})) };
+      text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes }, names);
+    }
     return { user: u, text, format: model?.format || "yealink" };
   }
 
