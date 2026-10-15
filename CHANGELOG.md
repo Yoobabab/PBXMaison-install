@@ -1,5 +1,11 @@
 # Nouveautés de Callikoe
 
+## 1.5.0
+- Serveur multi-tenant : plusieurs PBX clients sur un seul VPS, tous en SIP 5060 (aiguilleur SIP), chacun isolé (moteur, console, base, trunk)
+- Console du serveur (comme Omada) : comptes IRT avec rôles et double authentification, liste et recherche des PBX, création d'un PBX, ouverture d'un PBX sans se reconnecter et passage de l'un à l'autre
+- Sauvegarde et restauration du serveur entier en une commande ; réinitialisation compatible
+- Trunks avec proxy (Unyc…) : adresse du proxy correctement transmise au moteur
+
 ## 1.4.0
 - Console d'administration sur son propre port HTTPS 8822 (réservable aux adresses de l'installateur) ; le 443 ne sert plus qu'au softphone, à l'appli et aux téléphones
 - Yealink T57W, T48U, T77U : écran « Show More » dessiné (6 touches à gauche, 5 à droite, 3 colonnes de 6 au centre)
