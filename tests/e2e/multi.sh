@@ -335,7 +335,13 @@ reset() { labx pa "dialplan set global RANG none" >/dev/null; labx pb "dialplan 
 
 # 5. Appels entrants : opérateur → trunk de A → poste 201 de A (et pas celui de B)
 sudo timeout 9 tcpdump -i any -nn -q "udp and (portrange 10000-10399 or portrange 30000-30099 or portrange 31000-31199)" 2>/dev/null > "$LAB/rtp-all.txt" &
-reset; labx op "channel originate PJSIP/accta extension s@play" >/dev/null; sleep 9.5
+astx clia "rtp set debug on" >/dev/null 2>&1 || true
+reset; labx op "channel originate PJSIP/accta extension s@play" >/dev/null; sleep 4
+{ echo "== Pendant l'appel entrant A (PBX cli a)"; astx clia "core show channels concise"; astx clia "bridge show all"; astx clia "pjsip show channelstats"
+  for ch in $(astx clia "core show channels concise" | cut -d'!' -f1); do astx clia "core show channel $ch" | grep -iE "NativeFormats|WriteFormat|ReadFormat|WriteTranscode|ReadTranscode|Bridge|State|Application|Data" ; done
+  echo "== Poste pa"; labx pa "core show channels concise"; } >> "$PWD/multi-diag.txt" 2>&1 || true
+sleep 5.5
+astx clia "rtp set debug off" >/dev/null 2>&1 || true
 [[ "$(glob pa RANG)" == 201 && "$(glob pb RANG)" == none ]] && pass "Entrant sur le trunk de cli a → poste 201 de cli a uniquement" || { echo "RANG A=$(glob pa RANG) B=$(glob pb RANG)" >> "$OUT"; sipdump clia; fail "entrant A"; }
 NRTP="$(grep -cE '> 127\.0\.0\.11\.31[0-9]{3}:' "$LAB/rtp-all.txt" || true)"
 { echo "== RTP pendant l'appel entrant A (flux : nombre de paquets)"; awk '{print $5, $6, $7}' "$LAB/rtp-all.txt" | sort | uniq -c | sort -rn | head -20; } >> "$PWD/multi-diag.txt" 2>/dev/null || true
