@@ -385,9 +385,13 @@ export function createAdminService({ db, ami, pbx }) {
   }
   async function clearAlerts() { await db.query("DELETE FROM pbxmaison_alerts"); return getAlerts(); }
 
+  // Serveur multi-tenant : le moteur de CE PBX (callikoe-asterisk@<client>) et l'aiguilleur SIP commun
+  const TENANT = process.env.CX_MODE === "tenant" ? (process.env.CX_TENANT || "") : "";
+  const SERVICES = TENANT ? { ...CRITICAL_SERVICES, kamailio: "Aiguilleur SIP" } : CRITICAL_SERVICES;
+  const unitOf = (n) => (TENANT && n === "asterisk" ? `callikoe-asterisk@${TENANT}` : n);
   const activeServices = () => new Promise((resolve) => {
-    const names = Object.keys(CRITICAL_SERVICES);
-    execFile("systemctl", ["is-active", ...names], { timeout: 5000 }, (err, stdout) => {
+    const names = Object.keys(SERVICES);
+    execFile("systemctl", ["is-active", ...names.map(unitOf)], { timeout: 5000 }, (err, stdout) => {
       const lines = String(stdout || "").trim().split("\n");
       if (lines.length !== names.length) return resolve({});
       resolve(Object.fromEntries(names.map((n, i) => [n, lines[i] === "active"])));
@@ -512,7 +516,8 @@ export function createAdminService({ db, ami, pbx }) {
       backup: { schedule: b.schedule, hour: b.hour, remote: b.remote.enabled ? b.remote.host : "", last },
       recordings: recordingUsage(), voicemail: { bytes: dirSize(process.env.PBXM_VM_SPOOL || "/var/spool/asterisk/voicemail") },
       cdr: cdr ? { bytes: Number(cdr.bytes), calls: cdr.n, oldest: cdr.oldest } : null,
-      disk, services: Object.entries(CRITICAL_SERVICES).map(([id, label]) => ({ id, label, active: svc[id] ?? null })),
+      // Multi-tenant : le disque est celui de tout le serveur, il n'est pas montré dans la console d'un client
+      disk: TENANT ? null : disk, tenant: !!TENANT, services: Object.entries(SERVICES).map(([id, label]) => ({ id, label, active: svc[id] ?? null })),
     };
   }
   async function firewallCheck() {

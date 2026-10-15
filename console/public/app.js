@@ -494,9 +494,9 @@ async function drawSystem() {
     ${row("Enregistrements", `<span class="pill off">${fmtSize(y.recordings.bytes)} · ${y.recordings.files} fichier(s)</span>`, "#/enregistrements")}
     ${row("Messagerie vocale", `<span class="pill off">${fmtSize(y.voicemail.bytes)}</span>`)}
     ${row("Journal des appels", `<span class="pill off">${y.cdr ? `${y.cdr.calls} lignes · ${fmtSize(y.cdr.bytes)}` : "—"}</span> <button class="btn ghost sm" id="purge">Purger</button>`, "#/journal")}
-    ${row("Disque", `<span class="pill ${y.disk && y.disk.free / y.disk.total < 0.1 ? "bad" : "off"}">${disk}</span>`)}
+    ${y.tenant ? "" : row("Disque", `<span class="pill ${y.disk && y.disk.free / y.disk.total < 0.1 ? "bad" : "off"}">${disk}</span>`)}
     ${row(`Services <span class="s">${y.services.map((x) => `${x.active === false ? "✖" : "✔"} ${esc(x.label)}`).join(" · ")}</span>`, `${svcOk ? '<span class="pill ok">OK</span>' : '<span class="pill bad">Arrêté</span>'} <button class="btn ghost sm" id="rsvc">Redémarrer les services</button>`)}
-    ${row("Serveur", '<button class="btn ghost sm" id="reboot">Redémarrer le serveur</button>')}`;
+    ${y.tenant ? "" : row("Serveur", '<button class="btn ghost sm" id="reboot">Redémarrer le serveur</button>')}`;
   const act = async (b, url, confirmText, body) => {
     if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.classList.add("danger"); b.textContent = confirmText; setTimeout(() => { if (b.isConnected) { b.dataset.sure = ""; drawSystem(); } }, 5000); return; }
     b.disabled = true;
@@ -504,7 +504,7 @@ async function drawSystem() {
     renderDashboard();
   };
   $("#rsvc").onclick = (e) => act(e.target, "/api/system/restart-services", "Confirmer (appels en cours coupés)");
-  $("#reboot").onclick = (e) => act(e.target, "/api/system/reboot", "Confirmer le redémarrage (2 min sans téléphone)");
+  const rb = $("#reboot"); if (rb) rb.onclick = (e) => act(e.target, "/api/system/reboot", "Confirmer le redémarrage (2 min sans téléphone)");
   $("#purge").onclick = (e) => { e.preventDefault(); act(e.target, "/api/system/purge-cdr", "Supprimer > 1 an ?", { days: 365 }); };
   $("#fwtest").onclick = async (e) => {
     e.target.disabled = true; $("#fwres").innerHTML = '<div class="panel pad" style="margin-top:18px"><span class="spin"></span> Vérification…</div>';
