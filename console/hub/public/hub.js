@@ -188,7 +188,7 @@ async function renderInvite(token) {
 }
 
 // ---------------------------------------------------------------- Tableau de bord + PBX clients (vue globale, recherche)
-let pbxFilter = "", pbxStatus = "", listTimer = null;
+let pbxFilter = "", pbxStatus = "", listTimer = null, pbxSort = { k: "name", dir: 1 };
 const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const kpi = (ic, k, v, s, cls = "") => `<div class="kpi ${cls}"><span class="kpi-ic">${icon(ic, 20)}</span><div><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div></div>`;
 function pbxState(p) {
@@ -210,35 +210,39 @@ async function renderList() {
       ${kpi("trunk", "Trunks", `${t.trunks_ok ?? 0} <small>/ ${t.trunks ?? 0}</small>`, "enregistrés chez l'opérateur", t.trunks && t.trunks_ok < t.trunks ? "warn" : "good")}
       ${kpi("lic", "Licences", `${t.expiring || 0}`, "expirent dans moins de 30 jours", t.expiring ? "warn" : "good")}
     </div>`;
-  const card = (p) => {
+  // Liste en tableau (prévue pour beaucoup de PBX) : « Ouvrir » + menu « ⋯ » pour le reste
+  const SORTS = { name: (p) => p.name.toLowerCase(), state: (p) => ["ok", "wait", "bad", "off"].indexOf(pbxState(p)[0]), calls: (p) => -(p.calls || 0),
+    phones: (p) => -(p.phones_online || 0), lic: (p) => p.expires_at ? Date.parse(p.expires_at) : Infinity };
+  const th = (k, l, cls = "") => `<th class="${cls}"><button type="button" class="sorth ${pbxSort.k === k ? "on" : ""}" data-sort="${k}">${l}${pbxSort.k === k ? (pbxSort.dir > 0 ? " ▲" : " ▼") : ""}</button></th>`;
+  const row = (p) => {
     const [cls, label] = pbxState(p);
     const exp = p.expires_at ? Date.parse(p.expires_at) - Date.now() : null;
-    return `<div class="pbx-card${p.suspended ? " off" : ""}">
-      <div class="row" style="justify-content:space-between;margin:0"><strong>${esc(p.name)}</strong><span class="pill ${cls}">${label}</span></div>
-      <span class="mono">${esc(p.fqdn)}</span>
-      <span class="hint">${esc(p.company || p.slug)}${p.edition ? ` · ${esc(p.edition)}` : ""}</span>
-      <div class="pbx-stats">
-        <span title="Appels en cours / appels simultanés">${icon("call", 15)} ${p.calls || 0}/${p.max_calls || "—"}</span>
-        <span title="Postes connectés / postes">${icon("phone", 15)} ${p.phones_online || 0}/${p.phones || 0}</span>
-        <span title="Trunks enregistrés / trunks" class="${p.trunks && p.trunks_ok < p.trunks ? "warn" : ""}">${icon("trunk", 15)} ${p.trunks_ok || 0}/${p.trunks || 0}</span>
-        <span title="Fin de licence" class="${exp !== null && exp < 30 * 86400000 ? "warn" : ""}">${icon("lic", 15)} ${fmtDay(p.expires_at)}</span>
-      </div>
-      <div class="row" style="margin-top:6px">
-        ${p.suspended ? "" : `<a class="btn sm" href="/ouvrir/${encodeURIComponent(p.slug)}">Ouvrir</a>`}
-        ${can("super", "admin") ? (p.suspended ? `<button class="btn ghost sm" data-react="${esc(p.slug)}">Réactiver</button>`
-          : `<button class="btn ghost sm" data-susp="${esc(p.slug)}">Désactiver</button>`) : ""}
-        ${!p.suspended && can("super", "admin", "tech") ? `<a class="btn ghost sm" href="/ouvrir/${encodeURIComponent(p.slug)}?page=sauvegardes" title="Sauvegarder ou restaurer ce PBX">Sauvegardes</a>` : ""}
-        ${can("super", "admin") ? `<a class="btn ghost sm" href="/api/pbx/${encodeURIComponent(p.slug)}/config" title="Fichier pbx-config.json signé (réinstallation)">⬇ Config</a>
-          <button class="btn link sm" data-del="${esc(p.slug)}" style="color:var(--bad)">Supprimer</button>` : ""}
-      </div></div>`;
+    const menu = [
+      !p.suspended && can("super", "admin", "tech") ? `<a href="/ouvrir/${encodeURIComponent(p.slug)}?page=sauvegardes">Sauvegardes</a>` : "",
+      can("super", "admin") ? `<a href="/api/pbx/${encodeURIComponent(p.slug)}/config">Télécharger la configuration</a>` : "",
+      can("super", "admin") ? (p.suspended ? `<button type="button" data-react="${esc(p.slug)}">Réactiver</button>` : `<button type="button" data-susp="${esc(p.slug)}">Désactiver</button>`) : "",
+      can("super", "admin") ? `<hr><button type="button" class="danger" data-del="${esc(p.slug)}">Supprimer…</button>` : "",
+    ].join("");
+    return `<tr class="${p.suspended ? "off" : ""}">
+      <td class="pn"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.fqdn)}</span>${p.company && p.company !== p.name ? `<span class="s">${esc(p.company)}</span>` : ""}</td>
+      <td data-l="État"><span class="pill ${cls}">${label}</span></td>
+      <td data-l="Appels" title="Appels en cours / appels simultanés">${p.calls || 0}<span class="s"> / ${p.max_calls || "—"}</span></td>
+      <td data-l="Postes" title="Postes connectés / postes">${p.phones_online || 0}<span class="s"> / ${p.phones || 0}</span></td>
+      <td data-l="Trunks" class="${p.trunks && p.trunks_ok < p.trunks ? "warnc" : ""}" title="Trunks enregistrés / trunks">${p.trunks_ok || 0}<span class="s"> / ${p.trunks || 0}</span></td>
+      <td data-l="Licence" class="${exp !== null && exp < 30 * 86400000 ? "warnc" : ""}">${fmtDay(p.expires_at)}${p.edition ? `<span class="s">${esc(p.edition)}</span>` : ""}</td>
+      <td class="pa">${p.suspended ? "" : `<a class="btn sm" href="/ouvrir/${encodeURIComponent(p.slug)}">Ouvrir</a>`}
+        ${menu ? `<span class="more"><button type="button" class="btn ghost sm" data-more aria-label="Plus d'actions" title="Plus d'actions">⋯</button><span class="more-menu" hidden>${menu}</span></span>` : ""}</td></tr>`;
   };
   const draw = () => {
     const q = pbxFilter.trim().toLowerCase();
     const list = d.pbx.filter((p) => (!q || [p.name, p.slug, p.fqdn, p.company, p.license].join(" ").toLowerCase().includes(q))
       && (!pbxStatus || pbxState(p)[0] === pbxStatus));
     $("#dash").innerHTML = dash();
-    $("#cards").innerHTML = list.length ? list.map(card).join("")
-      : `<div class="empty" style="grid-column:1/-1">${d.pbx.length ? "Aucun PBX ne correspond à la recherche." : `Aucun PBX sur ce serveur pour l'instant.${can("super", "admin") ? ` <a href="#/nouveau">Créer le premier PBX</a>` : ""}`}</div>`;
+    const f = SORTS[pbxSort.k] || SORTS.name;
+    list.sort((a, b) => { const x = f(a), y = f(b); return (x < y ? -1 : x > y ? 1 : 0) * pbxSort.dir || a.name.localeCompare(b.name); });
+    $("#cards").innerHTML = list.length ? `<div class="table-wrap"><table class="pbxt"><thead><tr>${th("name", "PBX")}${th("state", "État")}${th("calls", "Appels")}${th("phones", "Postes")}<th>Trunks</th>${th("lic", "Licence")}<th></th></tr></thead>
+        <tbody>${list.map(row).join("")}</tbody></table></div>`
+      : `<div class="empty">${d.pbx.length ? "Aucun PBX ne correspond à la recherche." : `Aucun PBX sur ce serveur pour l'instant.${can("super", "admin") ? ` <a href="#/nouveau">Créer le premier PBX</a>` : ""}`}</div>`;
     $("#count").textContent = `${list.length} sur ${d.pbx.length} PBX (${d.max} au maximum)`;
   };
   app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Tableau de bord</h1>
@@ -251,11 +255,18 @@ async function renderList() {
         <label style="flex:1;min-width:220px">Rechercher<input id="q" type="search" placeholder="Nom, entreprise, adresse, licence…" value="${esc(pbxFilter)}" autocomplete="off"></label>
         <label>État<select id="st"><option value="">Tous</option><option value="ok">En ligne</option><option value="bad">Hors ligne</option><option value="off">Désactivés</option></select></label>
       </div>
-      <div class="hint" id="count"></div><div class="pbx-grid" id="cards"></div></div>`;
+      <div class="hint" id="count"></div></div>
+    <div class="panel" id="cards"></div>`;
   $("#st").value = pbxStatus;
   $("#q").oninput = (e) => { pbxFilter = e.target.value; draw(); };
   $("#st").onchange = (e) => { pbxStatus = e.target.value; draw(); };
   app.onclick = async (e) => {
+    const srt = e.target.closest("[data-sort]");
+    if (srt) { const k = srt.dataset.sort; pbxSort = { k, dir: pbxSort.k === k ? -pbxSort.dir : 1 }; draw(); return; }
+    const mb = e.target.closest("[data-more]");
+    const open = app.querySelector(".more-menu:not([hidden])");
+    if (open && (!mb || open.previousElementSibling !== mb)) open.hidden = true;
+    if (mb) { const m = mb.nextElementSibling; m.hidden = !m.hidden; m.classList.toggle("up", mb.getBoundingClientRect().bottom + 200 > innerHeight); return; }
     const del = e.target.closest("[data-del]");
     if (del) {
       const slug = del.dataset.del;
@@ -280,6 +291,7 @@ async function renderList() {
   // Mise à jour toutes les 15 s tant que la page est affichée
   listTimer = setInterval(async () => {
     if (location.hash && location.hash !== "#/") return clearInterval(listTimer);
+    if (app.querySelector(".more-menu:not([hidden])")) return;
     try { d = await api("GET", "/api/pbx"); Object.assign(t, d.totals); draw(); } catch { /* prochain essai */ }
   }, 15000);
 }

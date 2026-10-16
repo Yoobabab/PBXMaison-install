@@ -27,6 +27,36 @@
 fieldset{border:0;padding:0;margin:0;display:grid;gap:14px;align-content:start}
 legend{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:10px;padding:0}
 .ok-text{color:var(--ok);font-size:13px}
+.pbxt td{vertical-align:middle}
+.pbxt .pn{display:flex;flex-direction:column;gap:2px;min-width:200px}
+.pbxt .pn .mono{font-size:12px;color:var(--muted)}
+.pbxt td .s{font-size:12px;color:var(--muted)}
+.pbxt td[data-l="Licence"] .s{display:block}
+.pbxt tr.off td{opacity:.6}
+.pbxt tr.off td.pa{opacity:1}
+.pbxt .warnc{color:var(--warn);font-weight:600}
+.pbxt .pa{text-align:right;white-space:nowrap}
+.sorth{background:none;border:0;padding:0;font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer}
+.sorth.on{color:var(--text)}
+.more{position:relative;display:inline-block;margin-left:4px}
+.more-menu{position:absolute;right:0;top:calc(100% + 4px);z-index:20;min-width:230px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.14);padding:6px;display:flex;flex-direction:column;text-align:left}
+.more-menu[hidden]{display:none}
+.more-menu.up{top:auto;bottom:calc(100% + 4px)}
+#cards .table-wrap{overflow:visible}
+.more-menu a,.more-menu button{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:7px;background:none;border:0;font:inherit;font-size:14px;color:var(--text);text-decoration:none;cursor:pointer}
+.more-menu a:hover,.more-menu button:hover{background:var(--bg)}
+.more-menu .danger{color:var(--bad)}
+.more-menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+@media (max-width:760px){
+  .pbxt thead{display:none}
+  .pbxt,.pbxt tbody,.pbxt tr,.pbxt td{display:block;width:100%}
+  .pbxt tr{border-top:1px solid var(--line);padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
+  .pbxt td{border:0;padding:0}
+  .pbxt .pn{grid-column:1/-1}
+  .pbxt td[data-l]::before{content:attr(data-l);display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .pbxt .pa{grid-column:1/-1;text-align:left;margin-top:4px}
+  .more-menu{left:0;right:auto}
+}
 .sipev-row{padding:10px 18px;border-top:1px solid var(--line);display:grid;gap:4px}
 .sipev-row:first-child{border-top:0}
 .sipev-meta{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:13px}
