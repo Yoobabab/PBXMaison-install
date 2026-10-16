@@ -142,7 +142,15 @@ api GET /api/extensions/203 | node -e 'let s="";process.stdin.on("data",d=>s+=d)
 R="$(api PUT /api/trunks/dstny '{"template":"dstny","number":"0465001530","username":"testuser","dids":"04 65 00 15 30\n04 65 00 15 40 - 04 65 00 15 49"}')"
 api GET /api/trunks | grep -q '"0465001549"' && pass "SDA du trunk : tranche de 10 numéros enregistrée" || fail "SDA trunk : $R"
 TOK="$(api POST /api/extensions/201/app-token | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')"
-curl -sS "http://127.0.0.1/app/provision?t=${TOK}&format=json" | grep -q '"extension":"201"' && pass "QR code appli mobile : identifiants servis (valable 48 h)" || fail "app provision"
+PROV="$(curl -sS "http://127.0.0.1/app/provision?t=${TOK}&format=json")"
+echo "$PROV" | grep -q '"extension":"201"' && pass "QR code appli mobile : identifiants servis (valable 48 h)" || fail "app provision"
+DEV="$(echo "$PROV" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).device_token||""))')"
+AJ="$(mktemp)"
+[[ "$(curl -sS -c "$AJ" -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1/app/login?d=$DEV")" == "302 "*"/softphone?app=1" ]] \
+  && curl -sS -b "$AJ" http://127.0.0.1/api/u/me | grep -q '"201"' && pass "Appli mobile : le téléphone ouvre le softphone du poste 201 sans mot de passe (jeton d'appareil)" || fail "app login"
+curl -sS -X POST http://127.0.0.1/app/logout -H 'content-type: application/json' -d "{\"device_token\":\"$DEV\"}" >/dev/null
+[[ "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1/app/login?d=$DEV")" == 401 ]] && pass "Appli mobile : téléphone déconnecté → jeton refusé" || fail "app logout"
+curl -sS "http://127.0.0.1/app/provision?t=${TOK}" | grep -q "callikoe://provision" && pass "Lien du QR code ouvert sans l'appli : page « Ouvrir dans l'application »" || fail "page appli"
 api GET /api/phones | grep -q '"phones":\[' && pass "Menu Téléphones : liste disponible" || fail "api phones"
 
 systemctl is-enabled --quiet pbxmaison-dns.timer && pass "Mise à jour automatique de l'adresse (timer) active" || fail "timer DNS"
