@@ -1,9 +1,11 @@
 // Console : Gestion d'appels (règles entrantes, horaires, groupes, files, SVI, messageries de groupe,
 // annonces, traceur de routage, renvois actifs). Module chargé par app.js, qui fournit ses outils (h).
 import { renderFlowEditor, flowSummary } from "./flow-editor.js";
+import { renderPlanning, planningSummary } from "./planning-ui.js";
 let h = null;
 const TABS = [["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
-  ["svi", "SVI", "ivr"], ["messageries", "Messageries de groupe", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["traceur", "Traceur", ""], ["renvois", "Où sont les renvois ?", ""]];
+  ["svi", "SVI", "ivr"], ["messageries", "Messageries de groupe", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["traceur", "Traceur", ""], ["renvois", "Où sont les renvois ?", ""], ["planning", "Planning", "planning"]];
+const HIDDEN_TABS = ["planning"]; // ouvert depuis Routages
 const KIND_TAB = Object.fromEntries(TABS.filter((t) => t[2]).map(([s, , k]) => [k, s]));
 const RANGES = { group: 600, queue: 700, ivr: 800, groupvm: 900, conf: 500 };
 const IVR_KEYS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"];
@@ -21,12 +23,23 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   h = helpers;
   h.setNav("cf");
   await load();
-  const tab = TABS.find((t) => t[0] === sub) ? sub : "routages";
+  const tab = TABS.find((t) => t[0] === sub) && (sub !== "planning" || id) ? sub : "routages";
   const kind = TABS.find((t) => t[0] === tab)[2];
   const head = `<div class="bar"><div class="grow"><h1>Gestion d'appels</h1><p class="sub" style="margin:0">Où vont les appels entrants : routages par numéro (avec leurs horaires), groupes, files d'attente, SVI.</p></div></div>
-    <nav class="tabs">${TABS.filter(([s]) => s !== "regles" || tab === "regles" || objs("rule").length).map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
+    <nav class="tabs">${TABS.filter(([s]) => !HIDDEN_TABS.includes(s) && (s !== "regles" || tab === "regles" || objs("rule").length)).map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab || (s === "routages" && tab === "planning") ? "on" : ""}">${l}</a>`).join("")}</nav>`;
   if (tab === "traceur") return renderTracer(head, id);
   if (tab === "renvois") return renderForwards(head);
+  if (id && kind === "planning") {
+    const plan = id === "nouveau" ? null : cf.objects.find((o) => o.kind === "planning" && o.id === id);
+    if (id !== "nouveau" && !plan) { h.app.innerHTML = `${head}<div class="flash bad">Planning introuvable.</div>`; return; }
+    return renderPlanning(h.app, {
+      cf, plan, mode: "admin", top: `${h.takeFlash()}${head}`, backHref: "#/gestion/routages", backLabel: "Routages",
+      traceHref: (did) => `#/gestion/traceur/${encodeURIComponent(did)}`,
+      save: (body) => h.api(plan ? "PUT" : "POST", `/api/callflow/planning${plan ? "/" + plan.id : ""}`, body),
+      remove: () => h.api("DELETE", `/api/callflow/planning/${plan.id}?force=1`),
+      done: (text) => { h.setFlash({ text }); location.hash = "#/gestion/routages"; },
+    });
+  }
   if (id && kind === "flow") return renderFlowEditor(h, cf, head, id, { promptField, wirePromptFields, destPicker, wireDests, scheduleFields, wireSchedule, collect, defaults, IVR_KEYS });
   if (id) return kind === "prompt" ? renderPromptForm(head, id) : renderForm(head, kind, id === "nouveau" ? null : id);
   return renderList(head, kind);
@@ -34,7 +47,7 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
 
 // ---------------------------------------------------------------- Listes
 const INTRO = {
-  flow: "Le plus simple : décris le routage en une phrase ou construis-le en glissant des cadres de gauche à droite (SDA → sonnerie → groupe → messagerie…).",
+  flow: "Le plus simple : décris le routage en une phrase ou construis-le en glissant des cadres de gauche à droite (SDA → sonnerie → groupe → messagerie…). Pour des renvois différents selon le jour et l'heure (lundi 9 h-12 h Paul puis son mobile, 14 h-18 h Julie…), crée un planning de la semaine.",
   rule: "Une règle par numéro appelé (SDA) : où va l'appel pendant les heures d'ouverture, en dehors et les jours fériés. La règle par défaut prend les SDA sans règle.",
   schedule: "Plages d'ouverture de la semaine, jours fériés et congés. Choisis-les (ou crées-les) directement dans l'éditeur de routage.",
   group: "Plusieurs postes sonnent ensemble ou à tour de rôle. Les membres Absents, en Ne pas déranger ou qui refusent les appels de groupe ne sonnent pas.",
@@ -49,6 +62,7 @@ function summary(o) {
   const users = new Map(cf.users.map((u) => [u.id, u]));
   const mem = (list) => list.length ? list.map((x) => `${esc(x)}${users.get(x) ? ` <span class="s">${esc(users.get(x).name)}</span>` : ""}`).join(", ") : '<span class="s">aucun membre</span>';
   switch (o.kind) {
+    case "planning": return `${d.is_default ? '<span class="pill ok">Par défaut</span> ' : ""}${d.dids.map(fmtP).map(esc).join(", ")}<div class="s">${esc(planningSummary(d, cf))}</div>`;
     case "flow": return `${d.is_default ? '<span class="pill ok">Par défaut</span> ' : ""}${d.dids.map(fmtP).map(esc).join(", ")}<div class="s">${esc(flowSummary(cf, h, d))}</div>`;
     case "rule": return `${d.is_default ? '<span class="pill ok">Par défaut</span> ' : ""}${d.dids.map(fmtP).map(esc).join(", ")}<div class="s">${d.schedule ? `Horaires « ${esc(cf.objects.find((x) => x.id === d.schedule)?.name || "?")} »` : "Toujours ouvert"} → ${esc(destText(d.open))}</div>`;
     case "schedule": return `${esc(describeWeek(d.week))}<div class="s">${d.holidays_fr ? "Jours fériés fermés" : "Jours fériés ouverts"}${d.holidays.length ? ` · ${d.holidays.length} période${d.holidays.length > 1 ? "s" : ""} de congés` : ""}${d.override !== "auto" ? ` · <strong>forcé ${d.override === "open" ? "ouvert" : "fermé"}</strong>` : ""}</div>`;
@@ -85,17 +99,17 @@ function destText(d) {
 
 function renderList(head, kind) {
   // Les routages (éditeur visuel ou texte) sont aussi des règles entrantes : on les montre dans les deux onglets
-  const list = kind === "rule" ? [...objs("rule"), ...objs("flow")] : objs(kind);
+  const list = kind === "rule" ? [...objs("rule"), ...objs("flow"), ...objs("planning")] : kind === "flow" ? [...objs("flow"), ...objs("planning")] : objs(kind);
   const tab = KIND_TAB[kind];
   const label = cf.options.kinds[kind];
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed">
     <div class="ph"><p class="hint" style="margin:0;max-width:760px">${INTRO[kind]}</p>
-      ${kind === "prompt" ? `<a class="btn" href="#/gestion/annonces/nouveau">+ Ajouter une annonce</a>` : kind === "flow" ? `<a class="btn" href="#/gestion/routages/nouveau">+ Nouveau routage</a>` : `<a class="btn" href="#/gestion/${tab}/nouveau">+ ${kind === "rule" ? "Nouvelle règle" : kind === "schedule" ? "Nouveaux horaires" : `Nouveau ${label.split(" (")[0].replace(/^Groupe/, "groupe").replace(/^File/, "file").replace(/^SVI/, "SVI").replace(/^Messagerie/, "messagerie").toLowerCase()}`}</a>`}</div>
+      ${kind === "prompt" ? `<a class="btn" href="#/gestion/annonces/nouveau">+ Ajouter une annonce</a>` : kind === "flow" ? `<div class="row" style="gap:8px;flex-wrap:wrap"><a class="btn ghost" href="#/gestion/planning/nouveau">+ Planning de la semaine</a><a class="btn" href="#/gestion/routages/nouveau">+ Nouveau routage</a></div>` : `<a class="btn" href="#/gestion/${tab}/nouveau">+ ${kind === "rule" ? "Nouvelle règle" : kind === "schedule" ? "Nouveaux horaires" : `Nouveau ${label.split(" (")[0].replace(/^Groupe/, "groupe").replace(/^File/, "file").replace(/^SVI/, "SVI").replace(/^Messagerie/, "messagerie").toLowerCase()}`}</a>`}</div>
     ${list.length ? `<div class="table-wrap"><table><thead><tr>${["rule", "schedule", "prompt", "flow"].includes(kind) ? "" : "<th>Numéro</th>"}<th>Nom</th><th>${kind === "prompt" ? "Écoute" : "Configuration"}</th><th></th></tr></thead><tbody>
       ${list.map((o) => `<tr>${["rule", "schedule", "prompt", "flow"].includes(kind) ? "" : `<td><strong>${esc(o.number)}</strong></td>`}
-        <td><a href="#/gestion/${KIND_TAB[o.kind]}/${esc(o.id)}">${esc(o.name)}</a>${kind === "rule" && o.kind === "flow" ? ' <span class="pill off">Routage</span>' : ""}${kind === "schedule" ? `<div>${stateBadge(o)}</div>` : ""}</td>
+        <td><a href="#/gestion/${KIND_TAB[o.kind]}/${esc(o.id)}">${esc(o.name)}</a>${kind === "rule" && o.kind === "flow" ? ' <span class="pill off">Routage</span>' : ""}${o.kind === "planning" ? ' <span class="pill off">Planning</span>' : ""}${kind === "schedule" ? `<div>${stateBadge(o)}</div>` : ""}</td>
         <td>${kind === "prompt" ? `<audio controls preload="none" src="/api/prompts/${esc(o.id)}/audio"></audio> <span class="s">${o.data.duration} s</span>` : summary(o)}</td>
-        <td class="acts">${o.number ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.number)}">Tracer</a> ` : ""}${(kind === "rule" || kind === "flow") && o.data.dids[0] ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.data.dids[0])}">Tracer</a> ` : ""}<a class="btn ghost sm" href="#/gestion/${KIND_TAB[o.kind]}/${esc(o.id)}">Modifier</a></td></tr>`).join("")}
+        <td class="acts">${o.number ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.number)}">Tracer</a> ` : ""}${(kind === "rule" || kind === "flow") && o.data.dids?.[0] ? `<a class="btn ghost sm" href="#/gestion/traceur/${esc(o.data.dids[0])}">Tracer</a> ` : ""}<a class="btn ghost sm" href="#/gestion/${KIND_TAB[o.kind]}/${esc(o.id)}">Modifier</a></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="empty">Aucun élément pour l'instant.</div>`}
   </div>`;
 }

@@ -579,7 +579,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
           if (!d.branches[b]) continue;
           const kept = d.branches[b].map((st) => st.type === "ring" ? { ...st, users: st.users.filter((x) => x !== num) } : st)
             .filter((st) => !(st.type === "ring" && !st.users.length) && !((st.type === "user" || st.type === "user_vm") && st.target === num));
-          if (JSON.stringify(kept) !== JSON.stringify(d.branches[b])) { d.branches[b] = kept; changed = true; }
+          if (JSON.stringify(kept) !== JSON.stringify(d.branches[b])) { d.branches[b] = kept.length || o.kind !== "planning" ? kept : [{ type: "hangup", target: "" }]; changed = true; }
         }
         if (changed) await c.query("UPDATE pbxmaison_objects SET data = $3, updated_at = now(), updated_by = $4 WHERE kind = $1 AND id = $2", [o.kind, o.id, JSON.stringify(d), by || ""]);
       }
@@ -1100,11 +1100,12 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         if (kind === "prompt" && d.greeting === id) { d.greeting = ""; changed = true; }
         if (kind === "prompt" && d.prompt === id) { d.prompt = ""; changed = true; }
         if (kind === "schedule" && d.schedule === id) { d.schedule = ""; changed = true; }
-        if (other.kind === "flow") for (const b of Object.keys(d.branches || {})) {
+        if (other.kind === "flow" || other.kind === "planning") for (const b of Object.keys(d.branches || {})) {
           if (!d.branches[b]) continue;
           const kept = d.branches[b].filter((st) => !(st.type === kind && st.target === id));
           if (kept.length !== d.branches[b].length) { d.branches[b] = kept; changed = true; }
-          if (kind === "schedule" && b !== "open") { d.branches[b] = null; changed = true; }
+          if (kind === "schedule" && other.kind === "flow" && b !== "open") { d.branches[b] = null; changed = true; }
+          if (other.kind === "planning" && !d.branches[b].length) { d.branches[b] = [{ type: "hangup", target: "" }]; changed = true; }
         }
         if (changed) await c.query("UPDATE pbxmaison_objects SET data = $3, updated_at = now(), updated_by = $4 WHERE kind = $1 AND id = $2", [other.kind, other.id, JSON.stringify(d), by || ""]);
       }

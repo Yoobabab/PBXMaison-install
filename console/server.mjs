@@ -15,6 +15,7 @@ import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken,
   newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
+import { isManager } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
 import { migrateChat, createChat } from "./lib/chat.mjs";
@@ -575,7 +576,7 @@ export async function buildApp({ db, ami } = {}) {
     id: u.id, name: u.name, first_name: u.first_name, last_name: u.last_name, status: u.status, email: u.email,
     mobile: u.mobile, dids: u.dids, outbound_cid: u.outbound_cid,
     forwarding: u.forwarding, voicemail: { enabled: u.voicemail.enabled, pin: u.voicemail.pin, skip_pin: u.voicemail.skip_pin },
-    ring_mobile: u.options.ring_mobile,
+    ring_mobile: u.options.ring_mobile, manager: isManager(u),
   });
   app.get("/api/u/me", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
@@ -594,6 +595,32 @@ export async function buildApp({ db, ami } = {}) {
       contacts: await team(u.id),
       rooms: (await pbx.listObjects("conf")).map((o) => ({ number: o.number, name: o.name, pin: !!o.data.pin })),
     };
+  });
+  // Plannings d'appels : modifiables par les utilisateurs « Responsable » (fiche utilisateur › Général › Rôle)
+  const PLAN_FIELDS = ["scenarios", "branches", "outside", "week", "week_b", "alternate", "ref_monday", "holidays_fr", "holiday_scenario", "days", "override"];
+  async function managerOf(req) {
+    const u = await pbx.getUser(webUser(req).ext);
+    if (!isManager(u)) throw Object.assign(new UserError("Réservé aux responsables : demande à l'administrateur du PBX de te donner ce rôle."), { status: 403 });
+    return u;
+  }
+  app.get("/api/u/plannings", { preHandler: requireWebUser }, async (req) => {
+    await managerOf(req);
+    const all = await pbx.listObjects();
+    const light = (o) => ({ kind: o.kind, id: o.id, number: o.number, name: o.name, data: o.kind === "planning" ? o.data : { name: o.data.name, ring_time: o.data.ring_time, dids: o.data.dids || [] } });
+    return {
+      plannings: all.filter((o) => o.kind === "planning" && o.data.managers).map(light),
+      objects: all.filter((o) => ["group", "queue", "prompt", "ivr", "groupvm", "conf", "planning"].includes(o.kind)).map(light),
+      users: (await pbx.listExtensions()).map((u) => ({ id: u.id, name: u.name, status: u.status, disabled: u.disabled, dids: [] })),
+      timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris", trunk_dids: [],
+    };
+  });
+  app.put("/api/u/plannings/:id", { preHandler: requireWebUser }, async (req) => {
+    const u = await managerOf(req);
+    const o = await pbx.getObject("planning", req.params.id);
+    if (!o.data.managers) throw Object.assign(new UserError("Ce planning n'est modifiable que depuis la console du PBX."), { status: 403 });
+    const input = Object.fromEntries(PLAN_FIELDS.filter((k) => req.body?.[k] !== undefined).map((k) => [k, req.body[k]]));
+    const r = await pbx.saveObject("planning", o.id, input, `${u.id} ${u.name} (responsable)`);
+    return { id: r.id, name: r.name, data: r.data };
   });
   app.get("/api/u/calls", { preHandler: requireWebUser }, async (req) => ({ calls: await pbx.userCalls(webUser(req).ext, 150) }));
   app.get("/api/u/contacts", { preHandler: requireWebUser }, async () => ({ contacts: (await pbx.listContacts()).map(({ notes, ...c }) => (void notes, c)) }));

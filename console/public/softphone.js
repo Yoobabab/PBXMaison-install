@@ -1,3 +1,4 @@
+import { renderPlanning, planningSummary } from "./planning-ui.js";
 // Softphone web Callikoe — WebRTC via JsSIP, connecté au PBX par https://<fqdn>/ws
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -42,6 +43,7 @@ const I = {
   calls: () => svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
   vm: () => svg('<circle cx="6.5" cy="12" r="3.5"/><circle cx="17.5" cy="12" r="3.5"/><path d="M6.5 15.5h11"/>'),
   gear: () => svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  cal: () => svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h3M13 14h3M8 17.5h3"/>'),
   keypad: () => svg('<circle cx="6" cy="5" r="1.3"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="5" r="1.3"/><circle cx="6" cy="11" r="1.3"/><circle cx="12" cy="11" r="1.3"/><circle cx="18" cy="11" r="1.3"/><circle cx="6" cy="17" r="1.3"/><circle cx="12" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/><circle cx="12" cy="22" r="1.1"/>'),
   star: (on) => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>`,
   x: () => svg('<path d="M6 6l12 12M18 6 6 18"/>'),
@@ -240,7 +242,9 @@ if (IN_APP) document.documentElement.classList.add("in-app");
 const NAV = IN_APP
   ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
   : [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages" };
+const TITLES = { equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
+// Responsable : onglet Plannings (dans le menu de l'appli, où la barre du bas est déjà pleine)
+const navItems = () => !me?.user?.manager || IN_APP ? NAV : [...NAV.slice(0, -1), ["planning", "Plannings", I.cal], NAV.at(-1)];
 
 function presenceOf(c) {
   if (!c.registered) return { cls: "off", label: "Hors ligne" };
@@ -254,7 +258,7 @@ function renderShell() {
   root.innerHTML = `<div class="sp-app">
     <aside class="rail">
       <a class="rail-logo" href="#/equipe" title="Callikoe"><i></i></a>
-      <nav>${NAV.map(([k, l, ic]) => k === "clavier" ? `<a href="#" data-dial>${ic()}<span>${l}</span></a>` : `<a href="#/${k}" data-r="${k}">${ic()}<span>${l}</span><b class="badge" id="b-${k}" hidden></b></a>`).join("")}</nav>
+      <nav>${navItems().map(([k, l, ic]) => k === "clavier" ? `<a href="#" data-dial>${ic()}<span>${l}</span></a>` : `<a href="#/${k}" data-r="${k}">${ic()}<span>${l}</span><b class="badge" id="b-${k}" hidden></b></a>`).join("")}</nav>
       <button class="rail-me" id="mebtn" title="Mon statut">${avatar(me.user.name, myPresence().cls, "sm", "me-av")}</button>
     </aside>
     <div class="sp-body">
@@ -316,11 +320,12 @@ function toggleMenu(force) {
     ${Object.entries(STATUS).map(([k, l]) => `<button class="pm-it ${me.user.status === k ? "on" : ""}" data-st="${k}"><i class="pres ${k}"></i>${l}${me.user.status === k ? '<span class="ck">✓</span>' : ""}</button>`).join("")}
     <hr>
     <a class="pm-it" href="#/reglages/transfert">Renvois par statut…</a>
+    ${me.user.manager ? `<a class="pm-it" href="#/planning">${I.cal()}Plannings d'appels…</a>` : ""}
     ${IN_APP ? `<button class="pm-it" id="appaccounts">${I.team()}Comptes…</button>` : `<button class="pm-it" id="logout">${I.logout()}${me.impersonated_by ? "Quitter l'incarnation" : "Se déconnecter"}</button>`}
   </div>`;
   m.querySelector(".pmenu").onclick = (e) => e.stopPropagation();
   $$("[data-st]", m).forEach((b) => b.onclick = () => setStatus(b.dataset.st));
-  $("a.pm-it", m).onclick = () => toggleMenu(false);
+  $$("a.pm-it", m).forEach((a) => a.onclick = () => toggleMenu(false));
   $("#appaccounts")?.addEventListener("click", () => { toggleMenu(false); toApp("accounts"); });
   if ($("#logout")) $("#logout").onclick = async () => { try { ua?.stop(); } catch { /* */ } ua = null; await api("POST", "/api/u/logout"); me.impersonated_by ? window.close() : renderLogin(); };
   setTimeout(() => document.addEventListener("click", () => toggleMenu(false), { once: true }));
@@ -339,7 +344,7 @@ function refreshPresence() {
 // ------------------------------------------------------------------ Navigation
 function route() {
   const [p, s] = location.hash.replace(/^#\/?/, "").split("/");
-  page = TITLES[p] ? p : "equipe"; sub = s || "";
+  page = TITLES[p] && (p !== "planning" || me.user.manager) ? p : "equipe"; sub = s || "";
   $$(".rail [data-r]").forEach((a) => a.classList.toggle("on", a.dataset.r === page));
   $("#title").textContent = TITLES[page];
   if (page === "appels") store.set(`callikoe_seen_${me.user.id}`, new Date().toISOString());
@@ -350,7 +355,30 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings })[page](el);
+  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning })[page](el);
+}
+
+// ------------------------------------------------------------------ Plannings d'appels (responsables)
+async function pagePlanning(el) {
+  el.innerHTML = '<p class="s" style="padding:16px">Chargement…</p>';
+  let cf;
+  try { cf = await api("GET", "/api/u/plannings"); } catch (err) { el.innerHTML = `<div class="sp-banner warn">${esc(err.message)}</div>`; return; }
+  if (sub) {
+    const plan = cf.plannings.find((x) => x.id === sub);
+    if (!plan) { el.innerHTML = '<div class="sp-banner warn">Planning introuvable.</div>'; return; }
+    renderPlanning(el, {
+      cf, plan, mode: "manager", backHref: "#/planning", backLabel: "Plannings",
+      save: (body) => api("PUT", `/api/u/plannings/${encodeURIComponent(plan.id)}`, body),
+      done: (text) => { toast(text); location.hash = "#/planning"; },
+    });
+    return;
+  }
+  const fmtN = (n) => /^0\d{9}$/.test(n) ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : n;
+  el.innerHTML = `<div class="sp-plans">
+    <p class="s" style="margin:0 0 12px">Tu es responsable : choisis qui reçoit les appels selon le jour et l'heure. Les modifications s'appliquent dès que tu valides.</p>
+    ${cf.plannings.length ? cf.plannings.map((p) => `<a class="panel sp-plan" href="#/planning/${esc(p.id)}"><strong>${esc(p.name)}</strong>
+      <span class="s">${esc(p.data.dids.map(fmtN).join(", ") || "Numéros sans règle")} · ${esc(planningSummary(p.data, cf))}</span></a>`).join("")
+    : '<div class="sp-banner info">Aucun planning ne t\'est confié pour l\'instant. L\'administrateur les crée dans la console (Gestion d\'appels › Routages) en cochant « Modifiable par les responsables ».</div>'}</div>`;
 }
 
 // ------------------------------------------------------------------ Équipe

@@ -246,6 +246,22 @@ FID="$(api POST /api/callflow/flow "$FL" | jid)"
 sleep 1
 sudo /usr/sbin/asterisk -rx 'dialplan show 0465001541@did-rules' | grep -q "flow-$FID" && sudo /usr/sbin/asterisk -rx "dialplan show s@flow-$FID" | grep -q 'Dial(PJSIP/205&PJSIP/205-web,20' && pass "Routage validé : SDA → étapes appliquées dans Asterisk" || { sudo /usr/sbin/asterisk -rx "dialplan show s@flow-$FID" | head -15 >> "$OUT"; fail "routage flow"; }
 api GET "/api/trace?n=0465001541" | grep -q 'Routage test' && pass "Traceur : SDA → routage visuel" || fail "traceur routage"
+# Planning de la semaine : scénario selon le jour et l'heure, forçage, responsable depuis le softphone
+PLJ='{"name":"Planning test","dids":["04 65 00 15 42"],"scenarios":[{"id":"a","name":"Toute la journee","color":"#2563eb"},{"id":"x","name":"Dehors","color":"#94a3b8"}],"branches":{"a":[{"type":"hangup"}],"x":[{"type":"hangup"}]},"outside":"x","week":{"mon":[{"from":"00:00","to":"24:00","s":"a"}],"tue":[{"from":"00:00","to":"24:00","s":"a"}],"wed":[{"from":"00:00","to":"24:00","s":"a"}],"thu":[{"from":"00:00","to":"24:00","s":"a"}],"fri":[{"from":"00:00","to":"24:00","s":"a"}],"sat":[{"from":"00:00","to":"24:00","s":"a"}],"sun":[{"from":"00:00","to":"24:00","s":"a"}]},"holidays_fr":false,"days":{"2030-01-02":{"slots":[],"label":"Fermeture"}}}'
+PLID="$(api POST /api/callflow/planning "$PLJ" | jid)"
+sleep 1
+sudo /usr/sbin/asterisk -rx 'dialplan show 0465001542@did-rules' | grep -q "plan-$PLID" && sudo /usr/sbin/asterisk -rx "dialplan show s@plan-$PLID" | grep -q "STRFTIME" && sudo /usr/sbin/asterisk -rx "dialplan show 20300102@plan-$PLID-day" | grep -q "Fermeture" \
+  && pass "Planning : SDA → planning, jour particulier et scénarios chargés dans Asterisk" || { sudo /usr/sbin/asterisk -rx "dialplan show plan-$PLID" | head -20 >> "$OUT"; fail "planning dialplan"; }
+plrule() { sudo /usr/sbin/asterisk -rx "channel originate Local/0465001542@did-rules application Wait 1" >/dev/null 2>&1 || true; sleep 3; sudo -u postgres psql -d asterisk -Atc "select rule from cdr where rule like 'Planning test%' order by id desc limit 1"; }
+R1="$(plrule)"
+[[ "$R1" == "Planning test · Toute la journee" ]] && pass "Planning : un appel maintenant prend le scénario de la plage horaire" || { echo "règle CDR : $R1" >> "$OUT"; fail "planning appel"; }
+api PUT /api/extensions/204 '{"options":{"role":"manager"}}' >/dev/null
+curl -sS -b "$UJ" "$API/api/u/me" | grep -q '"manager":true' && curl -sS -b "$UJ" "$API/api/u/plannings" | grep -q '"Planning test"' && pass "Responsable : 204 voit le planning dans son softphone" || fail "planning responsable liste"
+R="$(curl -sS -b "$UJ" -X PUT "$API/api/u/plannings/$PLID" -H 'content-type: application/json' -d '{"override":"x","name":"Pirate","dids":["0465001599"]}')"
+echo "$R" | grep -q '"override":"x"' && echo "$R" | grep -q '"name":"Planning test"' && pass "Responsable : force le scénario « Dehors » (sans pouvoir changer le nom ni les numéros)" || { echo "$R" | cut -c1-300 >> "$OUT"; fail "planning responsable modif"; }
+R2="$(plrule)"
+[[ "$R2" == "Planning test · Dehors" ]] && pass "Planning forcé : l'appel suit le scénario forcé" || { echo "règle CDR : $R2" >> "$OUT"; fail "planning forcé"; }
+[[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$VJ" "$API/api/u/plannings")" == 403 ]] && pass "Planning : un utilisateur sans rôle Responsable est refusé" || fail "planning non responsable"
 if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" "" callflow 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Gestion d'appels OK"; then pass "Appels réels : groupe 600 et SVI 800 (touche 1)"; else
   sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appels gestion d'appels"; fi
 

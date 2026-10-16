@@ -15,6 +15,10 @@ export class UserError extends Error {
   constructor(message, field) { super(message); this.field = field; this.status = 400; }
 }
 
+/** Rôle d'un utilisateur du PBX : un responsable gère les plannings depuis son softphone et l'appli. */
+export const USER_ROLES = { user: "Utilisateur", manager: "Responsable (gère les plannings)" };
+export const isManager = (u) => u?.options?.role === "manager" && !u.options.disabled;
+
 export function defaultUser(id) {
   return {
     id, first_name: "", last_name: "", email: "", mobile: "", outbound_cid: "", dids: [],
@@ -26,7 +30,7 @@ export function defaultUser(id) {
       away: { type: "voicemail", target: "" },
       dnd: { type: "voicemail", target: "" },
     },
-    options: { ring_mobile: false, accept_group_calls: true, disabled: false, block_external: false, hidden: false },
+    options: { ring_mobile: false, accept_group_calls: true, disabled: false, block_external: false, hidden: false, role: "user" },
     voicemail: { enabled: true, pin: "", skip_pin: true },
   };
 }
@@ -120,7 +124,11 @@ export function validateUser(input, current, ctx) {
   }
 
   if (input.options) {
-    for (const k of Object.keys(u.options)) if (input.options[k] !== undefined) u.options[k] = !!input.options[k];
+    for (const k of Object.keys(u.options)) if (k !== "role" && input.options[k] !== undefined) u.options[k] = !!input.options[k];
+    if (input.options.role !== undefined) {
+      if (!USER_ROLES[input.options.role]) throw new UserError("Rôle inconnu.", "options.role");
+      u.options.role = input.options.role;
+    }
   }
   if (input.voicemail) {
     const vm = input.voicemail;

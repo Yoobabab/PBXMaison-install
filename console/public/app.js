@@ -1008,7 +1008,8 @@ async function renderUser(id, tab = "general") {
 
   if (tab === "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
-      <label>Numéro de poste<input value="${esc(u.id)}" readonly></label><span class="hide-sm"></span>
+      <label>Numéro de poste<input value="${esc(u.id)}" readonly></label>
+      <label>Rôle<select name="options.role"><option value="user" ${u.options.role !== "manager" ? "selected" : ""}>Utilisateur</option><option value="manager" ${u.options.role === "manager" ? "selected" : ""}>Responsable</option></select><span class="hint">Un responsable modifie les plannings d'appels depuis son softphone et l'appli mobile.</span></label>
       <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>

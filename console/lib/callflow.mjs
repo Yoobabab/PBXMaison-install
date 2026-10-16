@@ -7,11 +7,14 @@
  *   - traceur de routage (arbre de configuration d'un numéro) et liste des renvois actifs.
  */
 import { UserError, STATUSES, displayName, nationalNumber, ringsForGroups } from "./users.mjs";
+import { PLAN_DAYS, PLAN_DAY_LONG, PLAN_MAX_SCENARIOS, planMin, ymdOf, isWeekB, planHolidays, resolvePlan, localNow, mondayOf, describeSlots } from "../public/planning-core.js";
 
 export const KINDS = {
   group: "Groupe d'appel", queue: "File d'attente", ivr: "SVI (standard automatique)", groupvm: "Messagerie de groupe",
-  schedule: "Horaires", rule: "Règle entrante", prompt: "Annonce", flow: "Routage", conf: "Salle de réunion",
+  schedule: "Horaires", rule: "Règle entrante", prompt: "Annonce", flow: "Routage", conf: "Salle de réunion", planning: "Planning",
 };
+/** Objets qui reçoivent des SDA comme une règle entrante (une seule « par défaut » parmi eux). */
+const ENTRY_KINDS = ["rule", "flow", "planning"];
 /** Étapes d'un routage (éditeur visuel / description en texte), enchaînées de gauche à droite. */
 export const STEP_TYPES = {
   ring: "Faire sonner des utilisateurs", group: "Groupe d'appel", queue: "File d'attente", prompt: "Lire une annonce",
@@ -67,6 +70,9 @@ export function defaultObject(kind) {
     case "rule": return { name: "", dids: [], is_default: false, schedule: "", open: hang, closed: hang, break: null, holiday: null };
     case "prompt": return { name: "", file: "", duration: 0 };
     case "flow": return { name: "", dids: [], is_default: false, schedule: "", branches: { open: [], closed: null, break: null, holiday: null } };
+    case "planning": return { name: "", dids: [], is_default: false, managers: true, scenarios: [{ id: "s1", name: "En dehors des plages", color: "#94a3b8" }],
+      branches: { s1: [{ type: "hangup", target: "" }] }, outside: "s1", week: Object.fromEntries(PLAN_DAYS.map((x) => [x, []])), alternate: false,
+      week_b: Object.fromEntries(PLAN_DAYS.map((x) => [x, []])), ref_monday: mondayOf(ymdOf(Date.now())), holidays_fr: true, holiday_scenario: "s1", days: {}, override: "" };
     default: throw new UserError("Type d'objet inconnu.");
   }
 }
@@ -255,7 +261,7 @@ export function validateObject(kind, input, current, ctx) {
     if (input.dids !== undefined) d.dids = validDids(input.dids, ctx, "dids");
     if (!d.is_default && !d.dids.length) throw new UserError("Indique au moins une SDA, ou coche « règle par défaut ».", "dids");
     if (d.is_default) {
-      const other = ctx.objects.find((o) => (o.kind === "rule" || o.kind === "flow") && o.id !== ctx.selfId && o.data.is_default);
+      const other = ctx.objects.find((o) => ENTRY_KINDS.includes(o.kind) && o.id !== ctx.selfId && o.data.is_default);
       if (other) throw new UserError(`« ${other.data.name} » est déjà la règle par défaut.`, "is_default");
     }
     if (input.schedule !== undefined) d.schedule = input.schedule ? (ctx.objects.some((o) => o.kind === "schedule" && o.id === input.schedule) ? input.schedule : (() => { throw new UserError("Horaires introuvables.", "schedule"); })()) : "";
@@ -267,7 +273,7 @@ export function validateObject(kind, input, current, ctx) {
     if (input.dids !== undefined) d.dids = validDids(input.dids, ctx, "dids");
     if (input.is_default !== undefined) d.is_default = !!input.is_default;
     if (d.is_default) {
-      const other = ctx.objects.find((o) => (o.kind === "rule" || o.kind === "flow") && o.id !== ctx.selfId && o.data.is_default);
+      const other = ctx.objects.find((o) => ENTRY_KINDS.includes(o.kind) && o.id !== ctx.selfId && o.data.is_default);
       if (other) throw new UserError(`« ${other.data.name} » est déjà le routage par défaut.`, "is_default");
     }
     if (!d.is_default && !d.dids.length) throw new UserError("Glisse au moins une SDA, ou coche « routage par défaut ».", "dids");
@@ -284,10 +290,100 @@ export function validateObject(kind, input, current, ctx) {
       d.branches = b;
     }
     if (!d.branches.open.length) throw new UserError("Ajoute au moins une étape au routage.", "branches.open");
+  } else if (kind === "planning") {
+    validatePlanning(d, input, ctx);
   } else if (kind === "prompt") {
     // fichier et durée posés par le serveur après conversion
   }
   return { number: d.number || null, name: d.name, data: d };
+}
+
+// ------------------------------------------------------------------ Planning de la semaine
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const SLOT_T = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/;
+const validYmd = (v) => YMD.test(v) && !isNaN(Date.parse(`${v}T00:00:00Z`)) && ymdOf(Date.parse(`${v}T00:00:00Z`)) === v;
+function validSlots(list, ids, label, field) {
+  if (!Array.isArray(list)) throw new UserError(`${label} : plages invalides.`, field);
+  if (list.length > 96) throw new UserError(`${label} : trop de plages.`, field);
+  const out = [];
+  for (const r of list) {
+    const from = String(r?.from || "").trim(), to = String(r?.to || "").trim(), s = String(r?.s || "");
+    if (!SLOT_T.test(from) || from === "24:00" || !SLOT_T.test(to)) throw new UserError(`${label} : heures au format HH:MM.`, field);
+    if (planMin(to) <= planMin(from)) throw new UserError(`${label} : l'heure de fin doit être après l'heure de début.`, field);
+    if (!ids.has(s)) throw new UserError(`${label} : scénario inconnu.`, field);
+    out.push({ from, to, s });
+  }
+  out.sort((x, y) => planMin(x.from) - planMin(y.from));
+  for (let i = 1; i < out.length; i++) if (planMin(out[i].from) < planMin(out[i - 1].to)) throw new UserError(`${label} : plages qui se chevauchent (${out[i - 1].from}-${out[i - 1].to} et ${out[i].from}-${out[i].to}).`, field);
+  return out;
+}
+function validatePlanning(d, input, ctx) {
+  if (input.dids !== undefined) d.dids = validDids(input.dids, ctx, "dids");
+  if (input.is_default !== undefined) d.is_default = !!input.is_default;
+  if (d.is_default) {
+    const other = ctx.objects.find((o) => ENTRY_KINDS.includes(o.kind) && o.id !== ctx.selfId && o.data.is_default);
+    if (other) throw new UserError(`« ${other.data.name} » est déjà le routage par défaut.`, "is_default");
+  }
+  if (!d.is_default && !d.dids.length) throw new UserError("Ajoute au moins une SDA, ou coche « routage par défaut ».", "dids");
+  if (input.managers !== undefined) d.managers = !!input.managers;
+  if (input.scenarios !== undefined) {
+    const arr = Array.isArray(input.scenarios) ? input.scenarios : [];
+    if (!arr.length) throw new UserError("Crée au moins un scénario.", "scenarios");
+    if (arr.length > PLAN_MAX_SCENARIOS) throw new UserError(`${PLAN_MAX_SCENARIOS} scénarios maximum.`, "scenarios");
+    const seen = new Set();
+    d.scenarios = arr.map((x, i) => {
+      const id = String(x?.id || "");
+      if (!/^[a-z0-9]{1,8}$/.test(id) || seen.has(id)) throw new UserError(`Scénario ${i + 1} : identifiant invalide.`, "scenarios");
+      seen.add(id);
+      const name = clean(x?.name, 30);
+      if (!name) throw new UserError(`Scénario ${i + 1} : donne-lui un nom.`, `scenario.${id}`);
+      const color = /^#[0-9a-f]{6}$/i.test(String(x?.color || "")) ? String(x.color).toLowerCase() : "#94a3b8";
+      return { id, name, color };
+    });
+  }
+  const ids = new Set(d.scenarios.map((x) => x.id));
+  if (input.branches !== undefined) {
+    const b = {};
+    for (const sc of d.scenarios) {
+      const steps = validateSteps(input.branches?.[sc.id] || [], ctx, `branches.${sc.id}`);
+      if (!steps.length) throw new UserError(`Scénario « ${sc.name} » : ajoute au moins une étape.`, `branches.${sc.id}`);
+      b[sc.id] = steps;
+    }
+    d.branches = b;
+  }
+  for (const sc of d.scenarios) if (!d.branches[sc.id]) throw new UserError(`Scénario « ${sc.name} » : ajoute au moins une étape.`, `branches.${sc.id}`);
+  for (const k of Object.keys(d.branches)) if (!ids.has(k)) delete d.branches[k];
+  if (input.outside !== undefined) d.outside = String(input.outside || "");
+  if (!ids.has(d.outside)) throw new UserError("Choisis le scénario utilisé en dehors des plages.", "outside");
+  for (const [key, label] of [["week", "Semaine A"], ["week_b", "Semaine B"]]) {
+    if (input[key] === undefined) continue;
+    const w = {};
+    for (const day of PLAN_DAYS) w[day] = validSlots(input[key]?.[day] || [], ids, `${label} · ${PLAN_DAY_LONG[day]}`, `${key}.${day}`);
+    d[key] = w;
+  }
+  if (input.alternate !== undefined) d.alternate = !!input.alternate;
+  if (input.ref_monday !== undefined) {
+    const r = String(input.ref_monday || "");
+    if (!validYmd(r)) throw new UserError("Date de début de la semaine A invalide.", "ref_monday");
+    d.ref_monday = mondayOf(r);
+  }
+  if (input.holidays_fr !== undefined) d.holidays_fr = !!input.holidays_fr;
+  if (input.holiday_scenario !== undefined) d.holiday_scenario = String(input.holiday_scenario || "");
+  if (d.holiday_scenario && !ids.has(d.holiday_scenario)) d.holiday_scenario = "";
+  if (input.days !== undefined) {
+    const out = {};
+    const entries = Object.entries(input.days && typeof input.days === "object" ? input.days : {});
+    if (entries.length > 400) throw new UserError("400 journées particulières maximum.", "days");
+    for (const [ymd, v] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+      if (!validYmd(ymd)) throw new UserError(`Date invalide : ${ymd}.`, "days");
+      out[ymd] = { slots: validSlots(v?.slots || [], ids, `Journée du ${ymd.split("-").reverse().join("/")}`, `days.${ymd}`), label: clean(v?.label, 40) };
+    }
+    d.days = out;
+  }
+  for (const [ymd, v] of Object.entries(d.days || {})) v.slots = v.slots.filter((x) => ids.has(x.s));
+  for (const k of ["week", "week_b"]) for (const day of PLAN_DAYS) d[k][day] = (d[k][day] || []).filter((x) => ids.has(x.s));
+  if (input.override !== undefined) d.override = String(input.override || "");
+  if (d.override && !ids.has(d.override)) d.override = "";
 }
 
 /** Valide une suite d'étapes ; une étape « terminale » doit être la dernière. */
@@ -315,7 +411,8 @@ export function validateSteps(list, ctx, field) {
   });
   return out;
 }
-const flowSteps = (d) => Object.entries(d.branches || {}).flatMap(([b, list]) => (list || []).map((st, i) => ({ b, i, st })));
+const branchLabel = (d, b) => BRANCHES[b] || `scénario « ${d.scenarios?.find((x) => x.id === b)?.name || b} »`;
+const flowSteps = (d) => Object.entries(d.branches || {}).flatMap(([b, list]) => (list || []).map((st, i) => ({ b, i, st, label: branchLabel(d, b) })));
 
 /** Références vers un objet (avant suppression) : [{ kind, id, name, where }] */
 export function referencesTo(kind, id, objects, users) {
@@ -336,9 +433,9 @@ export function referencesTo(kind, id, objects, users) {
     for (const [k, v] of Object.entries(d.options || {})) if (hit(v)) where.push(`touche ${k}`);
     if (kind === "prompt" && (d.greeting === id || d.prompt === id)) where.push(o.kind === "ivr" ? "annonce du SVI" : "annonce d'accueil");
     if (kind === "schedule" && d.schedule === id) where.push("horaires");
-    for (const { b, i, st } of flowSteps(d)) {
-      if (st.type === kind && st.target === id) where.push(`étape ${i + 1} (${BRANCHES[b].toLowerCase()})`);
-      if (kind === "user" && (st.type === "user" || st.type === "user_vm") && st.target === id) where.push(`étape ${i + 1} (${BRANCHES[b].toLowerCase()})`);
+    for (const { i, st, label } of flowSteps(d)) {
+      if (st.type === kind && st.target === id) where.push(`étape ${i + 1} (${label.toLowerCase()})`);
+      if (kind === "user" && (st.type === "user" || st.type === "user_vm") && st.target === id) where.push(`étape ${i + 1} (${label.toLowerCase()})`);
     }
     if (where.length) refs.push({ kind: o.kind, id: o.id, name: d.name, where: where.join(", ") });
   }
@@ -620,6 +717,13 @@ export function buildCallflowDialplan(m) {
   }
   for (const o of byKind(m.objects, "flow")) L.push("", ...buildFlow(o, m));
 
+  // Plannings de la semaine
+  for (const o of byKind(m.objects, "planning")) {
+    for (const did of o.data.dids) L.splice(L.indexOf("[did-rules]") + 1, 0, `exten => ${did},1,Goto(plan-${o.id},s,1)`);
+    if (o.data.is_default) L.splice(L.indexOf("[did-rules]") + 1, 0, `exten => default,1,Goto(plan-${o.id},s,1)`);
+  }
+  for (const o of byKind(m.objects, "planning")) L.push("", ...buildPlanning(o, m, tz, year));
+
   // Messagerie d'un utilisateur en destination directe
   L.push("", "[vm-direct]", "exten => _XXX,1,VoiceMail(${EXTEN}@default,u)", " same => n,Hangup()", "");
   return L.join("\n");
@@ -695,6 +799,52 @@ function buildFlow(o, m) {
   return L;
 }
 
+/**
+ * Planning : le scénario dépend du jour et de l'heure, calculés à chaque appel (fuseau du PBX).
+ * Ordre : forcé → journée particulière → jour férié → semaine B (si alternance) → semaine A → « en dehors ».
+ */
+function buildPlanning(o, m, tz, year) {
+  const d = o.data, P = `plan-${o.id}`;
+  const sc = (id) => `${P}-sc,sc${id},1`;
+  const L = [`[${P}]`, `exten => s,1,NoOp(Planning ${nameOf(o)})`, ` same => n,Set(CDR(rule)=${nameOf(o)})`];
+  if (d.override) { L.push(` same => n,Goto(${sc(d.override)})`); }
+  else {
+    L.push(` same => n,Set(PLAN_D=\${STRFTIME(\${EPOCH},${tz},%Y%m%d)})`);
+    if (Object.keys(d.days || {}).length) L.push(` same => n,GotoIf(\${DIALPLAN_EXISTS(${P}-day,\${PLAN_D},1)}?${P}-day,\${PLAN_D},1)`);
+    if (d.holidays_fr && d.holiday_scenario) L.push(` same => n,GotoIf(\${DIALPLAN_EXISTS(${P}-hol,\${PLAN_D},1)}?${sc(d.holiday_scenario)})`);
+    if (d.alternate) L.push(` same => n,GotoIf(\${DIALPLAN_EXISTS(${P}-wb,\${PLAN_D},1)}?${P}-b,s,1)`);
+    L.push(` same => n,Goto(${P}-a,s,1)`);
+  }
+  const slotLines = (slots, day) => slots.map((x) => ` same => n,GotoIfTime(${x.from}-${minusOne(x.to === "24:00" ? "00:00" : x.to)},${day},*,*,${tz}?${sc(x.s)})`);
+  for (const [ctx, week] of [["a", d.week], ...(d.alternate ? [["b", d.week_b]] : [])]) {
+    L.push(`[${P}-${ctx}]`, `exten => s,1,NoOp(${ctx === "a" ? (d.alternate ? "Semaine A" : "Semaine type") : "Semaine B"})`);
+    for (const day of PLAN_DAYS) L.push(...slotLines(week[day] || [], day));
+    L.push(` same => n,Goto(${sc(d.outside)})`);
+  }
+  if (Object.keys(d.days || {}).length) {
+    L.push(`[${P}-day]`);
+    for (const [ymd, v] of Object.entries(d.days)) {
+      L.push(`exten => ${ymd.replace(/-/g, "")},1,NoOp(${clean(v.label || "Journée particulière", 40)})`, ...slotLines(v.slots, "*"), ` same => n,Goto(${sc(d.outside)})`);
+    }
+  }
+  if (d.holidays_fr && d.holiday_scenario) {
+    L.push(`[${P}-hol]`);
+    for (let y = year; y <= year + 2; y++) for (const [ymd, label] of planHolidays(y)) L.push(`exten => ${ymd.replace(/-/g, "")},1,NoOp(${clean(label, 40)})`);
+  }
+  if (d.alternate) {
+    // Jours des semaines B sur 3 ans (listés de l'année en cours à dans 2 ans, comme les jours fériés)
+    L.push(`[${P}-wb]`);
+    for (let t = Date.UTC(year, 0, 1); t < Date.UTC(year + 3, 0, 1); t += 86400_000) { const ymd = ymdOf(t); if (isWeekB(d, ymd)) L.push(`exten => ${ymd.replace(/-/g, "")},1,NoOp(B)`); }
+  }
+  L.push(`[${P}-sc]`);
+  for (const s of d.scenarios) {
+    L.push(`exten => sc${s.id},1,NoOp(Scénario ${clean(s.name, 30)})`, ` same => n,Set(CDR(rule)=${nameOf(o)} · ${clean(s.name, 30)})`);
+    (d.branches[s.id] || []).forEach((st, i) => { for (const [label, app] of stepLines(st, m, `${s.id}-${i}`)) L.push(` same => n${label ? `(${label})` : ""},${app}`); });
+    L.push(" same => n,Hangup()", " same => n(end),Hangup()");
+  }
+  return L;
+}
+
 /** Contenu de queues_callikoe.conf (inclus dans queues.conf). */
 export function buildQueues(m) {
   const L = [`; Files d'attente — écrit par la console web (${new Date().toISOString()}).`];
@@ -767,7 +917,7 @@ export function traceNumber(input, m) {
   const userDid = [...m.users.values()].find((u) => u.dids.includes(n));
   const rule = m.objects.find((o) => o.kind === "rule" && o.data.dids.includes(n));
   const objDid = m.objects.find((o) => OFFICE_KINDS.includes(o.kind) && (o.data.dids || []).includes(n));
-  const flow = m.objects.find((o) => o.kind === "flow" && o.data.dids.includes(n));
+  const flow = m.objects.find((o) => (o.kind === "flow" || o.kind === "planning") && o.data.dids.includes(n));
   const isOurs = m.trunkDids.has(n) || userDid || rule || objDid || flow;
   if (isOurs) {
     const head = node("did", `SDA ${fmt(n)}`, { detail: [] });
@@ -781,10 +931,10 @@ export function traceNumber(input, m) {
     } else if (rule) {
       head.children.push({ label: "Règle entrante", node: expandRule(rule, m, [], 0) });
     } else if (flow) {
-      head.children.push({ label: "Routage", node: expandFlow(flow, m) });
+      head.children.push({ label: flow.kind === "planning" ? "Planning" : "Routage", node: flow.kind === "planning" ? expandPlanning(flow, m) : expandFlow(flow, m) });
     } else {
-      const def = m.objects.find((o) => (o.kind === "rule" || o.kind === "flow") && o.data.is_default);
-      if (def) head.children.push({ label: "Aucune règle pour cette SDA → routage par défaut", node: def.kind === "flow" ? expandFlow(def, m) : expandRule(def, m, [], 0) });
+      const def = m.objects.find((o) => ENTRY_KINDS.includes(o.kind) && o.data.is_default);
+      if (def) head.children.push({ label: "Aucune règle pour cette SDA → routage par défaut", node: def.kind === "flow" ? expandFlow(def, m) : def.kind === "planning" ? expandPlanning(def, m) : expandRule(def, m, [], 0) });
       else head.children.push({ label: "Aucune règle pour cette SDA", node: legacyInbound(m) });
     }
     roots.push(head);
@@ -839,6 +989,20 @@ function expandFlow(o, m) {
     if (!list && b !== "open") { nd.children.push({ label, node: node("info", "Accepté comme aux heures d'ouverture", { status: "info" }), current: b === now }); continue; }
     nd.children.push({ label, node: chainNode(effective, 0, m, []), current: sched && b === now });
   }
+  return nd;
+}
+function expandPlanning(o, m) {
+  const d = o.data;
+  const nd = node("rule", `Planning « ${d.name} »`, { detail: [] });
+  const { ymd, minute } = localNow(m.now || new Date(), m.tz);
+  const now = resolvePlan(d, ymd, minute);
+  const name = (id) => d.scenarios.find((x) => x.id === id)?.name || "?";
+  if (now.forced) { nd.status = "warn"; nd.detail.push(`Forcé sur le scénario « ${name(d.override)} » (Planning › Forcer)`); }
+  else nd.detail.push(`Maintenant : ${now.label.toLowerCase()} → « ${name(now.scenario)} »`);
+  const wd = PLAN_DAYS[(new Date(`${ymd}T00:00:00Z`).getUTCDay() + 6) % 7];
+  const today = d.days?.[ymd]?.slots || (isWeekB(d, ymd) ? d.week_b : d.week)[wd] || [];
+  nd.detail.push(`Aujourd'hui : ${describeSlots(today, name) || "aucune plage"} ; sinon « ${name(d.outside)} »`);
+  for (const s of d.scenarios) nd.children.push({ label: `${s.name}${s.id === now.scenario ? " ← maintenant" : ""}`, node: chainNode(d.branches[s.id] || [], 0, m, []), current: s.id === now.scenario });
   return nd;
 }
 /** Suite d'étapes en arbre : chaque étape a pour enfant la suivante (« sans réponse »). */
@@ -1041,6 +1205,9 @@ export function listForwards(m) {
       if (u.status !== st && (d.type === "extension" || d.type === "external")) rows.push({ ...who, level: "info", when: `Si ${USTATUS[st]}`, to: dl(d, u), active: false, kind: "rule", external: d.type === "external" });
     }
     if (u.options.ring_mobile && u.mobile) rows.push({ ...who, level: "info", when: "Sonnerie simultanée", to: `mobile ${fmt(u.mobile)}`, active: u.status === "available", kind: "mobile", external: true });
+  }
+  for (const o of byKind(m.objects, "planning")) {
+    if (o.data.override) rows.push({ id: "", name: `Planning « ${o.data.name} »`, level: "warn", when: "Scénario forcé", to: o.data.scenarios.find((x) => x.id === o.data.override)?.name || "?", active: true, kind: "schedule" });
   }
   for (const o of byKind(m.objects, "schedule")) {
     if (o.data.override !== "auto") rows.push({ id: "", name: `Horaires « ${o.data.name} »`, level: "warn", when: "Mode forcé", to: o.data.override === "open" ? "toujours ouvert" : "toujours fermé", active: true, kind: "schedule" });
