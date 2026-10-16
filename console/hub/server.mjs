@@ -342,7 +342,24 @@ export async function buildApp({ db } = {}) {
   let signKey = null;
   const loadSignKey = () => { try { signKey = crypto.createPrivateKey(fs.readFileSync(SIGN_KEY)); } catch { signKey = null; } return signKey; };
   loadSignKey();
-  function signingInfo() { return signKey ? { configured: true, fingerprint: fingerprint(crypto.createPublicKey(signKey)) } : { configured: false }; }
+  // Serveur d'un partenaire (configuration signée avec le jeton du portail pro) : licences achetées dans le portail, signées par lui
+  const partnerCfg = () => { const p = serverConfig().partner; return p?.token && /^https:\/\//.test(p.portal || "") || (p?.token && process.env.HUB_PORTAL_URL) ? p : null; };
+  const portalMode = () => !signKey && !!partnerCfg();
+  const portalUrl = () => process.env.HUB_PORTAL_URL || partnerCfg()?.portal || "";
+  async function portal(pathname, body) {
+    const p = partnerCfg();
+    let r; try { r = await fetch(`${portalUrl()}${pathname}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${p.token}` },
+      body: JSON.stringify(body || {}), signal: AbortSignal.timeout(15000) }); }
+    catch { throw new UserError("Portail pro Callikoe injoignable : réessaie dans un instant."); }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new UserError(d.error || `Portail pro : erreur ${r.status}.`);
+    return d;
+  }
+  function signingInfo() {
+    if (signKey) return { configured: true, fingerprint: fingerprint(crypto.createPublicKey(signKey)) };
+    const p = partnerCfg();
+    return p ? { configured: true, portal: true, partner: p.name || "", buy_url: `${portalUrl()}/#/acheter`, portal_url: portalUrl() } : { configured: false };
+  }
   const sign = (obj) => { const { signature, ...rest } = obj; return { ...rest, signature: crypto.sign(null, Buffer.from(canonicalJson(rest)), signKey).toString("base64") }; };
   app.get("/api/signing", { preHandler: requireUser }, async () => signingInfo());
   app.post("/api/signing", { preHandler: requireRole("super") }, async (req) => {
@@ -370,8 +387,12 @@ export async function buildApp({ db } = {}) {
   const LIC_RE = /^PBXM(-[A-Z0-9]{4}){4}$/;
   const regTenants = () => readJson(TENANTS, {}).tenants || [];
   // Rapproche la table des PBX réels : licences des PBX existants reprises, licences des PBX supprimés rendues disponibles
-  async function syncLicenses() {
+  let portalSync = { at: 0, error: "" };
+  const suspending = new Map();
+  setInterval(() => { if (portalMode()) syncLicenses(true).catch(() => {}); }, 5 * 60_000).unref();
+  async function syncLicenses(force = false) {
     const d = await etat();
+    if (portalMode()) return syncPortal(d, force);
     const reg = regTenants(), slugs = new Set(reg.map((t) => t.slug));
     for (const p of d?.pbx || []) {
       if (!LIC_RE.test(p.license || "") || !p.expires_at || isNaN(Date.parse(p.expires_at))) continue;
@@ -388,6 +409,43 @@ export async function buildApp({ db } = {}) {
     if (d) for (const r of (await db.query("SELECT key, slug FROM hub_licenses WHERE slug IS NOT NULL AND (assigned_at IS NULL OR assigned_at < now() - interval '15 minutes')")).rows)
       if (!slugs.has(r.slug)) await db.query("UPDATE hub_licenses SET slug = NULL, pbx_id = NULL, assigned_at = NULL WHERE key = $1", [r.key]);
   }
+  // Mode portail : licences du partenaire recopiées ici ; licence supprimée dans le portail → PBX désactivé ; renouvellement → envoyé au PBX
+  async function syncPortal(d, force) {
+    if (!force && Date.now() - portalSync.at < 30_000) return;
+    portalSync.at = Date.now();
+    if (!d) return;
+    const reg = regTenants();
+    const pbx = (d.pbx || []).map((p) => ({ slug: p.slug, name: p.name, fqdn: p.fqdn, license: p.license, pbx_id: reg.find((t) => t.slug === p.slug)?.pbx_id || "", suspended: !!p.suspended }));
+    let r; try { r = await portal("/v1/hub/sync", { pbx, version: process.env.CX_VERSION || "" }); portalSync.error = ""; }
+    catch (e) { portalSync.error = e.message; return; }
+    const keys = [];
+    for (const l of r.licenses || []) {
+      if (!LIC_RE.test(l.key)) continue;
+      keys.push(l.key);
+      const used = (d.pbx || []).find((p) => p.license === l.key);
+      const slug = used?.slug || (l.assigned?.here ? l.assigned.slug : null);
+      await db.query(`INSERT INTO hub_licenses (key, edition, simultaneous_calls, expires_at, slug, pbx_id, note, origin, revoked_at, assigned_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'portail', $8, CASE WHEN $5::text IS NULL THEN NULL ELSE now() END)
+        ON CONFLICT (key) DO UPDATE SET edition = $2, simultaneous_calls = $3, expires_at = $4, slug = $5, pbx_id = $6, note = $7, origin = 'portail', revoked_at = $8`,
+        [l.key, l.edition, l.simultaneous_calls, l.expires_at, slug, slug ? (reg.find((t) => t.slug === slug)?.pbx_id || null) : null, l.note || "", l.revoked_at || null]);
+      if (!used) continue;
+      const pid = reg.find((t) => t.slug === used.slug)?.pbx_id;
+      // Licence supprimée dans le portail : le PBX qui l'utilise est désactivé
+      if (l.revoked_at && !used.suspended) {
+        if (Date.now() - (suspending.get(used.slug) || 0) < 10 * 60_000) continue;
+        suspending.set(used.slug, Date.now());
+        runHost(["suspendre", used.slug], `Licence ${l.key} supprimée dans le portail pro : désactivation du PBX ${used.slug}`, { ip: "portail", cookies: {} });
+        etatCache.at = 0;
+      } else if (!l.revoked_at && pid && (used.expires_at !== l.expires_at || Number(used.max_calls) !== l.simultaneous_calls || used.edition !== l.edition)
+        && Date.parse(l.expires_at) > Date.now()) {
+        // Licence renouvelée ou changée dans le portail : nouvelle clé signée envoyée au PBX, sans coupure
+        try { await pushLicense(used.slug, pid, l); await audit({ ip: "portail", cookies: {} }, `Licence ${l.key} mise à jour depuis le portail pro`, true, `PBX ${used.slug} · jusqu'au ${String(l.expires_at).slice(0, 10)}`, "portail"); }
+        catch (e) { await audit({ ip: "portail", cookies: {} }, `Licence ${l.key} : mise à jour du PBX ${used.slug} impossible`, false, e.message, "portail"); }
+      }
+    }
+    // Licences du portail qui ne sont plus dans le compte du partenaire (serveur retiré…) : oubliées si aucun PBX ne les utilise
+    await db.query("DELETE FROM hub_licenses WHERE origin = 'portail' AND slug IS NULL AND NOT (key = ANY($1::text[]))", [keys]);
+  }
   const licStatus = (l, now = Date.now()) => l.revoked_at ? "revoquee" : Date.parse(l.expires_at) <= now ? "expiree"
     : Date.parse(l.expires_at) - now < 30 * 86400000 ? "bientot" : "valide";
   const licRow = (l) => ({ key: l.key, edition: l.edition, simultaneous_calls: l.simultaneous_calls, expires_at: new Date(l.expires_at).toISOString(),
@@ -399,7 +457,11 @@ export async function buildApp({ db } = {}) {
     if (!l) throw new UserError("Licence inconnue.", null, 404);
     return l;
   };
-  const needSign = () => { if (!signKey) throw new UserError("Installe d'abord la clé de signature des licences (Super administrateur › Clé de signature)."); };
+  const needSign = () => {
+    if (portalMode()) throw new UserError("Les licences de ce serveur s'achètent et se renouvellent dans ton portail pro Callikoe (menu Licences › Acheter).");
+    if (!signKey) throw new UserError("Installe d'abord la clé de signature des licences (Super administrateur › Clé de signature).");
+  };
+  const needSigner = () => { if (!signKey && !portalMode()) throw new UserError("Installe d'abord la clé de signature des licences (Super administrateur › Clé de signature)."); };
   const licFields = (b, cur = null) => {
     const edition = String(b.edition ?? cur?.edition ?? "");
     if (!EDITIONS[edition]) throw new UserError("Édition invalide.", "edition");
@@ -415,25 +477,28 @@ export async function buildApp({ db } = {}) {
   };
   // Envoie la licence au PBX (clé signée appliquée sans coupure) et met à jour sa copie de configuration signée
   async function pushLicense(slug, pbxId, lic) {
-    const tok = encodeToken(sign({ pbx_id: pbxId, key: lic.key, edition: lic.edition, simultaneous_calls: lic.simultaneous_calls,
-      expires_at: new Date(lic.expires_at).toISOString(), issued_at: new Date().toISOString() }));
+    const pbxName = regTenants().find((t) => t.slug === slug)?.name || slug;
+    const tok = portalMode() ? (await portal("/v1/hub/token", { key: lic.key, pbx_id: pbxId, slug, name: pbxName })).token
+      : encodeToken(sign({ pbx_id: pbxId, key: lic.key, edition: lic.edition, simultaneous_calls: lic.simultaneous_calls,
+        expires_at: new Date(lic.expires_at).toISOString(), issued_at: new Date().toISOString() }));
     const r = await hostJson(["licence", slug, tok]);
     if (!r.ok || !r.data?.ok) throw new UserError(`Le PBX ${slug} n'a pas accepté la licence : ${r.data?.error || r.error || "erreur inconnue"}`);
     const f = path.join(VAR, "configs", `${slug}.json`), cfg = readJson(f, null);
     if (cfg?.license) {
       cfg.license = { ...cfg.license, key: lic.key, edition: lic.edition, simultaneous_calls: lic.simultaneous_calls, expires_at: new Date(lic.expires_at).toISOString() };
-      fs.writeFileSync(`${f}.new`, JSON.stringify(sign(cfg), null, 2), { mode: 0o600 }); fs.renameSync(`${f}.new`, f);
+      const signed = portalMode() ? await portal("/v1/hub/config", { config: cfg, slug }).then((x) => x.config).catch(() => null) : sign(cfg);
+      if (signed) { fs.writeFileSync(`${f}.new`, JSON.stringify(signed, null, 2), { mode: 0o600 }); fs.renameSync(`${f}.new`, f); }
     }
     etatCache.at = 0;
   }
   const pbxIdOf = (slug) => regTenants().find((t) => t.slug === slug)?.pbx_id || "";
 
   app.get("/api/licenses", { preHandler: requireUser }, async () => {
-    await syncLicenses().catch(() => {});
+    await syncLicenses(true).catch(() => {});
     const rows = (await db.query("SELECT * FROM hub_licenses ORDER BY created_at DESC")).rows.map(licRow);
     const d = await etat();
     const pbx = (d?.pbx || regTenants()).map((p) => ({ slug: p.slug, name: p.name, fqdn: p.fqdn, company: p.company || "", suspended: !!p.suspended }));
-    return { licenses: rows, pbx, editions: EDITIONS, sc: SC, durations: DURATIONS, signing: signingInfo() };
+    return { licenses: rows, pbx, editions: EDITIONS, sc: SC, durations: DURATIONS, signing: signingInfo(), portal_error: portalMode() ? portalSync.error : "" };
   });
   app.post("/api/licenses", { preHandler: requireRole("super", "admin") }, async (req) => {
     needSign();
@@ -458,7 +523,7 @@ export async function buildApp({ db } = {}) {
   });
   // Attribuer une licence disponible à un PBX existant (remplace sa licence actuelle, qui redevient disponible)
   app.post("/api/licenses/:key/assign", { preHandler: requireRole("super", "admin") }, async (req) => {
-    needSign();
+    needSigner();
     const l = await getLic(req.params.key);
     if (!licRow(l).available) throw new UserError("Cette licence n'est pas disponible (déjà attribuée, expirée ou supprimée).");
     const slug = String(req.body?.slug || "");
@@ -474,9 +539,11 @@ export async function buildApp({ db } = {}) {
     const l = await getLic(req.params.key);
     if (String(req.body?.confirm || "").trim().toUpperCase() !== l.key.slice(-4)) throw new UserError(`Tape les 4 derniers caractères de la licence (${l.key.slice(-4)}) pour confirmer.`, "confirm");
     await checkCode(req);
+    if (portalMode() && l.origin === "portail") await portal("/v1/hub/revoke", { key: l.key });
     const live = l.slug && regTenants().some((t) => t.slug === l.slug);
     if (!live) {
-      await db.query("DELETE FROM hub_licenses WHERE key = $1", [l.key]);
+      if (portalMode() && l.origin === "portail") await db.query("UPDATE hub_licenses SET revoked_at = now(), revoked_by = $2 WHERE key = $1", [l.key, req.email]);
+      else await db.query("DELETE FROM hub_licenses WHERE key = $1", [l.key]);
       await audit(req, `Licence supprimée : ${l.key}`, true, "aucun PBX associé");
       return { ok: true, deleted: true };
     }
@@ -502,7 +569,7 @@ export async function buildApp({ db } = {}) {
     catch { return { available: null, reason: "Service d'adresses injoignable." }; }
   });
   app.post("/api/pbx/new", { preHandler: requireRole("super", "admin") }, async (req) => {
-    if (!signKey) throw new UserError("Installe d'abord la clé de signature des licences (Super administrateur › Clé de signature).");
+    needSigner();
     const b = req.body || {};
     const v = (k) => String(b[k] ?? "").trim();
     const slug = v("slug").toLowerCase();
@@ -523,6 +590,7 @@ export async function buildApp({ db } = {}) {
     if (!LANGUAGES[v("language")]) throw new UserError("Langue non prise en charge.", "language");
     // Licence : nouvelle (créée ici) ou licence disponible déjà créée (menu Licences)
     let lic = null;
+    if (portalMode() && v("license_mode") !== "existing") throw new UserError("Choisis une licence dispo (achetée dans ton portail pro Callikoe).", "license_key");
     if (v("license_mode") === "existing") {
       const l = await getLic(v("license_key")).catch(() => { throw new UserError("Choisis une licence disponible.", "license_key"); });
       if (!licRow(l).available) throw new UserError("Cette licence n'est plus disponible (attribuée, expirée ou supprimée).", "license_key");
@@ -536,17 +604,18 @@ export async function buildApp({ db } = {}) {
     }
     const id = crypto.randomUUID(), now = new Date();
     if (isManaged(fqdn)) {
-      const resv = sign({ action: "reserve", fqdn, pbx_id: id, ts: now.toISOString() });
+      const resv = portalMode() ? (await portal("/v1/hub/reserve", { fqdn, pbx_id: id })).reserve : sign({ action: "reserve", fqdn, pbx_id: id, ts: now.toISOString() });
       let r; try { r = await fetch(`${DNS_API}/v1/reserve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(resv), signal: AbortSignal.timeout(15000) }); }
       catch { throw new UserError("Service d'adresses injoignable : réessaie dans un instant.", "label"); }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new UserError(d.error || "Adresse refusée par le service d'adresses.", "label");
     }
-    const cfg = sign({ version: 1,
+    const raw = { version: 1,
       pbx: { id, name: v("name"), company: v("company"), fqdn, phone, country: country.code, country_code: country.dial, timezone: v("timezone"), language: v("language") },
       admin: { email, password: "set_on_first_login" },
       license: { key: lic.key, edition: lic.edition, simultaneous_calls: lic.simultaneous_calls, expires_at: lic.expires_at },
-      issued_at: now.toISOString() });
+      issued_at: now.toISOString() };
+    const cfg = portalMode() ? (await portal("/v1/hub/config", { config: raw, slug })).config : sign(raw);
     // Copie du fichier de configuration signé (réinstallation, portail) : téléchargeable depuis la console du serveur
     fs.mkdirSync(path.join(VAR, "configs"), { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(VAR, "configs", `${slug}.json`), JSON.stringify(cfg, null, 2), { mode: 0o600 });

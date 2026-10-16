@@ -227,6 +227,8 @@ hub_init() {
   id callikoe-hub >/dev/null 2>&1 || useradd --system --gid callikoe-hub --home-dir "$HUB_VAR" --no-create-home --shell /usr/sbin/nologin callikoe-hub
   install -d -o root -g callikoe-hub -m 0750 "$HUB_ETC"
   install -d -o callikoe-hub -g callikoe-hub -m 0755 "$HUB_VAR"
+  # Configuration du serveur : contient le jeton du portail pro (serveur d'un partenaire) → lisible par root et la console du serveur seulement
+  chgrp callikoe-hub "$SRV_CFG" && chmod 0640 "$SRV_CFG"
   # Clé de signature des ouvertures de PBX : privée pour la console du serveur, publique pour les PBX
   if [[ ! -f "$HUB_ETC/sso-key.pem" ]]; then
     openssl genpkey -algorithm ed25519 -out "$HUB_ETC/sso-key.pem" 2>/dev/null

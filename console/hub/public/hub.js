@@ -371,7 +371,7 @@ async function renderNew() {
         <label>Langue<select name="language">${opt(Object.entries(o.languages), "fr")}</select></label>
       </fieldset>
       <fieldset><legend>Licence</legend>
-        <div class="seg lic-mode"><label class="on"><input type="radio" name="license_mode" value="new" checked>Nouvelle licence</label><label class="${free.length ? "" : "dim"}"><input type="radio" name="license_mode" value="existing" ${free.length ? "" : "disabled"}>Licence dispo${free.length ? ` <span class="cnt">${free.length}</span>` : ""}</label></div>
+        <div class="seg lic-mode">${o.signing.portal ? "" : `<label class="on"><input type="radio" name="license_mode" value="new" checked>Nouvelle licence</label>`}<label class="${free.length ? "" : "dim"}"><input type="radio" name="license_mode" value="existing" ${free.length ? "" : "disabled"}>Licence dispo${free.length ? ` <span class="cnt">${free.length}</span>` : ""}</label></div>
         <div class="stack lic-new">
           <label>Édition<select name="edition">${opt(Object.entries(o.editions), "pro")}</select></label>
           <label>Appels simultanés<select name="simultaneous_calls">${opt(o.sc.map((n) => [n, `${n} appels`]), 8)}</select></label>
@@ -381,7 +381,8 @@ async function renderNew() {
           <label>Licence disponible<select name="license_key">${free.map((l) => `<option value="${esc(l.key)}">${esc(l.key)} · ${esc(o.editions[l.edition] || l.edition)} · ${l.simultaneous_calls} appels · jusqu'au ${fmtDay(l.expires_at)}${l.note ? " · " + esc(l.note) : ""}</option>`).join("")}</select>
           <span class="hint">Licences créées dans le menu Licences et attribuées à aucun PBX. Édition, appels et date d'expiration sont ceux de la licence.</span></label>
         </div>
-        ${free.length ? "" : `<span class="hint">Aucune licence disponible pour l'instant (menu <a href="#/licences">Licences</a>).</span>`}
+        ${free.length ? "" : o.signing.portal ? `<div class="flash warn" style="margin:0">Aucune licence dispo : <a href="${esc(o.signing.buy_url)}" target="_blank" rel="noopener">achète des licences dans ton portail pro</a>, elles arrivent ici toutes seules.</div>`
+          : `<span class="hint">Aucune licence disponible pour l'instant (menu <a href="#/licences">Licences</a>).</span>`}
       </fieldset>
       <fieldset><legend>Contact du client</legend>
         <label>E-mail du client<input name="admin_email" type="email" placeholder="contact@entreprise.fr" autocapitalize="off"><span class="hint">Pour les alertes du PBX. Les comptes de connexion se créent ensuite dans la console du PBX.</span></label>
@@ -392,12 +393,14 @@ async function renderNew() {
     <div id="job"></div>`;
 
   const form = $("#nf");
+  if (o.signing.portal && free.length) form.querySelector('[value="existing"]').checked = true;
   const licMode = () => {
-    const ex = form.querySelector('[name="license_mode"]:checked').value === "existing";
+    const ex = (form.querySelector('[name="license_mode"]:checked')?.value || "existing") === "existing";
     form.querySelectorAll(".lic-mode label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
     form.querySelector(".lic-new").hidden = ex; form.querySelector(".lic-old").hidden = !ex;
   };
   form.querySelectorAll('[name="license_mode"]').forEach((r) => r.addEventListener("change", licMode));
+  if (o.signing.portal) licMode();
   if (wanted && free.some((l) => l.key === wanted)) { form.license_key.value = wanted; form.querySelector('[value="existing"]').checked = true; licMode(); }
   for (const k of ["label", "slug"]) form[k].addEventListener("keydown", () => { form[k].dataset.touched = "1"; });
   const auto = () => {
@@ -448,6 +451,7 @@ async function renderLicenses() {
   let d;
   try { d = await api("GET", "/api/licenses"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
   const edit = can("super", "admin");
+  const PM = !!d.signing?.portal, buy = d.signing?.buy_url || "", purl = d.signing?.portal_url || "";
   const L = d.licenses, P = Object.fromEntries(d.pbx.map((p) => [p.slug, p]));
   const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
   const days = (l) => Math.ceil((Date.parse(l.expires_at) - Date.now()) / 86400000);
@@ -463,7 +467,8 @@ async function renderLicenses() {
     const p = l.slug ? P[l.slug] : null;
     const dl = days(l);
     const menu = edit ? [
-      !l.revoked_at ? `<button type="button" data-renew="${esc(l.key)}">Renouveler / modifier…</button>` : "",
+      !l.revoked_at ? (PM ? `<a href="${esc(purl)}/#/licences?renew=${encodeURIComponent(l.key)}" target="_blank" rel="noopener">Renouveler dans le portail pro ↗</a>`
+        : `<button type="button" data-renew="${esc(l.key)}">Renouveler / modifier…</button>`) : "",
       l.available ? `<button type="button" data-assign="${esc(l.key)}">Attribuer à un PBX existant…</button><a href="#/nouveau?licence=${encodeURIComponent(l.key)}">Créer un PBX avec cette licence</a>` : "",
       `<button type="button" data-copy="${esc(l.key)}">Copier le numéro</button>`,
       `<hr><button type="button" class="danger" data-ldel="${esc(l.key)}">${l.slug && !l.revoked_at ? "Supprimer (désactive le PBX)…" : "Supprimer…"}</button>`,
@@ -503,8 +508,9 @@ async function renderLicenses() {
   };
   const t = { all: L.length, ok: n("valide"), soon: n("bientot"), exp: n("expiree"), free: n("dispo") };
   app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Licences</h1>
-      <p class="sub" style="margin:0">Toutes les licences des PBX du serveur. Une licence disponible peut servir pour un nouveau PBX ou remplacer celle d'un PBX existant.</p></div>
-      ${edit ? `<button type="button" class="btn" id="lnew">+ Nouvelle licence</button>` : ""}</div>
+      <p class="sub" style="margin:0">Toutes les licences des PBX du serveur. Une licence disponible peut servir pour un nouveau PBX ou remplacer celle d'un PBX existant.${PM ? ` Elles viennent de ton portail pro Callikoe${d.signing.partner ? ` (${esc(d.signing.partner)})` : ""} : achat, renouvellement et suppression y sont repris ici automatiquement.` : ""}</p></div>
+      ${edit ? (PM ? `<a class="btn" href="${esc(buy)}" target="_blank" rel="noopener">+ Acheter des licences ↗</a>` : `<button type="button" class="btn" id="lnew">+ Nouvelle licence</button>`) : ""}</div>
+    ${d.portal_error ? `<div class="flash warn">Portail pro : ${esc(d.portal_error)} (liste affichée telle qu'au dernier contact).</div>` : ""}
     ${!d.signing?.configured ? `<div class="flash warn">Clé de signature des licences non installée : création et renouvellement impossibles. ${can("super") ? `<a href="#/cle">Clé de signature</a>` : ""}</div>` : ""}
     <div class="kpis kpis5">
       ${kpi("lic", "Licences", `${t.all}`, `${n("attribuee")} attribuée${n("attribuee") > 1 ? "s" : ""} à un PBX`)}
