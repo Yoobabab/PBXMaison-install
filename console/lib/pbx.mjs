@@ -561,6 +561,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       }
       await c.query("DELETE FROM ps_contacts WHERE endpoint IN ($1::text, $1::text || '-web')", [num]);
       await c.query("DELETE FROM pbxmaison_extensions WHERE id = $1", [num]);
+      await c.query("DELETE FROM pbxmaison_app_devices WHERE extension = $1", [num]);
+      await c.query("DELETE FROM pbxmaison_app_tokens WHERE extension = $1", [num]);
       // Gestion d'appels : retrait des membres, destinations vers ce poste → raccrocher
       for (const o of await loadObjects(c)) {
         const d = structuredClone(o.data);
@@ -599,7 +601,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   }
   async function revokeAppToken(num) { await db.query("DELETE FROM pbxmaison_app_tokens WHERE extension = $1", [num]); }
   /** Identifiants pour l'appli mobile, si le jeton du QR code est valide. */
-  async function appProvision(token, server) {
+  async function appProvision(token, server, ua = "") {
     if (!token || token.length < 20) return null;
     const r = await db.query("SELECT extension FROM pbxmaison_app_tokens WHERE token_hash = $1 AND expires_at > now()", [hashToken(token)]);
     if (!r.rowCount) return null;
@@ -607,9 +609,25 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await db.query("UPDATE pbxmaison_app_tokens SET used_at = now() WHERE token_hash = $1", [hashToken(token)]);
     const u = await getUser(num);
     const secret = await extensionSecret(num);
+    // Appareil : jeton longue durée gardé par l'appli, pour ouvrir le softphone sans mot de passe
+    const device = crypto.randomBytes(32).toString("base64url");
+    await db.query("INSERT INTO pbxmaison_app_devices (token_hash, extension, user_agent) VALUES ($1, $2, $3)", [hashToken(device), num, String(ua || "").slice(0, 200)]);
+    const base = `${server.tls ? "https" : "http"}://${server.host}`;
     return { pbx: env().PBX_NAME || "", extension: num, name: displayName(u), auth_id: secret.auth_id, password: secret.password,
-      host: server.host, fqdn: server.fqdn, ports: { udp: 5060, tcp: 5060, tls: server.tls ? 5061 : null }, voicemail: "*97" };
+      host: server.host, fqdn: server.fqdn, ports: { udp: 5060, tcp: 5060, tls: server.tls ? 5061 : null }, voicemail: "*97",
+      device_token: device, app_login_url: `${base}/app/login`, softphone_url: `${base}/softphone`, logout_url: `${base}/app/logout` };
   }
+  /** Poste d'un appareil de l'appli mobile (jeton valide), noté comme utilisé. */
+  async function appDevice(token) {
+    if (!token || token.length < 30) return null;
+    const r = await db.query("UPDATE pbxmaison_app_devices SET last_used_at = now() WHERE token_hash = $1 RETURNING extension", [hashToken(token)]);
+    return r.rows[0]?.extension || null;
+  }
+  async function revokeAppDevice(token) { if (token) await db.query("DELETE FROM pbxmaison_app_devices WHERE token_hash = $1", [hashToken(String(token))]); }
+  async function appDevices(num) {
+    return (await db.query("SELECT created_at, last_used_at, user_agent FROM pbxmaison_app_devices WHERE extension = $1 ORDER BY created_at DESC", [num])).rows;
+  }
+  async function revokeAppDevices(num) { await db.query("DELETE FROM pbxmaison_app_devices WHERE extension = $1", [num]); }
 
   // ------------------------------------------------------------------ Téléphones connectés
   /** Note les connexions / déconnexions (appelé toutes les 20 s par le serveur). */
@@ -1180,7 +1198,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, deleteImpact,
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
-    createAppToken, appTokenStatus, revokeAppToken, appProvision, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
+    createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
     loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,

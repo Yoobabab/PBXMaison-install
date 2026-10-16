@@ -256,8 +256,8 @@ export async function buildApp({ db } = {}) {
   // ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP, adresses bloquées)
   const IP_RE = /^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$/;
   app.get("/api/telephonie", { preHandler: requireUser }, async (req) => {
-    const min = Math.min(1440, Math.max(5, Number(req.query?.minutes) || 60));
-    const out = await new Promise((res) => execFile(HOST_CMD[0], [...HOST_CMD.slice(1), "journal", String(min)], { timeout: 40_000, maxBuffer: 32 << 20 }, (e, o) => res(String(o || ""))));
+    const min = Math.min(43200, Math.max(5, Number(req.query?.minutes) || 60));
+    const out = await new Promise((res) => execFile(HOST_CMD[0], [...HOST_CMD.slice(1), "journal", String(min)], { timeout: 90_000, maxBuffer: 32 << 20 }, (e, o) => res(String(o || ""))));
     let d; try { d = JSON.parse(out.trim().split("\n").pop()); } catch { throw new UserError("Journal de la téléphonie illisible : réessaie dans un instant."); }
     return { ...d, client_ip: req.ip };
   });

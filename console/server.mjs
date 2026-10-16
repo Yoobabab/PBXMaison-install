@@ -418,14 +418,26 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/app/provision", async (req, reply) => {
     const wantsJson = req.query?.format === "json" || String(req.headers.accept || "").includes("application/json");
     if (!wantsJson) {
-      return reply.type("text/html; charset=utf-8").send(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>Callikoe</title><body style="font:16px system-ui;max-width:420px;margin:12vh auto;padding:0 16px;text-align:center">
-        <h1 style="font-size:20px">Application Callikoe</h1><p>Ce QR code se scanne depuis l'application mobile Callikoe pour configurer ton poste automatiquement.</p></body></html>`);
+      // QR code scanné avec l'appareil photo (ou lien reçu par mail) : page qui ouvre l'appli sur ce poste
+      const t = String(req.query?.t || "");
+      const self = `${appUrl("")}${encodeURIComponent(t)}`;
+      const deep = `callikoe://provision?url=${encodeURIComponent(self)}`;
+      const pbxName = String(pbxEnv().PBX_NAME || "").replace(/[<>&"]/g, "");
+      return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Callikoe · application mobile</title>
+        <style>body{margin:0;min-height:100vh;background:#16141a;color:#fff;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center}
+        main{max-width:400px;padding:32px 20px;text-align:center}.dot{width:64px;height:64px;border-radius:50%;margin:0 auto 18px;background:linear-gradient(120deg,#f26b4f,#d8141c 50%,#e0006e);box-shadow:0 0 0 10px rgba(255,255,255,.06)}
+        h1{font-size:24px;margin:0 0 6px}p{color:#c9c4cf;margin:0 0 18px}a.btn{display:block;padding:14px 18px;border-radius:12px;background:linear-gradient(120deg,#f26b4f,#d8141c 55%,#e0006e);color:#fff;text-decoration:none;font-weight:700;margin:0 0 12px}
+        a.ghost{background:none;border:1px solid #3a3540}.s{font-size:13px;color:#8d8794}ol{text-align:left;color:#c9c4cf;padding-left:20px}</style>
+        <main><div class="dot"></div><h1>Callikoe</h1><p>Configure ton poste${pbxName ? ` de <strong>${pbxName}</strong>` : ""} sur ton mobile, sans rien saisir.</p>
+        <a class="btn" href="${deep}">Ouvrir dans l'application Callikoe</a>
+        <ol><li>Installe l'application Callikoe sur ton téléphone (bientôt sur l'App Store et Google Play).</li><li>Reviens sur cette page et touche « Ouvrir dans l'application », ou scanne le QR code depuis l'application.</li></ol>
+        <p class="s">Ce lien est personnel et valable 48 h. Ne le transfère à personne.</p></main></html>`);
     }
     const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
     const f = provFails.get(ip);
     if (f && f.count >= 30 && f.until > Date.now()) return reply.code(429).send({ error: "Trop de tentatives." });
-    const out = await pbx.appProvision(String(req.query?.t || ""), sipServer());
+    const out = await pbx.appProvision(String(req.query?.t || ""), sipServer(), req.headers["user-agent"]);
     if (!out) {
       const fresh = !f || f.until < Date.now();
       provFails.set(ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 10 * 60_000 });
@@ -433,6 +445,26 @@ export async function buildApp({ db, ami } = {}) {
     }
     return reply.header("cache-control", "no-store").send(out);
   });
+
+  // Appli mobile : ouverture du softphone avec le jeton de l'appareil (gardé par l'appli), déconnexion de l'appareil
+  app.get("/app/login", async (req, reply) => {
+    const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();
+    const f = provFails.get(ip);
+    if (f && f.count >= 30 && f.until > Date.now()) return reply.code(429).type("text/html; charset=utf-8").send("<p>Trop de tentatives : réessaie dans 10 minutes.</p>");
+    const ext = await pbx.appDevice(String(req.query?.d || ""));
+    if (!ext) {
+      const fresh = !f || f.until < Date.now();
+      provFails.set(ip, { count: fresh ? 1 : f.count + 1, until: Date.now() + 10 * 60_000 });
+      return reply.code(401).type("text/html; charset=utf-8").send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <body style="font:16px system-ui;background:#16141a;color:#fff;text-align:center;padding:18vh 20px"><h1 style="font-size:20px">Ce téléphone n'est plus relié au poste</h1>
+        <p style="color:#c9c4cf">Demande un nouveau QR code à ton administrateur, puis déconnecte ce téléphone dans les réglages de l'application et scanne-le.</p></body>`);
+    }
+    reply.setCookie(UCOOKIE, createToken({ ext, app: true }, settings.sessionSecret, 12), cookieOpts(req));
+    return reply.redirect("/softphone?app=1");
+  });
+  app.post("/app/logout", async (req) => { await pbx.revokeAppDevice(req.body?.device_token); return { ok: true }; });
+  app.get("/api/extensions/:id/app-devices", { preHandler: requireUser }, async (req) => ({ devices: await pbx.appDevices(req.params.id) }));
+  app.delete("/api/extensions/:id/app-devices", { preHandler: requireUser }, async (req) => { await pbx.revokeAppDevices(req.params.id); return { ok: true }; });
 
   // ---------------------------------------------------------------- Espace utilisateur / softphone web
   const UCOOKIE = "callikoe_user";

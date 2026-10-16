@@ -77,6 +77,13 @@ export function createDb(cfg) {
         created_by text NOT NULL DEFAULT '',
         used_at timestamptz
       );
+      CREATE TABLE IF NOT EXISTS pbxmaison_app_devices (
+        token_hash text PRIMARY KEY,
+        extension text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        last_used_at timestamptz,
+        user_agent text NOT NULL DEFAULT ''
+      );
       CREATE TABLE IF NOT EXISTS pbxmaison_objects (
         kind text NOT NULL,
         id text NOT NULL,

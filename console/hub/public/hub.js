@@ -43,7 +43,7 @@ function setNav(active, label = "") {
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
   const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []),
-    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/telephonie", "Téléphonie", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
+    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   $("#nav").innerHTML = on ? `<div class="ng">${items.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`).join("")}</div>` : "";
   $("#user").innerHTML = on ? `<div class="sf-user"><span class="sf-av">${esc(state.user.email.charAt(0).toUpperCase())}</span>
     <span class="sf-mail" title="${esc(state.user.email)} · ${esc(state.user.role_label)}">${esc(state.user.email)}</span>
@@ -484,13 +484,13 @@ async function renderAudit() {
 
 // ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP)
 const SIP_KINDS = { erreur: ["bad", "Erreur"], auth: ["wait", "Mot de passe refusé"], refus: ["off", "Adresse inconnue"], robot: ["off", "Robot / fraude"], flood: ["wait", "Trop de messages"] };
-let sipMin = 60, sipFilter = "", sipKind = "", sipTimer = null;
+let sipMin = 60, sipFilter = "", sipKind = "", sipTimer = null, sipShow = 200;
 async function renderTelephonie() {
-  setNav("sip", "Téléphonie");
+  setNav("sip", "Logs d'erreur");
   clearInterval(sipTimer);
-  app.innerHTML = `<div class="bar"><div class="grow"><h1>Téléphonie</h1>
+  app.innerHTML = `<div class="bar"><div class="grow"><h1>Logs d'erreur</h1>
       <p class="sub" style="margin:0">Ce que l'aiguilleur SIP du serveur a refusé ou n'a pas pu transmettre, et les adresses bloquées. Utile quand un téléphone ou un trunk n'arrive pas à s'enregistrer.</p></div>
-      <label>Période<select id="sipmin">${[[15, "15 dernières minutes"], [60, "Dernière heure"], [360, "6 dernières heures"], [1440, "24 dernières heures"]].map(([v, l]) => `<option value="${v}" ${v === sipMin ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>Période<select id="sipmin">${[[15, "15 dernières minutes"], [60, "Dernière heure"], [360, "6 dernières heures"], [1440, "24 dernières heures"], [10080, "7 derniers jours"], [43200, "30 derniers jours"]].map(([v, l]) => `<option value="${v}" ${v === sipMin ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <button class="btn ghost" id="siprefresh">Actualiser</button></div>
     <div id="sipbody"><div class="empty"><span class="spin"></span></div></div>`;
   $("#sipmin").onchange = (e) => { sipMin = Number(e.target.value); load(); };
@@ -539,13 +539,14 @@ async function renderTelephonie() {
           <label style="flex:1;min-width:200px">Rechercher<input id="sipq" type="search" placeholder="Adresse IP, numéro de poste, PBX…" value="${esc(sipFilter)}" autocomplete="off"></label>
           <label>Type<select id="sipk"><option value="">Tous</option>${Object.entries(SIP_KINDS).map(([k, [, l]]) => `<option value="${k}" ${k === sipKind ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
         ${ev.length ? `<div class="sipev">
-          ${ev.slice(0, 300).map((e) => `<div class="sipev-row"><div class="sipev-meta"><span class="s">${e.at ? new Date(e.at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
+          ${ev.slice(0, sipShow).map((e) => `<div class="sipev-row"><div class="sipev-meta"><span class="s">${e.at ? new Date(e.at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
             <span class="pill ${(SIP_KINDS[e.kind] || ["off"])[0]}">${esc((SIP_KINDS[e.kind] || [e.kind, e.kind])[1])}</span>
             ${e.ip ? `<a href="#" class="mono" data-ip="${esc(e.ip)}">${esc(e.ip)}</a>` : ""}</div><div>${esc(e.text)}</div></div>`).join("")}
-          </div>` : `<div class="empty">${d.total ? "Aucun événement ne correspond." : "Rien à signaler sur la période : aucun refus ni erreur."}</div>`}
+          </div>${ev.length > sipShow ? `<div class="pad" style="text-align:center;border-top:1px solid var(--line)"><button class="btn ghost" id="sipmore">Afficher plus (${ev.length - sipShow} restants)</button></div>` : ""}` : `<div class="empty">${d.total ? "Aucun événement ne correspond." : "Rien à signaler sur la période : aucun refus ni erreur."}</div>`}
       </div>`;
     $("#sipq").oninput = (e) => { sipFilter = e.target.value; const pos = e.target.selectionStart; draw(d); const i = $("#sipq"); i.focus(); i.setSelectionRange(pos, pos); };
     $("#sipk").onchange = (e) => { sipKind = e.target.value; draw(d); };
+    $("#sipmore")?.addEventListener("click", () => { sipShow += 300; draw(d); });
     app.querySelectorAll("[data-ip]").forEach((a) => a.onclick = (e) => { e.preventDefault(); sipFilter = a.dataset.ip; draw(d); $("#sipq").scrollIntoView({ block: "center" }); });
     const act2 = async (path, ip, b) => {
       b.disabled = true;
@@ -566,7 +567,7 @@ async function renderTelephonie() {
     });
   }
   await load();
-  sipTimer = setInterval(() => { if (location.hash === "#/telephonie" && !document.hidden && !document.activeElement?.closest?.("#sipbody")) load(); else if (location.hash !== "#/telephonie") clearInterval(sipTimer); }, 30_000);
+  sipTimer = setInterval(() => { if (location.hash === "#/telephonie" && sipMin <= 1440 && !document.hidden && !document.activeElement?.closest?.("#sipbody")) load(); else if (location.hash !== "#/telephonie") clearInterval(sipTimer); }, 30_000);
 }
 
 // ---------------------------------------------------------------- Routage

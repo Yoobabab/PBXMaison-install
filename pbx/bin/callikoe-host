@@ -188,6 +188,14 @@ EOF
   nginx -t -q && { systemctl is-active --quiet nginx && systemctl reload nginx || systemctl enable --now nginx >/dev/null 2>&1; }
   ok "Serveur web prêt"
 
+  # Logs d'erreur de la téléphonie (console du serveur) : journal gardé sur disque au moins un mois
+  install -d -m 0755 /etc/systemd/journald.conf.d /var/log/journal
+  local jconf=$'[Journal]\nStorage=persistent\nSystemMaxUse=1G\nMaxRetentionSec=35day\n'
+  if [[ "$(cat /etc/systemd/journald.conf.d/callikoe.conf 2>/dev/null)" != "${jconf%$'\n'}" ]]; then
+    printf '%s' "$jconf" > /etc/systemd/journald.conf.d/callikoe.conf
+    systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
+  fi
   # fail2ban : les échecs d'authentification sont notés par l'aiguilleur avec l'adresse réelle du poste
   # Échecs de mot de passe et rafales : bannis vite. Adresse de PBX inconnue (souvent un ancien téléphone resté configuré) : bien plus tolérant.
   # Ces deux règles ne bloquent que le SIP (5060/5061) : SSH, le web et les consoles restent joignables.
@@ -624,7 +632,7 @@ cmd_etat() {
 # Journal de la téléphonie (console du serveur) : refus, erreurs, adresses bloquées ou ignorées (JSON)
 cmd_journal() {
   local min="${1:-60}"
-  [[ "$min" =~ ^[0-9]+$ ]] && ((min >= 1 && min <= 1440)) || die "Durée invalide (1 à 1440 minutes)."
+  [[ "$min" =~ ^[0-9]+$ ]] && ((min >= 1 && min <= 43200)) || die "Durée invalide (1 minute à 30 jours)."
   node "$APP/pbx/lib/sip-journal.mjs" "$REG" "$min"
 }
 valid_ip_any() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ || "$1" =~ ^[0-9a-fA-F:]{2,39}$ ]]; }

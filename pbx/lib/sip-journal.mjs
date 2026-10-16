@@ -10,7 +10,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const [reg, minArg] = process.argv.slice(2);
-const minutes = Math.min(1440, Math.max(1, Number(minArg) || 60));
+const minutes = Math.min(43200, Math.max(1, Number(minArg) || 60));
 const run = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: "utf8", timeout: 20_000, maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "ignore"] }); } catch (e) { return String(e.stdout || ""); } };
 
 // PBX du serveur : adresse (FQDN) → nom
@@ -88,4 +88,4 @@ const by_ip = [...ips.values()].sort((a, b) => b.count - a.count).slice(0, 30)
   .map((x) => ({ ...x, banned: bannedSet.has(x.ip), ignored: ignoredSet.has(x.ip) }));
 const counts = events.reduce((a, e) => ((a[e.kind] = (a[e.kind] || 0) + 1), a), {});
 
-process.stdout.write(JSON.stringify({ minutes, counts, events: events.slice(0, 500), total: events.length, by_ip, banned, ignored }) + "\n");
+process.stdout.write(JSON.stringify({ minutes, counts, events: events.slice(0, 3000), total: events.length, by_ip, banned, ignored }) + "\n");
