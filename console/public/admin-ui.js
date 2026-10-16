@@ -473,7 +473,7 @@ async function pageLicense() {
   H.setNav("sys");
   const l = await H.api("GET", "/api/license");
   const pct = l.max_calls ? Math.min(100, Math.round(100 * l.usage.calls / l.max_calls)) : 0;
-  const EDITIONS = { basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" };
+  const EDITIONS = { basic: "Basic", start: "Start", pro: "Essentiel", enterprise: "Intégral" };
   H.app.innerHTML = `<p style="margin:0 0 6px"><a href="#/systeme">← Système</a></p>` + head("Licence", "Informations de licence et d'utilisation du standard.") +
     `<div class="cx-lic"><div class="cx-lic-card"><span class="cx-lic-ed">Callikoe ${H.esc(EDITIONS[l.edition] || l.edition || "")}</span>
       <div class="cx-lic-key mono">${H.esc(l.key || "—")}</div>

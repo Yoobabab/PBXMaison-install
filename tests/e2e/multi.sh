@@ -447,7 +447,7 @@ R="$(hapi POST /api/licenses '{"edition":"pro","simultaneous_calls":"16","durati
 EXPA="$(envof clia PBX_LICENSE_EXPIRES)"
 R="$(hapi POST "/api/licenses/$KA/renew" '{"edition":"enterprise","simultaneous_calls":"16","duration_months":"12"}')"
 [[ "$(envof clia PBX_MAX_CALLS)" == 16 && "$(envof clia PBX_EDITION)" == enterprise && "$(envof clia PBX_LICENSE_EXPIRES)" > "$EXPA" ]] \
-  && pass "Licence de cli a renouvelée (+1 an, Enterprise, 16 appels) : appliquée tout de suite au PBX" || fail "renouvellement : $R · $(envof clia PBX_MAX_CALLS) $(envof clia PBX_LICENSE_EXPIRES)"
+  && pass "Licence de cli a renouvelée (+1 an, Intégral, 16 appels) : appliquée tout de suite au PBX" || fail "renouvellement : $R · $(envof clia PBX_MAX_CALLS) $(envof clia PBX_LICENSE_EXPIRES)"
 R="$(hapi DELETE "/api/licenses/$KB" '{"confirm":"XXXX","code":"000000"}')"
 [[ "$R" == *"4 derniers caractères"* ]] && pass "Suppression de licence : confirmation exigée" || fail "suppression sans confirmation : $R"
 R="$(hapi DELETE "/api/licenses/$KB" "{\"confirm\":\"${KB: -4}\",\"code\":\"$(otp "$HTOTP")\"}")"; JID="$(echo "$R" | jget id)"

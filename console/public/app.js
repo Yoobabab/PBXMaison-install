@@ -459,7 +459,7 @@ async function renderDashboard() {
         <div class="s">${d.extensions.total === 0 ? "Aucun poste créé" : "téléphones enregistrés"}</div></a>
       <a class="card" href="#/appels"><div class="k">Appels en cours</div><div class="v">${d.calls.available ? d.calls.active : "—"}<small> / ${d.pbx.max_calls}</small></div>
         <div class="s">${d.calls.available ? "limite de la licence" : "moteur injoignable"}</div></a>
-      <a class="card tone-brand" href="#/systeme"><div class="k">Licence</div><div class="v">Callikoe ${esc(({ basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" })[d.pbx.edition] || d.pbx.edition)}</div>
+      <a class="card tone-brand" href="#/systeme"><div class="k">Licence</div><div class="v">Callikoe ${esc(({ basic: "Basic", start: "Start", pro: "Essentiel", enterprise: "Intégral" })[d.pbx.edition] || d.pbx.edition)}</div>
         <div class="s">valable jusqu'au ${fmtDate(d.pbx.expires_at)}${left < 30 ? ` · <strong>${left} jours restants</strong>` : ""}</div></a>
     </div>
     <div class="grid2">
@@ -1695,7 +1695,7 @@ async function renderSystem() {
   setNav("sys");
   clearInterval(timer);
   const [d, l] = await Promise.all([api("GET", "/api/dashboard"), api("GET", "/api/license").catch(() => null)]);
-  const ED = { basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" };
+  const ED = { basic: "Basic", start: "Start", pro: "Essentiel", enterprise: "Intégral" };
   const pct = l?.max_calls ? Math.min(100, Math.round(100 * l.usage.calls / l.max_calls)) : 0;
   app.innerHTML = `${takeFlash()}<h1>Système</h1><p class="sub">Licence, certificat, installation et code pour le portail.</p>
     ${l ? `<div class="cx-lic sys-lic"><div class="cx-lic-card"><span class="cx-lic-ed">Callikoe ${esc(ED[l.edition] || l.edition || "")}</span>

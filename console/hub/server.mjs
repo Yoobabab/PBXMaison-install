@@ -27,7 +27,7 @@ const TRUSTED = process.env.HUB_TRUSTED_KEYS || (fs.existsSync("/etc/callikoe/tr
 const DNS_API = process.env.PBXM_DNS_API || "https://api.callikoe.fr";
 const MANAGED = ["callikoe.fr", "callikoe.com"];
 const isManaged = (f) => MANAGED.some((d) => String(f || "").endsWith("." + d));
-export const EDITIONS = { basic: "Basic", pro: "Pro", enterprise: "Enterprise" };
+export const EDITIONS = { basic: "Basic", pro: "Essentiel", enterprise: "Intégral" };
 export const SC = [2, 4, 8, 16, 24, 32, 48, 64, 96, 128];
 export const COUNTRIES = [
   { code: "FR", name: "France", dial: "33", tz: "Europe/Paris" }, { code: "BE", name: "Belgique", dial: "32", tz: "Europe/Brussels" },
