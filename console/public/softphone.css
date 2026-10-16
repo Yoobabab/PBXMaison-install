@@ -381,3 +381,5 @@ label.ck input{width:auto}
 .sp-display span.bk{width:38px;flex:none}
 .sp-dialpage{max-width:420px;margin:0 auto;padding:4px 0 0;overflow:visible}
 .sp-dialpage .key{background:var(--panel);box-shadow:0 0 0 1px var(--line)}.sp-dialpage .key:hover{background:var(--accent-soft)}
+.ltabs,.stabs{overflow-y:hidden;scrollbar-width:none}
+.ltabs::-webkit-scrollbar,.stabs::-webkit-scrollbar{display:none}

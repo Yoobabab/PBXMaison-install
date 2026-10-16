@@ -134,7 +134,7 @@ td a{color:inherit;font-weight:600;text-decoration:none}
 .fw.info{color:var(--ink)}
 .back{display:inline-block;margin-bottom:10px;font-size:14px;text-decoration:none}
 .fwsum{margin-bottom:14px}
-.tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line);margin:18px 0 0;scrollbar-width:thin}
+.tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line);margin:18px 0 0;scrollbar-width:none}
 .tabs a{padding:10px 14px;text-decoration:none;color:var(--muted);font-weight:600;font-size:14px;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs a.on{color:var(--accent);border-bottom-color:var(--accent)}
 .panel.tabbed{border-top-left-radius:0;border-top-right-radius:0;border-top:0}
@@ -751,3 +751,7 @@ tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
   .pl-now{margin:12px}.pl-force{width:100%}.pl-force select{flex:1;min-width:0}
   .pl-sec{padding:14px 12px}.pl-md{min-height:52px;padding:4px}.pl-mtag{display:none}
 }
+
+/* Onglets : défilement horizontal au besoin (petits écrans), sans barre de défilement ni flèches visibles */
+.tabs,.fx-tabs{overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none}
+.tabs::-webkit-scrollbar,.fx-tabs::-webkit-scrollbar{display:none}
