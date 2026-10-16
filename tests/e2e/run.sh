@@ -262,6 +262,13 @@ echo "$R" | grep -q '"override":"x"' && echo "$R" | grep -q '"name":"Planning te
 R2="$(plrule)"
 [[ "$R2" == "Planning test · Dehors" ]] && pass "Planning forcé : l'appel suit le scénario forcé" || { echo "règle CDR : $R2" >> "$OUT"; fail "planning forcé"; }
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$VJ" "$API/api/u/plannings")" == 403 ]] && pass "Planning : un utilisateur sans rôle Responsable est refusé" || fail "planning non responsable"
+# Client : rôle « Accès console » → connexion à la console avec l'e-mail de sa fiche et son mot de passe du softphone (accès restreint)
+api PUT /api/extensions/204 '{"email":"client204@e2e.invalid","options":{"role":"console"}}' >/dev/null
+CJ="$(mktemp)"
+curl -sS -c "$CJ" -X POST "$API/api/login" -H 'content-type: application/json' -d "{\"email\":\"client204@e2e.invalid\",\"password\":\"$PA\"}" | grep -q '"ok":true' \
+  && [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$CJ" "$API/api/extensions")" == 200 ]] && [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$CJ" "$API/api/security")" == 403 ]] \
+  && curl -sS -b "$CJ" "$API/api/me" | grep -q '"role":"client"' && pass "Client : connexion à la console par sa fiche utilisateur (accès restreint)" || fail "connexion client par fiche"
+curl -sS -o /dev/null -X POST "$API/api/login" -H 'content-type: application/json' -d '{"email":"client204@e2e.invalid","password":"mauvais"}' -w '%{http_code}' | grep -q 401 && pass "Client : mauvais mot de passe refusé" || fail "client mauvais mdp"
 # Dépannage : tests d'appel silencieux (entrant, sortant) et test de sonnerie
 R="$(api POST /api/diag/inbound '{"number":"04 65 00 15 41"}')"
 echo "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);process.exit(r.verdict&&r.targets.some(t=>t.ext==="205")&&r.root.title.includes("SDA")?0:1)})' && pass "Dépannage : test entrant silencieux (chemin de maintenant, poste 205, état des appareils)" || { echo "$R" | cut -c1-400 >> "$OUT"; fail "diag entrant"; }

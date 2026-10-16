@@ -260,6 +260,7 @@ async function pageRecordings(sub) {
   const s = cfg.settings;
   const DIR = { in: "Entrant", out: "Sortant", internal: "Interne" };
   const showCfg = sub === "reglages";
+  const pg = H.paginate("rec", list.recordings);
   H.app.innerHTML = head("Enregistrements", "Écoute et télécharge les appels enregistrés.",
     `<a class="btn ${showCfg ? "" : "ghost"}" href="${showCfg ? "#/enregistrements" : "#/enregistrements/reglages"}">${showCfg ? "Retour à la liste" : "Réglages"}</a>`) +
     `<div class="kpis">${kpi("rec" in I ? "rec" : "play", "Enregistrement", s.enabled ? "Actif" : "Arrêté", s.enabled ? [s.in && "entrants", s.out && "sortants"].filter(Boolean).join(" et ") : "Aucun appel n'est enregistré", s.enabled ? "good" : "warn")}
@@ -276,17 +277,18 @@ async function pageRecordings(sub) {
         <select id="rdir"><option value="">Tous les sens</option><option value="in" ${q.direction === "in" ? "selected" : ""}>Entrants</option><option value="out" ${q.direction === "out" ? "selected" : ""}>Sortants</option></select>
         <select id="rdays">${[[1, "Aujourd'hui"], [7, "7 jours"], [30, "30 jours"], [90, "90 jours"], [366, "1 an"]].map(([v, l]) => `<option value="${v}" ${Number(q.days || 30) === v ? "selected" : ""}>${l}</option>`).join("")}</select>
         <span class="s">${list.total} enregistrement(s)</span></div>
-      ${list.recordings.length ? `<div class="cx-list">${list.recordings.map((c) => `<div class="cx-row cx-rec">
+      ${list.recordings.length ? `${pg.html}<div class="cx-list">${pg.rows.map((c) => `<div class="cx-row cx-rec">
           <span class="cx-dir ${c.direction}" title="${DIR[c.direction] || ""}">${ic(c.direction === "in" ? I.down : I.up, 15)}</span>
           <div class="grow"><b>${H.esc(c.from.name || H.fmtPhone(c.from.number))}</b> <span class="s">→</span> <b>${H.esc(c.answered_by || H.fmtPhone(c.to.number))}</b>
             <div class="s">${fmtDT(c.start)} · ${Math.floor(c.talk / 60)} min ${String(c.talk % 60).padStart(2, "0")} s${c.did ? ` · SDA ${H.esc(H.fmtPhone(c.did))}` : ""}</div></div>
           ${c.available ? `<audio controls preload="none" src="/api/recordings/file?f=${encodeURIComponent(c.recording)}"></audio>
             <a class="ghost-ic" href="/api/recordings/file?f=${encodeURIComponent(c.recording)}&dl=1" title="Télécharger">${ic(I.dl)}</a>
             <button class="ghost-ic" data-del="${H.esc(c.recording)}" title="Supprimer">${ic(I.trash)}</button>` : `<span class="s">Fichier supprimé</span>`}
-        </div>`).join("")}</div>` : `<div class="empty">${s.enabled ? "Aucun appel enregistré sur la période." : "L'enregistrement est arrêté : active-le dans les réglages."}</div>`}</div>`);
+        </div>`).join("")}</div>${pg.html}` : `<div class="empty">${s.enabled ? "Aucun appel enregistré sur la période." : "L'enregistrement est arrêté : active-le dans les réglages."}</div>`}</div>`);
   const f = H.$("#recf");
   if (f) onSubmit(f, async (v) => { await H.api("PUT", "/api/recording", { ...v, retention_days: Number(v.retention_days) }); ok("Réglages enregistrés."); location.hash = "#/enregistrements"; });
-  const setQ = (k, v) => { sessionStorage.setItem("pbxm_rec_q", JSON.stringify({ ...q, [k]: v })); pageRecordings(); };
+  H.wirePager(H.app, () => pageRecordings(sub));
+  const setQ = (k, v) => { sessionStorage.setItem("pbxm_rec_q", JSON.stringify({ ...q, [k]: v })); H.resetPage("rec"); pageRecordings(); };
   let t; H.$("#rq")?.addEventListener("input", (e) => { clearTimeout(t); t = setTimeout(() => setQ("q", e.target.value), 400); });
   H.$("#rdir")?.addEventListener("change", (e) => setQ("direction", e.target.value));
   H.$("#rdays")?.addEventListener("change", (e) => setQ("days", e.target.value));
@@ -302,12 +304,19 @@ async function pageShortcodes() {
   const { codes } = await H.api("GET", "/api/shortcodes");
   const groups = [...new Set(codes.map((c) => c.group))];
   const SUF = { place: "+ place (1-9)", poste: "+ poste", "numéro": "+ numéro" };
-  H.app.innerHTML = head("Codes de raccourci", "Codes composés depuis un téléphone ou le softphone. Modifiables pour reprendre ceux d'un ancien standard.") +
-    `<form id="scf" novalidate><div class="form-msg"></div><div class="cx-codes">${groups.map((g) => `<div class="panel"><div class="ph"><h2>${H.esc(g)}</h2></div>
-      ${codes.filter((c) => c.group === g).map((c) => `<label class="cx-code"><span class="grow">${H.esc(c.label)}${c.code !== c.default ? `<small>par défaut ${H.esc(c.default)}</small>` : ""}</span>
-        <span class="cx-kbd"><input name="${c.id}" value="${H.esc(c.code)}" maxlength="5" spellcheck="false">${c.suffix ? `<em>${SUF[c.suffix] || ""}</em>` : ""}</span></label>`).join("")}</div>`).join("")}</div>
-      <div class="note" style="margin-top:16px"><b>Exemples</b> : transférer un appel vers <code>${H.esc(codes.find((c) => c.id === "park").code)}</code> le met en attente sur une place de parcage (annoncée), n'importe quel collègue le reprend avec <code>${H.esc(codes.find((c) => c.id === "unpark").code)}1</code>. <code>${H.esc(codes.find((c) => c.id === "pickup").code)}201</code> intercepte un appel qui sonne sur le poste 201.</div>
+  const EX = { place: "1", poste: "201", "numéro": "0612345678" };
+  const example = (c) => `${c.code}${c.suffix ? EX[c.suffix] || "" : ""}`;
+  H.app.innerHTML = head("Codes de raccourci", "Composés depuis un téléphone, le softphone ou l'appli. Tu peux les changer pour reprendre ceux d'un ancien standard.") +
+    `<form id="scf" novalidate><div class="form-msg"></div><div class="panel"><div class="table-wrap"><table class="sctable">
+      <thead><tr><th>Code</th><th>Ce que ça fait</th><th class="hide-sm">Exemple</th></tr></thead>
+      ${groups.map((g) => `<tbody><tr class="scg"><td colspan="3">${H.esc(g)}</td></tr>
+        ${codes.filter((c) => c.group === g).map((c) => `<tr>
+          <td class="nw"><span class="sc-in"><input name="${c.id}" value="${H.esc(c.code)}" maxlength="5" spellcheck="false" aria-label="${H.esc(c.label)}" data-sfx="${H.esc(c.suffix || "")}">${c.suffix ? `<em>+ ${H.esc(c.suffix === "place" ? "place" : c.suffix)}</em>` : ""}</span></td>
+          <td>${H.esc(c.label)}${c.code !== c.default ? ` <span class="s">(par défaut ${H.esc(c.default)})</span>` : ""}</td>
+          <td class="hide-sm"><code data-ex="${c.id}">${H.esc(example(c))}</code></td></tr>`).join("")}</tbody>`).join("")}
+    </table></div></div>
       <div class="actions" style="margin-top:16px"><button type="button" class="btn ghost" id="scr">Rétablir les codes par défaut</button><button class="btn">Enregistrer</button></div></form>`;
+  H.app.querySelectorAll(".sc-in input").forEach((i) => i.addEventListener("input", () => { const x = H.app.querySelector(`[data-ex="${i.name}"]`); if (x) x.textContent = `${i.value}${i.dataset.sfx ? EX[i.dataset.sfx] || "" : ""}`; }));
   const f = H.$("#scf");
   onSubmit(f, async (v) => { await H.api("PUT", "/api/shortcodes", v); ok("Codes enregistrés : ils fonctionnent tout de suite."); pageShortcodes(); });
   H.$("#scr").addEventListener("click", () => { codes.forEach((c) => (f.elements[c.id].value = c.default)); });
@@ -407,37 +416,65 @@ async function pageUpdates(check = false) {
 }
 
 // ================================================================ Alertes
-async function pageAlerts() {
+async function pageAlerts(sub) {
   H.setNav("alerts");
   const d = await H.api("GET", "/api/alerts");
   const s = d.settings;
   const SEV = { critical: "bad", warning: "wait", info: "off" };
-  H.app.innerHTML = head("Alertes", "Le standard prévient quand quelque chose d'important se passe.", `<button class="btn ghost" id="alchk">Vérifier maintenant</button>`) +
-    `<div class="note" style="margin-bottom:16px">${ic(I.mail, 16)} <b>Envoi des e-mails en préparation.</b> Les alertes sont déjà détectées et notées dans le journal ci-dessous ; l'envoi par e-mail sera activé dans une prochaine mise à jour avec les réglages enregistrés ici.</div>
-    <div class="grid2"><form id="alf" class="panel" novalidate><div class="ph"><h2>Que surveiller ?</h2></div><div class="pad stack"><div class="form-msg"></div>
-      ${Object.entries(d.events).map(([k, [t, sev, desc]]) => `<label class="switch cx-sw"><input type="checkbox" name="events.${k}" ${s.events[k] ? "checked" : ""}><span></span><b>${H.esc(t)} ${pill(SEV[sev], d.severity[sev])}<small>${H.esc(desc)}</small></b></label>`).join("")}
-      <label>Seuil d'alerte du disque (%)<input type="number" name="disk_threshold" min="50" max="99" value="${s.disk_threshold}"></label>
-      <h3 class="cx-h3">Destinataires et serveur d'envoi</h3>
-      <label>Adresses e-mail<textarea name="recipients" rows="2" placeholder="technicien@irt-network.fr, gerant@client.fr">${H.esc(s.recipients.join(", "))}</textarea></label>
-      <div class="cx-g3"><label>Serveur SMTP<input name="smtp.host" value="${H.esc(s.smtp.host)}" placeholder="smtp.exemple.fr"></label><label>Port<input name="smtp.port" type="number" value="${s.smtp.port}"></label>
-        <label>Sécurité<select name="smtp.security">${[["starttls", "STARTTLS (587)"], ["tls", "TLS (465)"], ["none", "Aucune (25)"]].map(([k, l]) => `<option value="${k}" ${s.smtp.security === k ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
-      <div class="cx-g3"><label>Identifiant<input name="smtp.user" value="${H.esc(s.smtp.user)}" autocomplete="off"></label><label>Mot de passe<input type="password" name="smtp.password" placeholder="${s.smtp.has_password ? "•••••••• (inchangé)" : ""}" autocomplete="new-password"></label>
-        <label>Expéditeur<input name="smtp.from" value="${H.esc(s.smtp.from)}" placeholder="standard@client.fr"></label></div>
-      <div class="actions"><button class="btn">Enregistrer</button></div></div></form>
-      <div class="panel"><div class="ph"><h2>Journal des alertes</h2>${d.log.length ? '<button class="btn ghost sm" id="alclr">Vider</button>' : ""}</div>
-        ${d.log.length ? `<div class="cx-list">${d.log.map((l) => `<div class="cx-row cx-al ${l.severity}"><span class="cx-sev"></span><div class="grow"><b>${H.esc(l.title)}</b><div class="s">${H.esc(l.text)}</div></div><div class="s cx-r">${fmtDT(l.at)}<br>${l.email === "pending" ? "e-mail en attente" : l.email === "no_recipient" ? "sans destinataire" : H.esc(l.email)}</div></div>`).join("")}</div>` : `<div class="empty">${ic(I.check, 30)}<p>Aucune alerte. Tout va bien.</p></div>`}</div></div>`;
-  onSubmit(H.$("#alf"), async (v) => { v.disk_threshold = Number(v.disk_threshold); v.smtp.port = Number(v.smtp.port); await H.api("PUT", "/api/alerts", v); ok("Réglages des alertes enregistrés."); pageAlerts(); });
-  H.$("#alclr")?.addEventListener("click", async () => { await H.api("DELETE", "/api/alerts/log"); pageAlerts(); });
-  H.$("#alchk").addEventListener("click", async () => { await H.api("POST", "/api/alerts/check", {}); pageAlerts(); });
+  const showCfg = sub === "reglages";
+  const week = Date.now() - 7 * 86400_000;
+  const recent = d.log.filter((l) => Date.parse(l.at) > week);
+  // Alertes identiques regroupées : une ligne, le nombre et la dernière fois
+  const groups = [];
+  for (const l of d.log) {
+    const g = groups.find((x) => x.title === l.title && x.text === l.text);
+    if (g) { g.count++; g.first = l.at; } else groups.push({ ...l, count: 1, first: l.at, last: l.at });
+  }
+  const lvl = sessionStorage.getItem("pbxm_al_lvl") || "";
+  const shown = groups.filter((g) => !lvl || g.severity === lvl);
+  const tabs = `<nav class="subtabs" style="margin:0 0 14px">${[["", "Journal"], ["reglages", "Réglages"]].map(([k, l]) => `<a href="#/alertes${k ? "/" + k : ""}" class="${(sub || "") === k ? "on" : ""}">${l}</a>`).join("")}</nav>`;
+  H.app.innerHTML = head("Alertes", "Le PBX prévient quand quelque chose d'important se passe : trunk décroché, tentative d'intrusion, disque plein…", `<button class="btn ghost" id="alchk">Vérifier maintenant</button>`) + tabs +
+    (showCfg ? `<form id="alf" novalidate><div class="form-msg"></div>
+      <div class="panel" style="margin-bottom:16px"><div class="ph"><h2>Que surveiller ?</h2></div><div class="table-wrap"><table class="altable"><tbody>
+        ${Object.entries(d.events).map(([k, [t, sev, desc]]) => `<tr><td class="nw"><label class="switch"><input type="checkbox" name="events.${k}" ${s.events[k] ? "checked" : ""} aria-label="${H.esc(t)}"><span></span></label></td>
+          <td><b>${H.esc(t)}</b><div class="s">${H.esc(desc)}</div>${k === "disk" || /disk|disque/i.test(k) ? `<label class="al-inline">Seuil<input type="number" name="disk_threshold" min="50" max="99" value="${s.disk_threshold}"> %</label>` : ""}</td>
+          <td class="nw">${pill(SEV[sev], d.severity[sev])}</td></tr>`).join("")}
+      </tbody></table></div></div>
+      ${Object.keys(d.events).some((k) => k === "disk" || /disk|disque/i.test(k)) ? "" : `<input type="hidden" name="disk_threshold" value="${s.disk_threshold}">`}
+      <div class="panel"><div class="ph"><h2>Envoi par e-mail</h2><span class="pill wait">En préparation</span></div><div class="pad stack">
+        <p class="hint" style="margin:0">Les alertes sont déjà détectées et notées dans le journal. L'envoi par e-mail sera activé dans une prochaine mise à jour avec ces réglages.</p>
+        <label>Destinataires<textarea name="recipients" rows="2" placeholder="technicien@irt-network.fr, gerant@client.fr">${H.esc(s.recipients.join(", "))}</textarea></label>
+        <div class="cx-g3"><label>Serveur SMTP<input name="smtp.host" value="${H.esc(s.smtp.host)}" placeholder="smtp.exemple.fr"></label><label>Port<input name="smtp.port" type="number" value="${s.smtp.port}"></label>
+          <label>Sécurité<select name="smtp.security">${[["starttls", "STARTTLS (587)"], ["tls", "TLS (465)"], ["none", "Aucune (25)"]].map(([k, l]) => `<option value="${k}" ${s.smtp.security === k ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+        <div class="cx-g3"><label>Identifiant<input name="smtp.user" value="${H.esc(s.smtp.user)}" autocomplete="off"></label><label>Mot de passe<input type="password" name="smtp.password" placeholder="${s.smtp.has_password ? "•••••••• (inchangé)" : ""}" autocomplete="new-password"></label>
+          <label>Expéditeur<input name="smtp.from" value="${H.esc(s.smtp.from)}" placeholder="standard@client.fr"></label></div>
+      </div></div>
+      <div class="actions" style="margin-top:16px"><button class="btn">Enregistrer</button></div></form>`
+    : `<div class="kpis">${kpi("alerts" in I ? "alerts" : "clock", "7 derniers jours", recent.length, recent.length ? `${recent.filter((l) => l.severity === "critical").length} critique(s)` : "Rien à signaler", recent.some((l) => l.severity === "critical") ? "warn" : "good")}
+        ${kpi("clock", "Dernière alerte", d.log[0] ? fmtDT(d.log[0].at) : "Aucune", d.log[0] ? H.esc(d.log[0].title) : "")}
+        ${kpi("check", "Surveillances actives", Object.values(s.events).filter(Boolean).length, `sur ${Object.keys(d.events).length}`)}</div>
+      <div class="panel"><div class="filters"><div class="seg" id="allvl">${[["", "Toutes"], ["critical", "Critiques"], ["warning", "Attention"]].map(([k, l]) => `<label class="${lvl === k ? "on" : ""}"><input type="radio" name="allvl" value="${k}" ${lvl === k ? "checked" : ""}>${l}</label>`).join("")}</div>
+        <span class="grow"></span>${d.log.length ? '<button class="btn ghost sm" id="alclr">Vider le journal</button>' : ""}</div>
+        ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Niveau</th><th>Alerte</th><th class="hide-sm">Dernière fois</th><th>Nombre</th></tr></thead><tbody>
+          ${shown.map((g) => `<tr><td class="nw">${pill(SEV[g.severity] || "off", d.severity[g.severity] || g.severity)}</td>
+            <td><b>${H.esc(g.title)}</b><div class="s">${H.esc(g.text)}</div></td>
+            <td class="hide-sm nw">${fmtDT(g.last)}${g.count > 1 ? `<div class="s">depuis le ${fmtDT(g.first)}</div>` : ""}</td>
+            <td class="nw">${g.count > 1 ? `<span class="pill off">×${g.count}</span>` : "1"}</td></tr>`).join("")}</tbody></table></div>`
+          : `<div class="empty">${ic(I.check, 30)}<p>${d.log.length ? "Aucune alerte de ce niveau." : "Aucune alerte. Tout va bien."}</p></div>`}</div>`);
+  const f = H.$("#alf");
+  if (f) onSubmit(f, async (v) => { v.disk_threshold = Number(v.disk_threshold); v.smtp.port = Number(v.smtp.port); await H.api("PUT", "/api/alerts", v); ok("Réglages des alertes enregistrés."); pageAlerts("reglages"); });
+  H.app.querySelectorAll("[name=allvl]").forEach((r) => r.onchange = () => { sessionStorage.setItem("pbxm_al_lvl", r.value); pageAlerts(sub); });
+  H.$("#alclr")?.addEventListener("click", async () => { if (!confirm("Vider tout le journal des alertes ?")) return; await H.api("DELETE", "/api/alerts/log"); pageAlerts(sub); });
+  H.$("#alchk").addEventListener("click", async () => { await H.api("POST", "/api/alerts/check", {}); pageAlerts(sub); });
 }
 
 // ================================================================ Licence
 async function pageLicense() {
-  H.setNav("licence");
+  H.setNav("sys");
   const l = await H.api("GET", "/api/license");
   const pct = l.max_calls ? Math.min(100, Math.round(100 * l.usage.calls / l.max_calls)) : 0;
   const EDITIONS = { basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" };
-  H.app.innerHTML = head("Licence", "Informations de licence et d'utilisation du standard.") +
+  H.app.innerHTML = `<p style="margin:0 0 6px"><a href="#/systeme">← Système</a></p>` + head("Licence", "Informations de licence et d'utilisation du standard.") +
     `<div class="cx-lic"><div class="cx-lic-card"><span class="cx-lic-ed">Callikoe ${H.esc(EDITIONS[l.edition] || l.edition || "")}</span>
       <div class="cx-lic-key mono">${H.esc(l.key || "—")}</div>
       <div class="cx-lic-meta"><span>${H.esc(l.pbx.company || l.pbx.name)}</span><span>${l.expires_at ? `Valable jusqu'au ${new Date(l.expires_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}` : "Sans date d'expiration"}</span></div></div>
@@ -608,7 +645,7 @@ export async function renderAdmin(helpers, page, sub) {
     case "codes": return pageShortcodes();
     case "sauvegardes": return pageBackups();
     case "mises-a-jour": return pageUpdates();
-    case "alertes": return pageAlerts();
+    case "alertes": return pageAlerts(sub);
     case "licence": return pageLicense();
     case "passerelles": return pageGateways(sub);
     case "comptes": return pageAccounts();

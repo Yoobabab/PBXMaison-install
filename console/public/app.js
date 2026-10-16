@@ -129,7 +129,7 @@ const NAV = [
     ["#/gestion", "Gestion d'appels", "cf"], ["#/sortants", "Règles sortantes", "out"], ["#/trunks", "Trunks", "trunks"], ["#/codes", "Codes de raccourci", "codes"]]],
   ["Activité", [["#/journal", "Journal des appels", "cdr"], ["#/enregistrements", "Enregistrements", "rec"], ["#/annuaire", "Annuaire", "book"], ["#/capture", "Capture réseau", "cap"]]],
   ["Administration", [["#/securite", "Sécurité", "sec"], ["#/sauvegardes", "Sauvegardes", "backup"], ["#/mises-a-jour", "Mises à jour", "updates"],
-    ["#/comptes", "Comptes", "accounts"], ["#/alertes", "Alertes", "alerts"], ["#/licence", "Licence", "licence"], ["#/systeme", "Système", "sys"]]],
+    ["#/comptes", "Comptes", "accounts"], ["#/alertes", "Alertes", "alerts"], ["#/systeme", "Système", "sys"]]],
 ];
 // Accès restreint (client) : ces pages restent réservées à l'installateur
 const CLIENT_HIDDEN = new Set(["cap", "gw", "out", "trunks", "codes", "sec", "backup", "updates", "accounts", "alerts", "licence", "sys"]);
@@ -138,7 +138,8 @@ function setNav(active) {
   const on = !!state?.logged_in;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  const nav = NAV.map(([g, items]) => [g, items.filter(([, , k]) => state?.role !== "client" || !CLIENT_HIDDEN.has(k))]).filter(([, items]) => items.length);
+  // Multi-tenant : les comptes se gèrent depuis la console du serveur (clients : rôle « Accès console » dans leur fiche utilisateur)
+  const nav = NAV.map(([g, items]) => [g, items.filter(([, , k]) => (state?.role !== "client" || !CLIENT_HIDDEN.has(k)) && !(k === "accounts" && state?.tenant))]).filter(([, items]) => items.length);
   $("#nav").innerHTML = on ? nav.map(([g, items]) => `<div class="ng">${g ? `<span class="ngl">${g}</span>` : ""}${items.map(([h, l, k]) =>
     `<a href="${h}" class="${k === active ? "on" : ""}" ${k === active ? 'aria-current="page"' : ""}>${nicon(k)}<span>${l}</span></a>`).join("")}</div>`).join("") : "";
   $("#user").innerHTML = on ? `<a class="sf-link" href="/softphone" target="_blank" rel="noopener">${nicon("soft", 17)}<span>Softphone web</span></a>
@@ -537,16 +538,16 @@ async function renderTrunks() {
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Trunks</h1><p class="sub" style="margin:0">Lignes de l'opérateur (SIP).</p></div>
     <a class="btn" href="#/trunks/nouveau">+ Ajouter un trunk</a></div>
     <div class="panel">${trunks.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>Nom</th><th>Opérateur</th><th>Numéro</th><th class="hide-sm">Serveur</th><th>État</th><th></th></tr></thead>
-      <tbody>${trunks.map((t) => `<tr>
-        <td><strong>${esc(t.id)}</strong></td>
-        <td>${esc(t.operator)}<div class="s">${esc(t.codecs.join(", "))}</div></td>
-        <td>${esc(fmtPhone(t.number.startsWith("33") ? "+" + t.number : t.number))}<div class="s">présenté : ${esc(t.outbound_cid)}${t.dids.length ? ` · ${t.dids.length} SDA` : ""}</div></td>
-        <td class="hide-sm mono">${esc(t.host)}<div class="s">${esc(t.transport.toUpperCase())} · ${esc(t.username)}</div></td>
+      <thead><tr><th>Trunk</th><th>Numéro principal</th><th>SDA</th><th>État</th><th></th></tr></thead>
+      <tbody>${trunks.map((t) => `<tr class="click" data-href="#/trunks/${esc(t.id)}">
+        <td><strong>${esc(t.id)}</strong><div class="s">${esc(t.operator)}</div></td>
+        <td class="nw">${esc(fmtPhone(t.number.startsWith("33") ? "0" + t.number.slice(2) : t.number))}</td>
+        <td>${t.dids.length ? `${t.dids.length} numéro${t.dids.length > 1 ? "s" : ""}` : '<span class="s">aucune</span>'}</td>
         <td><span class="pill ${t.status.cls}">${esc(t.status.label)}</span></td>
         <td style="text-align:right;white-space:nowrap"><a class="btn ghost sm" href="#/trunks/${esc(t.id)}">Modifier</a>
           <button class="btn ghost sm" data-del="${esc(t.id)}">Supprimer</button></td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty"><p>Aucun trunk pour l'instant.</p><a class="btn" href="#/trunks/nouveau">Ajouter le trunk de l'opérateur</a></div>`}</div>`;
+  app.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a,button")) location.hash = tr.dataset.href; });
   app.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
     if (!confirm(`Supprimer le trunk « ${b.dataset.del} » ? Les appels ne passeront plus par lui.`)) return;
     await api("DELETE", `/api/trunks/${encodeURIComponent(b.dataset.del)}`);
@@ -571,26 +572,29 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
   const fmt = (name, cur, withKeep) => `<select name="${name}"><option value="">Selon l'opérateur</option>${opts(Object.entries(FORMAT_LABELS).filter(([k]) => withKeep || k !== "keep"), cur)}</select>`;
 
   app.innerHTML = `<h1>${existing ? `Trunk « ${esc(existing.id)} »` : "Ajouter un trunk"}</h1>
-    <p class="sub">${existing ? "Laisse le mot de passe vide pour garder l'actuel." : "Choisis l'opérateur : les réglages techniques sont remplis automatiquement."}</p>
+    <p class="sub">${existing ? `${esc(existing.operator)} · <span class="pill ${existing.status.cls}">${esc(existing.status.label)}</span>` : "Choisis l'opérateur : les réglages techniques sont remplis automatiquement."}</p>
     ${errorMsg && !errorField ? `<div class="flash bad">${esc(errorMsg)}</div>` : ""}
     <div class="panel"><form method="post" class="grid" id="tf" novalidate>
-      ${field("template", "Opérateur", `<select name="template" required><option value="">— Choisir —</option>${opts(templates.map((t) => [t.id, t.label]), v.template)}</select>`, "", "full")}
-      <div class="op-info" id="opinfo" hidden></div>
-      ${field("name", "Nom du trunk", `<input name="name" value="${esc(v.name || "")}" ${existing ? "readonly" : ""} placeholder="ex. dstny" autocapitalize="off">`, "Lettres minuscules, chiffres, tirets.")}
-      ${field("number", "Numéro principal", `<input name="number" value="${esc(v.number || "")}" placeholder="04 12 34 56 78" inputmode="tel">`, "Numéro présenté par défaut sur les appels sortants.")}
-      ${field("username", "Identifiant SIP", `<input name="username" value="${esc(v.username || "")}" autocapitalize="off" autocomplete="off">`, "<span id='userhint'>Fourni par l'opérateur.</span>")}
-      ${field("password", "Mot de passe SIP", `<input name="password" type="password" autocomplete="new-password" placeholder="${existing ? "inchangé" : ""}">`, "")}
+      <h3 class="full sec" style="margin-top:0">Connexion à l'opérateur</h3>
+      ${field("template", "Opérateur", `<select name="template" required><option value="">— Choisir —</option>${opts(templates.map((t) => [t.id, t.label]), v.template)}</select>`, "")}
+      ${field("name", "Nom du trunk", `<input name="name" value="${esc(v.name || "")}" ${existing ? "readonly" : ""} placeholder="ex. dstny" autocapitalize="off">`, existing ? "" : "Minuscules, chiffres, tirets.")}
+      ${field("username", "Identifiant SIP", `<input name="username" value="${esc(v.username || "")}" autocapitalize="off" autocomplete="off">`, "<span id='userhint'></span>")}
+      ${field("password", "Mot de passe SIP", `<input name="password" type="password" autocomplete="new-password" placeholder="${existing ? "inchangé (laisser vide)" : ""}">`, "")}
       ${field("host", "Serveur (registrar)", `<input name="host" value="${esc(v.host || "")}" autocapitalize="off" placeholder="sip.operateur.fr">`, "<span id='hosthint'></span>")}
-      ${field("proxy", "Proxy sortant", `<input name="proxy" value="${esc(v.proxy ?? "")}" autocapitalize="off" placeholder="aucun">`, "<span id='proxyhint'>Facultatif : serveur ou serveur:port.</span>")}
-      ${field("dids", "SDA de ce trunk", `<textarea name="dids" rows="4" placeholder="04 65 00 15 30&#10;04 65 00 15 40 - 04 65 00 15 49">${esc(v.dids || "")}</textarea>`, "Un numéro ou une tranche par ligne (ex. 04 65 00 15 40 - 04 65 00 15 49). Ils sont ensuite proposés dans les fiches utilisateurs et les règles entrantes.", "full")}
+      ${field("proxy", "Proxy sortant (facultatif)", `<input name="proxy" value="${esc(v.proxy ?? "")}" autocapitalize="off" placeholder="aucun">`, "<span id='proxyhint'></span>")}
+      <h3 class="full sec">Numéros</h3>
+      ${field("number", "Numéro principal", `<input name="number" value="${esc(/^33\d{9}$/.test(v.number || "") ? fmtPhone("0" + v.number.slice(2)) : v.number || "")}" placeholder="04 12 34 56 78" inputmode="tel">`, "Présenté par défaut sur les appels sortants.")}
+      <span class="hide-sm"></span>
+      ${field("dids", "SDA de ce trunk", `<textarea name="dids" rows="3" placeholder="04 65 00 15 30&#10;04 65 00 15 40 - 04 65 00 15 49">${esc(v.dids || "")}</textarea>`, "Un numéro ou une tranche par ligne.", "full")}
+      <details class="full trunk-adv" ${["codecs", "cid_format", "dial_format", "caller_format"].includes(errorField) ? "open" : ""}><summary>Réglages avancés : codecs et formats des numéros</summary><div class="inner">
+      <div class="op-info full" id="opinfo" hidden></div>
       <div class="full ${errorField === "codecs" ? "has-err" : ""}"><span class="lbl">Codecs (ordre de priorité)</span>
         <input type="hidden" name="codecs" value="${esc(v.codecs || "")}">
         <div class="codec-list" id="codecs"></div>
-        ${errorField === "codecs" ? `<span class="err">${esc(errorMsg)}</span>` : `<span class="hint">Le premier coché est proposé en priorité à l'opérateur, puis les suivants en secours. Flèches pour changer l'ordre.</span>`}</div>
-      <details ${v.cid_format || v.dial_format || v.caller_format ? "open" : ""}><summary>Formats des numéros (avancé)</summary><div class="inner">
-        ${field("cid_format", "Numéro présenté", fmt("cid_format", v.cid_format), "Envoyé à l'opérateur.")}
-        ${field("dial_format", "Numéros composés", fmt("dial_format", v.dial_format), "Envoyés à l'opérateur.")}
-        ${field("caller_format", "Appelant entrant", fmt("caller_format", v.caller_format, true), "Affiché sur les postes.")}
+        ${errorField === "codecs" ? `<span class="err">${esc(errorMsg)}</span>` : `<span class="hint">Le premier coché est proposé en priorité, les suivants en secours.</span>`}</div>
+        ${field("cid_format", "Format du numéro présenté", fmt("cid_format", v.cid_format), "")}
+        ${field("dial_format", "Format des numéros composés", fmt("dial_format", v.dial_format), "")}
+        ${field("caller_format", "Format de l'appelant affiché sur les postes", fmt("caller_format", v.caller_format, true), "")}
       </div></details>
       <div class="actions"><a class="btn ghost" href="#/trunks">Annuler</a><button class="btn" type="submit">${existing ? "Enregistrer" : "Ajouter le trunk"}</button></div>
     </form></div>`;
@@ -613,8 +617,8 @@ async function renderTrunkForm(id, errorField, errorMsg, draft) {
     }
     // Les aides sont remplacées par le message d'erreur du champ concerné : elles peuvent être absentes
     const hh = $("#hosthint"), uh = $("#userhint");
-    if (hh) hh.textContent = t.registrar.host ? "Rempli d'après l'opérateur (modifiable)." : "À demander à l'opérateur (propre à ton compte).";
-    if (uh) uh.textContent = t.auth_username_default === "trunk_number" ? "Laisser vide : le numéro du trunk est utilisé." : "Fourni par l'opérateur.";
+    if (hh) hh.textContent = t.registrar.host ? "" : "À demander à l'opérateur (propre à ton compte).";
+    if (uh) uh.textContent = t.auth_username_default === "trunk_number" ? "Vide : le numéro du trunk est utilisé." : "";
     form.host.placeholder = t.registrar.host ? t.registrar.host : (/eqinoxe/.test(t.notes) ? "ex. pbx.eqinoxe.com" : "fourni par l'opérateur");
   };
   form.addEventListener("submit", async (e) => {
@@ -716,44 +720,50 @@ async function renderPhones() {
   setNav("phones");
   const d = await api("GET", "/api/phones");
   const filter = sessionStorage.getItem("pbxm_phones_f") || "all";
+  const q0 = sessionStorage.getItem("pbxm_phones_q") || "";
   const on = d.phones.filter((p) => p.online).length;
-  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Téléphones</h1><p class="sub" style="margin:0">Tous les appareils : téléphones de bureau, softphones et applis.</p></div>
-    ${on ? `<button class="btn ghost" id="resyncall">Reprovisionner tous les connectés (${on})</button>` : ""}</div>
-    <div class="cards"><div class="card"><div class="k">Connectés</div><div class="v">${on}</div></div>
-      <div class="card"><div class="k">Déconnectés</div><div class="v">${d.phones.length - on}</div></div>
-      <div class="card"><div class="k">Lien de provisioning</div><div class="s mono" style="word-break:break-all;margin-top:6px">${esc(d.provisioning_url)}</div>
-        <button class="copy" style="margin-top:6px" data-copy="${esc(d.provisioning_url)}">Copier</button></div></div>
-    <div class="panel"><div class="filters"><div class="seg" id="pf">${[["all", "Tous"], ["on", "Connectés"], ["off", "Déconnectés"]].map(([k, l]) => `<label class="${filter === k ? "on" : ""}"><input type="radio" name="pf" value="${k}" ${filter === k ? "checked" : ""}>${l}</label>`).join("")}</div></div>
-    ${d.phones.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>État</th><th>Appareil</th><th class="hide-sm">MAC</th><th>Utilisateur</th><th>Depuis</th><th class="hide-sm">IP publique / locale</th><th class="hide-sm">Connexion</th><th></th></tr></thead>
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Téléphones</h1><p class="sub" style="margin:0">Tous les appareils des utilisateurs : téléphones de bureau, softphones et applis. Clique sur une ligne pour ouvrir la fiche.</p></div>
+    ${on ? `<button class="btn ghost" id="resyncall" title="Ils rechargent leur configuration sans redémarrer">Reprovisionner les ${on} connectés</button>` : ""}</div>
+    <div class="provbar"><span class="dl">Lien de provisioning</span><span class="mono">${esc(d.provisioning_url)}</span><button class="copy" data-copy="${esc(d.provisioning_url)}">Copier</button>
+      <span class="hint">À mettre dans le téléphone (Auto Provision › Server URL) ou en option DHCP 66.</span></div>
+    <div class="panel"><div class="filters">
+      <div class="seg" id="pf">${[["all", "Tous", d.phones.length], ["on", "Connectés", on], ["off", "Déconnectés", d.phones.length - on]].map(([k, l, n]) => `<label class="${filter === k ? "on" : ""}"><input type="radio" name="pf" value="${k}" ${filter === k ? "checked" : ""}>${l} <span class="cnt">${n}</span></label>`).join("")}</div>
+      <input type="search" id="pq" class="grow" placeholder="Rechercher : utilisateur, modèle, MAC, adresse IP…" value="${esc(q0)}" style="max-width:360px"></div>
+    ${d.phones.length ? `<div class="table-wrap"><table class="ptable">
+      <thead><tr><th>Appareil</th><th>Utilisateur</th><th>État</th><th class="hide-sm">Adresse</th><th></th></tr></thead>
       <tbody id="prows"></tbody></table></div>`
       : `<div class="empty">Aucun appareil pour l'instant. Renseigne le modèle et l'adresse MAC dans la fiche d'un utilisateur (onglet Téléphone IP), ou connecte un softphone.</div>`}</div>`;
   copyButtons();
   const draw = () => {
     const f = app.querySelector("#pf input:checked")?.value || "all";
-    sessionStorage.setItem("pbxm_phones_f", f);
+    const q = ($("#pq")?.value || "").trim().toLowerCase().replace(/[:\s-]/g, "");
+    sessionStorage.setItem("pbxm_phones_f", f); sessionStorage.setItem("pbxm_phones_q", $("#pq")?.value || "");
     app.querySelectorAll("#pf label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
     const rows = $("#prows"); if (!rows) return;
-    rows.innerHTML = d.phones.filter((p) => f === "all" || (f === "on") === p.online).map((p) => `<tr class="click" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
-      <td>${p.online ? '<span class="pill ok">Connecté</span>' : '<span class="pill off">Déconnecté</span>'}</td>
-      <td><span class="devcell">${deviceIcon(p.device.kind)}<span>${esc(p.model || "—")}${p.firmware ? `<div class="s">firmware ${esc(p.firmware)}</div>` : !p.model && p.user_agent ? `<div class="s">${esc(p.user_agent)}</div>` : ""}</span></span></td>
-      <td class="hide-sm mono">${esc(fmtMac(p.mac)) || "—"}</td>
-      <td><a href="#/utilisateurs/${esc(p.user.id)}">${esc(p.user.id)} · ${esc(p.user.name)}</a></td>
-      <td>${p.since ? `${p.online ? "connecté depuis" : "déconnecté depuis"} <strong>${esc(ago(p.since))}</strong><div class="s">${esc(fmtDateTime(p.since))}</div>` : p.provisioned ? `<span class="s">jamais connecté · provisionné le ${esc(fmtDateTime(p.provisioned.at))}</span>` : '<span class="s">jamais connecté</span>'}</td>
-      <td class="hide-sm mono">${esc(p.source_ip || "—")}${p.local_ip && p.local_ip !== p.source_ip ? `<div class="s">local ${esc(p.local_ip)}</div>` : ""}</td>
-      <td class="hide-sm">${p.connection ? esc(p.connection.label) : "—"}</td>
-      <td class="acts">${p.online ? `<button class="btn ghost sm" data-resync="${esc(p.user.id)}">Reprovisionner</button> <button class="btn ghost sm" data-reboot="${esc(p.user.id)}">Redémarrer</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="8" class="empty">Aucun appareil dans cette catégorie.</td></tr>';
+    const hay = (p) => `${p.user.id}${p.user.name}${p.model}${p.label || ""}${p.mac}${p.source_ip}${p.local_ip}${p.device?.label || ""}`.toLowerCase().replace(/[:\s-]/g, "");
+    const list = d.phones.filter((p) => (f === "all" || (f === "on") === p.online) && (!q || hay(p).includes(q)));
+    rows.innerHTML = list.map((p) => {
+      const sub = [p.label, p.mac ? fmtMac(p.mac) : "", p.firmware ? `v${p.firmware}` : ""].filter(Boolean).join(" · ") || (!p.model && p.user_agent ? p.user_agent : "");
+      return `<tr class="click" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
+      <td><span class="devcell">${deviceIcon(p.device.kind)}<span><strong>${esc(p.model || p.device?.label || "Appareil")}</strong>${sub ? `<div class="s mono-s">${esc(sub)}</div>` : ""}</span></span></td>
+      <td class="nw"><a href="#/utilisateurs/${esc(p.user.id)}">${esc(p.user.id)} · ${esc(p.user.name)}</a></td>
+      <td class="nw">${p.online ? '<span class="pill ok">Connecté</span>' : '<span class="pill off">Déconnecté</span>'}
+        <div class="s">${p.since ? `depuis ${esc(ago(p.since))}` : p.provisioned ? `provisionné le ${esc(fmtDate(p.provisioned.at))}` : "jamais connecté"}</div></td>
+      <td class="hide-sm"><span class="mono">${esc(p.source_ip || "—")}</span>${p.local_ip && p.local_ip !== p.source_ip || p.connection ? `<div class="s">${[p.local_ip && p.local_ip !== p.source_ip ? `local ${esc(p.local_ip)}` : "", p.connection ? esc(p.connection.label) : ""].filter(Boolean).join(" · ")}</div>` : ""}</td>
+      <td class="acts nw">${p.online && !p.extra ? `<button class="ic" data-resync="${esc(p.user.id)}" title="Reprovisionner (sans redémarrer)" aria-label="Reprovisionner">⟳</button><button class="ic" data-reboot="${esc(p.user.id)}" title="Redémarrer" aria-label="Redémarrer">⏻</button>` : ""}</td></tr>`;
+    }).join("") || '<tr><td colspan="5" class="empty">Aucun appareil ne correspond.</td></tr>';
     wireResync(rows);
-    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
+    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a,button")) location.hash = tr.dataset.href; });
   };
   app.querySelectorAll("#pf input").forEach((i) => i.addEventListener("change", draw));
+  $("#pq")?.addEventListener("input", draw);
   $("#resyncall")?.addEventListener("click", async (e) => {
     if (!confirm("Envoyer la configuration à tous les téléphones connectés ? Ils la rechargent sans redémarrer.")) return;
     const r = await api("POST", "/api/phones/resync"); e.target.textContent = `Envoyé à ${r.sent} appareil(s) ✓`;
   });
   draw();
   clearInterval(timer);
-  timer = setInterval(() => location.hash === "#/telephones" && renderPhones(), 20000);
+  timer = setInterval(() => location.hash === "#/telephones" && !document.activeElement?.matches?.("#pq") && renderPhones(), 20000);
 }
 
 // ---------------------------------------------------------------- Utilisateurs
@@ -1009,7 +1019,8 @@ async function renderUser(id, tab = "general") {
   if (tab === "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label>Numéro de poste<input value="${esc(u.id)}" readonly></label>
-      <label>Rôle<select name="options.role"><option value="user" ${u.options.role !== "manager" ? "selected" : ""}>Utilisateur</option><option value="manager" ${u.options.role === "manager" ? "selected" : ""}>Responsable</option></select><span class="hint">Un responsable modifie les plannings d'appels depuis son softphone et l'appli mobile.</span></label>
+      <label>Rôle<select name="options.role">${[["user", "Utilisateur"], ["manager", "Responsable"], ["console", "Accès console (client)"]].map(([k, l]) => `<option value="${k}" ${(u.options.role || "user") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <span class="hint">Responsable : modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
       <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
@@ -1556,7 +1567,8 @@ async function renderCdr() {
   clearInterval(timer);
   const f = JSON.parse(sessionStorage.getItem("pbxm_cdr") || '{"days":"7","direction":"","status":"","q":""}');
   const qs = new URLSearchParams(f).toString();
-  const [d, live] = await Promise.all([api("GET", `/api/cdr?${qs}`), api("GET", "/api/calls").catch(() => ({ calls: [] }))]);
+  const [d, live] = await Promise.all([api("GET", `/api/cdr?${qs}&limit=5000`), api("GET", "/api/calls").catch(() => ({ calls: [] }))]);
+  const pg = paginate("cdr", d.calls);
   const fmtWhen = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
   const sel = (name, opts) => `<select data-f="${name}">${opts.map(([v, l]) => `<option value="${v}" ${f[name] === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   app.innerHTML = `<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX : qui a appelé, qui a répondu, combien de temps.</p></div>
@@ -1568,18 +1580,43 @@ async function renderCdr() {
       ${sel("direction", [["", "Tous les sens"], ["in", "Entrants"], ["out", "Sortants"], ["internal", "Internes"]])}
       ${sel("status", [["", "Tous les statuts"], ["answered", "Répondus"], ["missed", "Manqués"], ["voicemail", "Messagerie"], ["busy", "Occupés"], ["failed", "Échecs"]])}
       <span class="s">${d.total} appel${d.total > 1 ? "s" : ""}</span></div>
-    ${d.calls.length ? `<div class="table-wrap"><table class="cdr"><thead><tr><th>Date</th><th>Sens</th><th>De</th><th>Vers</th><th>Répondu par</th><th>Durée</th><th>Statut</th></tr></thead><tbody>
-      ${d.calls.map((c) => `<tr><td>${esc(fmtWhen(c.start))}</td><td title="${DIR[c.direction]?.[1] || ""}"><span class="dirc ${c.direction}">${DIR[c.direction]?.[0] || ""}</span></td>
+    ${d.calls.length ? `${pg.html}<div class="table-wrap"><table class="cdr"><thead><tr><th>Date</th><th>Sens</th><th>De</th><th>Vers</th><th>Répondu par</th><th>Durée</th><th>Statut</th></tr></thead><tbody>
+      ${pg.rows.map((c) => `<tr><td>${esc(fmtWhen(c.start))}</td><td title="${DIR[c.direction]?.[1] || ""}"><span class="dirc ${c.direction}">${DIR[c.direction]?.[0] || ""}</span></td>
         <td><strong>${esc(fmtPhone(c.from.number))}</strong>${c.from.name ? `<div class="s">${esc(c.from.name)}</div>` : ""}</td>
         <td>${esc(fmtPhone(c.to.number))}${c.rule ? `<div class="s">Règle « ${esc(c.rule)} »</div>` : ""}${c.direction === "in" && c.did ? `<div class="s"><a href="#/gestion/traceur/${esc(c.did)}">Tracer la SDA</a></div>` : ""}</td>
         <td>${c.answered_by ? esc(c.answered_by) : c.voicemail ? `Messagerie ${esc(c.voicemail)}` : "—"}${c.rang.length > (c.answered_by ? 1 : 0) ? `<div class="s">A sonné : ${esc(c.rang.join(", "))}</div>` : ""}</td>
         <td>${c.talk ? fmtDur(c.talk) : "—"}<div class="s">total ${fmtDur(c.duration)}</div></td>
-        <td><span class="pill ${CST[c.status]?.[0] || "off"}">${CST[c.status]?.[1] || esc(c.status)}</span></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Aucun appel sur cette période.</div>'}</div>`;
-  const save = () => { app.querySelectorAll("[data-f]").forEach((el) => { f[el.dataset.f] = el.value; }); sessionStorage.setItem("pbxm_cdr", JSON.stringify(f)); renderCdr(); };
+        <td><span class="pill ${CST[c.status]?.[0] || "off"}">${CST[c.status]?.[1] || esc(c.status)}</span></td></tr>`).join("")}</tbody></table></div>${pg.html}` : '<div class="empty">Aucun appel sur cette période.</div>'}</div>`;
+  wirePager(app, renderCdr);
+  const save = () => { app.querySelectorAll("[data-f]").forEach((el) => { f[el.dataset.f] = el.value; }); sessionStorage.setItem("pbxm_cdr", JSON.stringify(f)); resetPage("cdr"); renderCdr(); };
   app.querySelectorAll("select[data-f]").forEach((el) => el.onchange = save);
   let t; app.querySelector("input[data-f=q]").oninput = () => { clearTimeout(t); t = setTimeout(() => { sessionStorage.setItem("pbxm_cdr_focus", "1"); save(); }, 400); };
   if (sessionStorage.getItem("pbxm_cdr_focus")) { sessionStorage.removeItem("pbxm_cdr_focus"); const i = app.querySelector("input[data-f=q]"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
+
+// ---------------------------------------------------------------- Pagination des listes (50 / 100 / 200 / 500 lignes)
+const PAGE_SIZES = [50, 100, 200, 500];
+const pageSize = (key) => { try { const n = Number(localStorage.getItem(`pbxm_ps_${key}`)); return PAGE_SIZES.includes(n) ? n : 50; } catch { return 50; } };
+/** Découpe une liste : { rows, html } ; html = barre « Lignes par page » + pages, à câbler avec wirePager. */
+function paginate(key, list) {
+  const size = pageSize(key), pages = Math.max(1, Math.ceil(list.length / size));
+  const page = Math.min(Math.max(1, Number(sessionStorage.getItem(`pbxm_pg_${key}`)) || 1), pages);
+  const from = (page - 1) * size;
+  return { rows: list.slice(from, from + size), html: list.length <= PAGE_SIZES[0] && size === PAGE_SIZES[0] ? "" : `<div class="pager" data-pager="${key}">
+    <label>Lignes par page<select data-ps>${PAGE_SIZES.map((n) => `<option ${n === size ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+    <span class="grow"></span><span class="s">${list.length ? `${from + 1}–${Math.min(from + size, list.length)} sur ${list.length}` : "0"}</span>
+    <button type="button" class="btn ghost sm" data-pg="${page - 1}" ${page <= 1 ? "disabled" : ""} aria-label="Page précédente">‹</button>
+    <span class="s">page ${page} / ${pages}</span>
+    <button type="button" class="btn ghost sm" data-pg="${page + 1}" ${page >= pages ? "disabled" : ""} aria-label="Page suivante">›</button></div>` };
+}
+function wirePager(root, rerender) {
+  root.querySelectorAll("[data-pager]").forEach((p) => {
+    const key = p.dataset.pager;
+    p.querySelector("[data-ps]").onchange = (e) => { try { localStorage.setItem(`pbxm_ps_${key}`, e.target.value); } catch { /* */ } sessionStorage.setItem(`pbxm_pg_${key}`, "1"); rerender(); };
+    p.querySelectorAll("[data-pg]").forEach((b) => b.onclick = () => { sessionStorage.setItem(`pbxm_pg_${key}`, b.dataset.pg); rerender(); window.scrollTo({ top: 0 }); });
+  });
+}
+const resetPage = (key) => sessionStorage.setItem(`pbxm_pg_${key}`, "1");
 
 // ---------------------------------------------------------------- Annuaire de l'entreprise
 const PTYPES = { work: "Bureau", mobile: "Mobile", home: "Domicile", other: "Autre" };
@@ -1591,6 +1628,7 @@ async function renderContacts(editId) {
   const all = q ? (await api("GET", "/api/contacts")).contacts : contacts;
   const cur = editId && editId !== "nouveau" ? all.find((c) => c.id === editId) : null;
   const editing = editId === "nouveau" || cur;
+  const pg = paginate("book", contacts);
   const c = cur || { first_name: "", last_name: "", company: "", email: "", notes: "", phones: [{ type: "work", number: "" }, { type: "mobile", number: "" }] };
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Annuaire</h1><p class="sub" style="margin:0">Contacts de l'entreprise : visibles dans le softphone et sur les téléphones Yealink, et nom affiché quand ils appellent.</p></div>
     <a class="btn ghost" href="/api/contacts.csv">Exporter</a><button class="btn ghost" id="imp">Importer un CSV</button><a class="btn" href="#/annuaire/nouveau">+ Ajouter un contact</a></div>
@@ -1606,12 +1644,13 @@ async function renderContacts(editId) {
         <div class="actions">${cur ? '<button type="button" class="btn ghost" id="cdel">Supprimer</button>' : ""}<a class="btn ghost" href="#/annuaire">Annuler</a><button class="btn">Enregistrer</button></div>
       </form></div>` : ""}
     <div class="panel"><div class="filters"><input type="search" id="bq" placeholder="Rechercher : nom, société, numéro…" value="${esc(q)}"><span class="s">${contacts.length} contact${contacts.length > 1 ? "s" : ""}</span></div>
-    ${contacts.length ? `<div class="table-wrap"><table><thead><tr><th>Nom</th><th>Société</th><th>Numéros</th><th>E-mail</th><th></th></tr></thead><tbody>
-      ${contacts.map((x) => `<tr><td><a href="#/annuaire/${esc(x.id)}">${esc(`${x.first_name} ${x.last_name}`.trim() || "—")}</a></td><td>${esc(x.company)}</td>
+    ${contacts.length ? `${pg.html}<div class="table-wrap"><table><thead><tr><th>Nom</th><th>Société</th><th>Numéros</th><th>E-mail</th><th></th></tr></thead><tbody>
+      ${pg.rows.map((x) => `<tr><td><a href="#/annuaire/${esc(x.id)}">${esc(`${x.first_name} ${x.last_name}`.trim() || "—")}</a></td><td>${esc(x.company)}</td>
         <td>${x.phones.map((p) => `${esc(fmtPhone(p.number))} <span class="s">${PTYPES[p.type]}</span>`).join("<br>")}</td><td>${esc(x.email)}</td>
-        <td class="acts"><a class="btn ghost sm" href="#/annuaire/${esc(x.id)}">Modifier</a></td></tr>`).join("")}</tbody></table></div>`
+        <td class="acts"><a class="btn ghost sm" href="#/annuaire/${esc(x.id)}">Modifier</a></td></tr>`).join("")}</tbody></table></div>${pg.html}`
       : `<div class="empty">${q ? "Aucun résultat." : "L'annuaire est vide : ajoute des contacts ou importe un fichier CSV (Prénom ; Nom ; Société ; Téléphone ; Mobile ; E-mail)."}</div>`}</div>`;
-  let t; $("#bq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { sessionStorage.setItem("pbxm_book_q", e.target.value); renderContacts(editId).then(() => { const i = $("#bq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
+  wirePager(app, () => renderContacts(editId));
+  let t; $("#bq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { sessionStorage.setItem("pbxm_book_q", e.target.value); resetPage("book"); renderContacts(editId).then(() => { const i = $("#bq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
   $("#imp").onclick = () => $("#impf").click();
   $("#impf").onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -1649,8 +1688,17 @@ async function renderContacts(editId) {
 async function renderSystem() {
   setNav("sys");
   clearInterval(timer);
-  const d = await api("GET", "/api/dashboard");
-  app.innerHTML = `${takeFlash()}<h1>Système</h1><p class="sub">Certificat, installation et code pour le portail.</p>
+  const [d, l] = await Promise.all([api("GET", "/api/dashboard"), api("GET", "/api/license").catch(() => null)]);
+  const ED = { basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" };
+  const pct = l?.max_calls ? Math.min(100, Math.round(100 * l.usage.calls / l.max_calls)) : 0;
+  app.innerHTML = `${takeFlash()}<h1>Système</h1><p class="sub">Licence, certificat, installation et code pour le portail.</p>
+    ${l ? `<div class="panel sys-lic"><div class="ph"><h2>Licence</h2><a class="btn ghost sm" href="#/licence">Détails et changement de licence</a></div>
+      <div class="pad sys-lic-b">
+        <div><span class="dl">Édition</span><strong>Callikoe ${esc(ED[l.edition] || l.edition || "")}</strong></div>
+        <div><span class="dl">Appels simultanés</span><strong>${l.usage.calls} / ${l.max_calls}</strong><span class="cx-bar"><i style="width:${pct}%"></i></span></div>
+        <div><span class="dl">Validité</span><strong>${l.expires_at ? new Date(l.expires_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }) : "Sans date d'expiration"}</strong>${l.days_left != null ? `<span class="pill ${l.days_left <= 30 ? "wait" : "ok"}">${l.days_left} jours restants</span>` : ""}</div>
+        <div><span class="dl">Utilisateurs · trunks</span><strong>${l.usage.users} · ${l.usage.trunks}</strong></div>
+      </div></div>` : ""}
     <div class="grid2">
       <div class="panel"><div class="ph"><h2>Certificat et configuration</h2></div>
         <div class="pad stack">
@@ -1682,7 +1730,7 @@ async function renderSystem() {
 const cfHelpers = { api, esc, $, app, setNav, formData, showFormError, takeFlash: () => takeFlash(), setFlash: (f) => { flash = f; } };
 
 // Pages d'administration (module admin-ui.js)
-const adminHelpers = { ...cfHelpers, fmtPhone, copyButtons,
+const adminHelpers = { ...cfHelpers, fmtPhone, copyButtons, paginate, wirePager, resetPage,
   /** Rappelle fn toutes les ms jusqu'à ce qu'elle renvoie true (arrêté en changeant de page). */
   poll: (fn, ms) => { clearInterval(timer); const run = async () => { try { if (await fn()) clearInterval(timer); } catch { /* réessaie */ } }; timer = setInterval(run, ms); run(); } };
 

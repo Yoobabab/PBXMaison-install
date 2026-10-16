@@ -16,8 +16,9 @@ export class UserError extends Error {
 }
 
 /** Rôle d'un utilisateur du PBX : un responsable gère les plannings depuis son softphone et l'appli. */
-export const USER_ROLES = { user: "Utilisateur", manager: "Responsable (gère les plannings)" };
-export const isManager = (u) => u?.options?.role === "manager" && !u.options.disabled;
+export const USER_ROLES = { user: "Utilisateur", manager: "Responsable (gère les plannings)", console: "Accès console (restreint)" };
+/** Responsable : modifie les plannings depuis son softphone ; « accès console » : en plus, se connecte à la console du PBX (accès restreint). */
+export const isManager = (u) => ["manager", "console"].includes(u?.options?.role) && !u.options.disabled;
 
 export function defaultUser(id) {
   return {

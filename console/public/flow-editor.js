@@ -48,7 +48,9 @@ export function flowSummary(cfData, helpers, d) {
 export function renderFlowEditor(helpers, cfData, head, id, shared) {
   h = helpers; cf = cfData; kit = shared;
   cur = id && id !== "nouveau" ? cf.objects.find((o) => o.kind === "flow" && o.id === id) : null;
-  flow = cur ? structuredClone(cur.data) : { name: "", dids: [], is_default: false, schedule: "", branches: { open: [], closed: null, break: null, holiday: null } };
+  // Nouveau routage : horaires généraux du PBX proposés d'office
+  const gen = cf.objects.find((o) => o.kind === "schedule" && o.data.general);
+  flow = cur ? structuredClone(cur.data) : { name: "", dids: [], is_default: false, schedule: gen?.id || "", branches: { open: [], closed: gen ? [] : null, break: null, holiday: null } };
   sel = null; tab = "open"; errAt = null; adding = null;
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed fx">
     <div class="fx-top">
@@ -91,7 +93,7 @@ export function renderFlowEditor(helpers, cfData, head, id, shared) {
 // ---------------------------------------------------------------- Horaires (créés et modifiés sans quitter l'éditeur)
 function drawSched() {
   const sel2 = h.$("#fsched");
-  sel2.innerHTML = `<option value="">Toujours ouvert</option>${objs("schedule").map((s) => `<option value="${esc(s.id)}" ${flow.schedule === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}<option value="__new">+ Nouveaux horaires…</option>`;
+  sel2.innerHTML = `<option value="">Toujours ouvert</option>${objs("schedule").map((s) => `<option value="${esc(s.id)}" ${flow.schedule === s.id ? "selected" : ""}>${esc(s.name)}${s.data.general ? " (généraux)" : ""}</option>`).join("")}<option value="__new">+ Nouveaux horaires…</option>`;
   sel2.value = flow.schedule || "";
   h.$("#fsedit").hidden = !flow.schedule;
 }

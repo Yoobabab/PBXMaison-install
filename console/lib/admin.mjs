@@ -157,7 +157,7 @@ export function createAdminService({ db, ami, pbx }) {
       let size = 0; try { size = fs.statSync(f).size; } catch { /* fichier purgé */ }
       return { ...c, size, available: size > 44 };
     });
-    return { recordings: list.slice(0, 1000), total: list.length };
+    return { recordings: list.slice(0, 5000), total: list.length };
   }
   async function recordingFile(rel) {
     const f = recordingPath(rel);

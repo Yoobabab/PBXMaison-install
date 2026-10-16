@@ -2,6 +2,7 @@
 // annonces, traceur de routage, renvois actifs). Module chargé par app.js, qui fournit ses outils (h).
 import { renderFlowEditor, flowSummary } from "./flow-editor.js";
 import { renderPlanning, planningSummary } from "./planning-ui.js";
+import { resolvePlan, localNow } from "./planning-core.js";
 let h = null;
 const TABS = [["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
   ["svi", "SVI", "ivr"], ["messageries", "Messageries", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["depannage", "Dépannage", ""], ["traceur", "Traceur", ""], ["renvois", "Renvois actifs", ""], ["planning", "Planning", "planning"]];
@@ -45,7 +46,60 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   }
   if (id && kind === "flow") return renderFlowEditor(h, cf, head, id, { promptField, wirePromptFields, destPicker, wireDests, scheduleFields, wireSchedule, collect, defaults, IVR_KEYS });
   if (id) return kind === "prompt" ? renderPromptForm(head, id) : renderForm(head, kind, id === "nouveau" ? null : id);
+  if (kind === "schedule") return renderSchedules(head);
   return renderList(head, kind);
+}
+
+// ---------------------------------------------------------------- Horaires : généraux du PBX + par numéro
+function renderSchedules(head) {
+  const scheds = objs("schedule");
+  const general = scheds.find((s) => s.data.general);
+  const byId = (id) => scheds.find((s) => s.id === id);
+  const stateTxt = (st) => `<span class="pill ${st === "open" ? "ok" : st === "holiday" ? "wait" : st === "break" ? "wait" : "bad"}">${st === "open" ? "Ouvert" : st === "holiday" ? "Férié / congés" : st === "break" ? "Pause" : "Fermé"}</span>`;
+  const entry = cf.objects.filter((o) => ["rule", "flow", "planning", "group", "queue", "ivr"].includes(o.kind));
+  const def = entry.find((o) => o.data.is_default);
+  const hoursOf = (o) => {
+    if (!o) return { txt: "Toujours ouvert", st: "open" };
+    if (o.kind === "planning") {
+      const now = localNow(new Date(), cf.timezone); const r = resolvePlan(o.data, now.ymd, now.minute);
+      return { txt: `Planning « ${o.name} » (par tranche horaire)`, st: null, now: o.data.scenarios.find((x) => x.id === r.scenario)?.name || "?" };
+    }
+    const s = o.data.schedule && byId(o.data.schedule);
+    return s ? { txt: `« ${s.name} »${s.data.general ? " (généraux)" : ""} · ${describeWeek(s.data.week)}`, st: scheduleNow(s.data), href: `#/gestion/horaires/${s.id}` } : { txt: "Toujours ouvert (aucun horaire)", st: "open" };
+  };
+  const destOf = (did) => {
+    const u = cf.users.find((x) => (x.dids || []).includes(did));
+    if (u) return { label: `Utilisateur ${u.id} · ${u.name}`, href: `#/utilisateurs/${u.id}/general`, obj: null, user: true };
+    const o = entry.find((x) => (x.data.dids || []).includes(did)) || null;
+    if (o) return { label: `${o.kind === "planning" ? "Planning" : o.kind === "flow" ? "Routage" : o.kind === "rule" ? "Règle" : cf.options.kinds[o.kind]} « ${o.name} »`, href: `#/gestion/${KIND_TAB[o.kind]}/${o.id}`, obj: o };
+    if (def) return { label: `Par défaut : « ${def.name} »`, href: `#/gestion/${KIND_TAB[def.kind]}/${def.id}`, obj: def };
+    return { label: "Aucune règle (sonnerie générale)", href: "#/routes", obj: null };
+  };
+  const rows = cf.trunk_dids.map(({ did, trunk }) => {
+    const d = destOf(did); const hrs = d.user ? { txt: "Ses propres renvois (fiche utilisateur)", st: null } : hoursOf(d.obj);
+    return `<tr><td class="nw"><strong>${esc(fmtP(did))}</strong><div class="s">${esc(trunk)}</div></td>
+      <td><a href="${esc(d.href)}">${esc(d.label)}</a></td>
+      <td>${hrs.href ? `<a href="${esc(hrs.href)}">${esc(hrs.txt)}</a>` : esc(hrs.txt)}</td>
+      <td class="nw">${hrs.st ? stateTxt(hrs.st) : hrs.now ? `<span class="pill ok">${esc(hrs.now)}</span>` : "—"}</td>
+      <td class="acts"><a class="btn ghost sm" href="#/gestion/depannage/${encodeURIComponent(did)}">Tester</a></td></tr>`;
+  }).join("");
+  const used = (id) => cf.objects.filter((o) => o.data.schedule === id).length;
+  h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed">
+    <div class="ph"><p class="hint" style="margin:0;max-width:760px">Les horaires généraux s'appliquent par défaut aux nouveaux routages. Chaque numéro peut avoir ses propres horaires dans son routage (ou un planning par tranche horaire).</p>
+      <a class="btn" href="#/gestion/horaires/nouveau">+ Nouveaux horaires</a></div>
+    <div class="pad"><h3 class="cf-h" style="margin-top:0">Horaires généraux du PBX</h3>
+      ${general ? `<div class="sch-gen"><div class="grow"><strong>${esc(general.name)}</strong> ${stateBadge(general)}<div class="s">${esc(describeWeek(general.data.week))}${general.data.holidays_fr ? " · fermé les jours fériés" : ""}${general.data.holidays.length ? ` · ${general.data.holidays.length} période(s) de congés` : ""}</div></div>
+        <a class="btn ghost sm" href="#/gestion/horaires/${esc(general.id)}">Modifier</a></div>`
+        : `<div class="note">Aucun horaire n'est marqué « généraux ». ${scheds.length ? "Ouvre l'un d'eux et coche « Horaires généraux du PBX »." : '<a href="#/gestion/horaires/nouveau">Crée les horaires du bureau</a> et coche « Horaires généraux du PBX ».'}</div>`}
+      <h3 class="cf-h">Horaires par numéro du trunk</h3>
+      ${cf.trunk_dids.length ? `<div class="table-wrap"><table><thead><tr><th>Numéro</th><th>Reçu par</th><th>Horaires appliqués</th><th>Maintenant</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : '<p class="hint">Aucune SDA déclarée dans les trunks (Trunks › SDA).</p>'}
+      <h3 class="cf-h">Tous les horaires</h3>
+      ${scheds.length ? `<div class="table-wrap"><table><thead><tr><th>Nom</th><th>Semaine</th><th>Utilisé par</th><th></th></tr></thead><tbody>
+        ${scheds.map((o) => `<tr><td><a href="#/gestion/horaires/${esc(o.id)}">${esc(o.name)}</a>${o.data.general ? ' <span class="pill ok">Généraux</span>' : ""}<div>${stateBadge(o)}</div></td>
+          <td>${summary(o)}</td><td>${used(o.id) ? `${used(o.id)} routage${used(o.id) > 1 ? "s" : ""}` : '<span class="s">rien</span>'}</td>
+          <td class="acts"><a class="btn ghost sm" href="#/gestion/horaires/${esc(o.id)}">Modifier</a></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Aucun horaire pour l\'instant.</div>'}
+    </div></div>`;
 }
 
 // ---------------------------------------------------------------- Listes
@@ -427,7 +481,8 @@ function collect(form, kind) {
 // Horaires
 function scheduleFields(d) {
   const st = scheduleNow(d);
-  return `<div class="cf-sec"><span class="dl">Mode</span>
+  return `<label class="check"><input type="checkbox" name="general" ${d.general ? "checked" : ""}> <strong>Horaires généraux du PBX</strong> <span class="hint">(proposés d'office aux nouveaux routages ; un seul jeu d'horaires peut l'être)</span></label>
+    <div class="cf-sec"><span class="dl">Mode</span>
       <div class="seg" id="ovr">${[["auto", "Automatique (selon les horaires)"], ["open", "Forcer ouvert"], ["closed", "Forcer fermé"]].map(([k, l]) => `<label class="${d.override === k ? "on" : ""}"><input type="radio" name="override" value="${k}" ${d.override === k ? "checked" : ""}>${l}</label>`).join("")}</div>
       <p class="hint">En ce moment : <strong>${st === "open" ? "ouvert" : st === "holiday" ? "jour férié / congés" : "fermé"}</strong> (fuseau ${esc(cf.timezone)}).</p></div>
     <div class="cf-sec"><span class="dl">Semaine</span><div class="week" id="week">${Object.entries(DAY_SHORT).map(([k]) => `<div class="day" data-day="${k}"></div>`).join("")}</div>
@@ -619,6 +674,7 @@ function treeNode(n, label, current) {
 // ---------------------------------------------------------------- Dépannage : test d'appel sans déranger le client
 const DEV_KIND = { phone: "☎", web: "🖥", mobile: "📱" };
 async function renderDiag(head, arg) {
+  if (arg) sessionStorage.setItem("cf_diag_mode", "in");
   const mode = sessionStorage.getItem("cf_diag_mode") === "out" ? "out" : "in";
   const users = cf.users;
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed"><div class="pad stack">

@@ -413,6 +413,18 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const r = await db.query("SELECT id, web_password_hash FROM pbxmaison_extensions WHERE id = $1 OR (email <> '' AND lower(email) = $1)", [l]);
     return r.rows.length === 1 ? r.rows[0] : null;
   }
+  /** Utilisateur avec le rôle « Accès console » : connexion à la console avec l'e-mail de sa fiche et son mot de passe du softphone. */
+  async function findConsoleUser(email) {
+    const l = String(email || "").trim().toLowerCase();
+    if (!l || !l.includes("@")) return null;
+    const r = await db.query(`SELECT id, email, first_name, last_name, web_password_hash FROM pbxmaison_extensions
+      WHERE email <> '' AND lower(email) = $1 AND options->>'role' = 'console' AND COALESCE((options->>'disabled')::boolean, false) = false`, [l]);
+    return r.rows.length === 1 ? r.rows[0] : null;
+  }
+  async function consoleUserActive(ext) {
+    const r = await db.query("SELECT 1 FROM pbxmaison_extensions WHERE id = $1 AND options->>'role' = 'console' AND COALESCE((options->>'disabled')::boolean, false) = false", [String(ext)]);
+    return r.rowCount > 0;
+  }
   async function setWebPassword(num, hash) {
     checkExtNumber(num);
     const r = await db.query("UPDATE pbxmaison_extensions SET web_password_hash = $2 WHERE id = $1", [num, hash]);
@@ -1074,6 +1086,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await db.query(`INSERT INTO pbxmaison_objects (kind, id, number, name, data, updated_by) VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (kind, id) DO UPDATE SET number = EXCLUDED.number, name = EXCLUDED.name, data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`,
     [kind, newId, v.number, v.name, JSON.stringify(v.data), by || ""]);
+    // Un seul jeu d'horaires « généraux du PBX »
+    if (kind === "schedule" && v.data.general) await db.query("UPDATE pbxmaison_objects SET data = jsonb_set(data, '{general}', 'false') WHERE kind = 'schedule' AND id <> $1 AND (data->>'general')::boolean IS TRUE", [newId]);
     await applyDialplan();
     return getObject(kind, newId);
   }
@@ -1345,7 +1359,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   return {
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
-    getUser, updateUser, applyDialplan, deleteImpact,
+    getUser, updateUser, applyDialplan, deleteImpact, findConsoleUser, consoleUserActive,
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,

@@ -76,7 +76,8 @@ export async function buildApp({ db, ami } = {}) {
     // Compte supprimé ou rôle modifié : pris en compte immédiatement (compte du serveur multi-tenant : rôle publié par la console du serveur)
     const hr = u.hub ? hubRole(u.email) : null;
     if (u.hub && (CX_MODE !== "tenant" || !hr)) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'a plus accès au serveur." }); }
-    const row = u.hub ? { role: HUB_TO_PBX_ROLE[hr] } : (await db.query("SELECT role FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
+    const row = u.hub ? { role: HUB_TO_PBX_ROLE[hr] } : u.ext ? ((await pbx.consoleUserActive(u.ext)) ? { role: "client" } : null)
+      : (await db.query("SELECT role FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     if (!row) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'existe plus." }); }
     req.role = row.role;
     if (!u.mfa) return reply.code(403).send({ error: "Active d'abord la double authentification.", need_totp_setup: true });
@@ -216,6 +217,16 @@ export async function buildApp({ db, ami } = {}) {
     if (tooMany(req.ip)) return reply.code(429).send({ error: "Trop de tentatives : réessaie dans 15 minutes." });
     const email = String(req.body?.email || "").trim().toLowerCase();
     const r = await db.query("SELECT password_hash, totp_secret FROM pbxmaison_users WHERE email = $1", [email]);
+    // Client : utilisateur du PBX avec le rôle « Accès console » (e-mail de sa fiche + mot de passe du softphone) → accès restreint
+    if (!r.rowCount) {
+      const x = await pbx.findConsoleUser(email);
+      if (x?.web_password_hash && verifyPassword(req.body?.password, x.web_password_hash)) {
+        failures.delete(req.ip);
+        await audit(req, `Connexion à la console (utilisateur ${x.id}, accès restreint)`, true, "", email);
+        reply.setCookie(COOKIE, createSession(email, settings.sessionSecret, { mfa: true, mfa_at: Date.now(), ext: x.id }), cookieOpts(req));
+        return { ok: true, email };
+      }
+    }
     if (!r.rowCount || !verifyPassword(req.body?.password, r.rows[0].password_hash)) {
       fail(req.ip); await audit(req, "Connexion refusée : mauvais mot de passe", false, "", email);
       return reply.code(401).send({ error: "E-mail ou mot de passe incorrect." });
@@ -361,6 +372,7 @@ export async function buildApp({ db, ami } = {}) {
       return { email: u.email, totp: true, mfa: true, recovery_left: 8, role: HUB_TO_PBX_ROLE[hr] || "lecture", name: "", hub: true,
         hub_url: hubInfo().url || "", current: CX_TENANT, pbx_list: tenantList() };
     }
+    if (u.ext) return { email: u.email, totp: true, mfa: true, recovery_left: 0, role: "client", name: "", ext: u.ext };
     const row = (await db.query("SELECT totp_secret IS NOT NULL AS totp, jsonb_array_length(recovery) AS recovery_left FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     const role = (await db.query("SELECT role, name FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     return { email: u.email, totp: !!row?.totp, mfa: u.mfa, recovery_left: row?.recovery_left ?? 0, role: role?.role || "admin", name: role?.name || "" };
@@ -730,7 +742,7 @@ export async function buildApp({ db, ami } = {}) {
 
   // ---------------------------------------------------------------- Gestion d'appels
   app.get("/api/callflow", { preHandler: requireUser }, async () => ({
-    objects: await pbx.listObjects(), users: (await pbx.listExtensions()).map((u) => ({ id: u.id, name: u.name, status: u.status, disabled: u.disabled, registered: u.registered, voicemail: true })),
+    objects: await pbx.listObjects(), users: (await pbx.listExtensions()).map((u) => ({ id: u.id, name: u.name, status: u.status, disabled: u.disabled, registered: u.registered, voicemail: true, dids: u.dids || [] })),
     options: cfOptions, timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris",
     trunk_dids: (await pbx.listTrunks()).flatMap((t) => (t.dids || []).map((d) => ({ did: d, trunk: t.id }))),
   }));

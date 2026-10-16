@@ -66,7 +66,7 @@ export function defaultObject(kind) {
     case "groupvm": return { name: "", number: "", pin: "", members: [] };
     case "conf": return { name: "", number: "", pin: "", max_members: 20, video: true };
     case "schedule": return { name: "", week: Object.fromEntries(DAYS.map(([d]) => [d, ["mon", "tue", "wed", "thu", "fri"].includes(d) ? [["09:00", "12:00"], ["14:00", "18:00"]] : []])),
-      holidays_fr: true, holidays: [], override: "auto" };
+      holidays_fr: true, holidays: [], override: "auto", general: false };
     case "rule": return { name: "", dids: [], is_default: false, schedule: "", open: hang, closed: hang, break: null, holiday: null };
     case "prompt": return { name: "", file: "", duration: 0 };
     case "flow": return { name: "", dids: [], is_default: false, schedule: "", branches: { open: [], closed: null, break: null, holiday: null } };
@@ -240,6 +240,7 @@ export function validateObject(kind, input, current, ctx) {
       d.week = week;
     }
     if (input.holidays_fr !== undefined) d.holidays_fr = !!input.holidays_fr;
+    if (input.general !== undefined) d.general = !!input.general;
     if (input.holidays !== undefined) {
       const list = [];
       for (const h of Array.isArray(input.holidays) ? input.holidays : []) {

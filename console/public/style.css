@@ -135,7 +135,7 @@ td a{color:inherit;font-weight:600;text-decoration:none}
 .back{display:inline-block;margin-bottom:10px;font-size:14px;text-decoration:none}
 .fwsum{margin-bottom:14px}
 .tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--line);margin:18px 0 0;scrollbar-width:none}
-.tabs a{padding:10px 14px;text-decoration:none;color:var(--muted);font-weight:600;font-size:14px;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a{padding:10px 11px;text-decoration:none;color:var(--muted);font-weight:600;font-size:13.5px;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs a.on{color:var(--accent);border-bottom-color:var(--accent)}
 .panel.tabbed{border-top-left-radius:0;border-top-right-radius:0;border-top:0}
 textarea{resize:vertical}
@@ -778,3 +778,33 @@ tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
 .dg-steps{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
 .dg-steps li{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .dg-steps li.bad{border-color:var(--bad);background:var(--bad-soft)}.dg-steps li.warn{background:var(--warn-soft)}
+
+/* Page Téléphones : lignes compactes */
+.provbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:14px}
+.provbar .dl{margin:0}.provbar .mono{word-break:break-all}
+.ptable td{vertical-align:middle}.ptable .nw{white-space:nowrap}
+.ptable .mono-s{font-family:var(--mono);font-size:12px}
+.ptable .ic{font-size:16px}
+.seg .cnt{display:inline-block;min-width:20px;padding:0 6px;border-radius:99px;background:var(--bg);font-size:12px;margin-left:4px;color:var(--muted)}
+
+/* Codes raccourcis : tableau aligné */
+.sctable td{vertical-align:middle}.sctable .nw{white-space:nowrap;width:1%}
+.sctable .scg td{background:var(--bg);font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding-top:10px;padding-bottom:10px}
+.sc-in{display:inline-flex;align-items:center;gap:8px}.sc-in input{width:76px;text-align:center;font-family:var(--mono);font-weight:700}
+.sc-in em{font-style:normal;color:var(--muted);font-size:12.5px;min-width:58px}
+.sctable code{font-family:var(--mono);background:var(--bg);padding:2px 8px;border-radius:6px}
+.sc-in input{padding:6px 8px}.sctable td{padding-top:7px;padding-bottom:7px}
+
+/* Pagination des listes */
+.pager{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
+.pager:first-child,.filters+.pager{border-top:0;border-bottom:1px solid var(--line)}
+.pager label{flex-direction:row;align-items:center;gap:8px;margin:0;font-weight:500;font-size:13.5px}.pager select{width:auto}
+.sch-gen{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px 14px;flex-wrap:wrap}
+.nw{white-space:nowrap}
+
+/* Système : licence en haut */
+.sys-lic{margin-bottom:18px}
+.sys-lic-b{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px 22px}
+.sys-lic-b>div{display:flex;flex-direction:column;gap:4px}.sys-lic-b .pill{align-self:flex-start}
+.altable td{vertical-align:middle}.altable .nw{width:1%}
+.al-inline{flex-direction:row;align-items:center;gap:8px;margin:6px 0 0;font-weight:500;font-size:13px}.al-inline input{width:80px}
