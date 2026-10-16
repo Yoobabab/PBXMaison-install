@@ -1047,7 +1047,10 @@ async function renderUser(id, tab = "general") {
     const host = server.host || server.fqdn;
     const ph = u.phone, st = ph.settings, o = phoneOpts;
     const lp = ph.last_provisioned;
-    const localIp = u.contacts[0]?.local_ip;
+    const mine = (mac) => u.contacts.find((c) => c.device?.mac && c.device.mac === mac);
+    const extraMacs = new Set((ph.extra || []).map((x) => x.mac));
+    const mainC = mine(ph.mac) || u.contacts.find((c) => !extraMacs.has(c.device?.mac) && c.device?.kind !== "web" && c.device?.kind !== "mobile");
+    const localIp = mainC?.local_ip;
     body = `<form method="post" id="uf" novalidate>
       <div class="grid nogap-top"><div class="form-msg full"></div>
         <h3 class="full sec">Téléphone et provisioning automatique</h3>
@@ -1210,18 +1213,42 @@ async function renderUser(id, tab = "general") {
       if (strip(extra) === strip(u.phone.extra || [])) delete userDraft.extra; else userDraft.extra = extra.map(({ model, mac, label }) => ({ model, mac, label }));
       const on = draftDirty(); $("#udirty").hidden = !on; $("#ucancel").hidden = !on;
     };
+    // Volet « Provisioning et page web » d'un téléphone supplémentaire (enregistré : MAC connue du serveur)
+    const mine = (mac) => u.contacts.find((c) => c.device?.mac && c.device.mac === mac);
+    const xpanel = (x) => {
+      const saved = (u.phone.extra || []).find((e) => e.mac && e.mac === (x.mac || "").toLowerCase().replace(/[^0-9a-f]/g, ""));
+      if (!saved) return `<span class="hint full">${x.mac ? "Enregistre la fiche (bouton en haut) pour afficher son lien de provisioning et sa page web." : "Saisis son adresse MAC (étiquette sous le téléphone), puis enregistre la fiche."}</span>`;
+      const c = mine(saved.mac), lp2 = saved.last_provisioned;
+      return `<button type="button" class="btn ghost provtog xtog full ${c ? "" : "on"}" data-xtog aria-expanded="${c ? "false" : "true"}"><span class="chev">▸</span> Provisioning et page web ${c ? '<span class="pill ok">Connecté</span>' : '<span class="pill off">Pas connecté</span>'}</button>
+        <div class="full provwrap" ${c ? "hidden" : ""}><div class="provbox">
+          <div><span class="dl">Lien de provisioning</span><span class="mono">${esc(phoneOpts.provisioning_url)}</span> <button class="copy" type="button" data-copy="${esc(phoneOpts.provisioning_url)}">Copier</button>
+            <div class="hint">Le même que pour le téléphone principal : chaque téléphone télécharge son propre fichier <span class="mono">${esc(saved.mac)}.cfg</span>.</div></div>
+          <div class="row"><a class="btn ghost sm" href="/api/extensions/${esc(u.id)}/phone.cfg?mac=${esc(saved.mac)}" download>Télécharger le .cfg</a>
+            <button type="button" class="btn ghost sm" data-xnotify ${c ? "" : "disabled"} title="Envoyé à tous les téléphones du poste, sans redémarrage">Reprovisionner</button></div>
+          <div class="hint">Dernier provisioning : ${lp2 ? `${esc(fmtDateTime(lp2.at))} depuis ${esc(lp2.ip)}` : "jamais"}</div>
+          <div><span class="dl">Page web du téléphone</span>${c?.local_ip ? `<a href="http://${esc(c.local_ip)}" target="_blank" rel="noopener" class="mono">http://${esc(c.local_ip)}</a> · ` : ""}utilisateur <span class="mono">admin</span> · même mot de passe que le téléphone principal
+            <button class="copy" type="button" data-copy="${esc(u.phone.admin_password)}">Copier</button></div></div></div>`;
+    };
     const drawExtra = () => {
       extraBox.innerHTML = `${extra.map((x, i) => `<div class="xph" data-i="${i}">
           <label>Nom (facultatif)<input data-f="label" value="${esc(x.label || "")}" maxlength="40" placeholder="Atelier, bureau du haut…"></label>
           <label>Modèle<select data-f="model"><option value="">— Choisir —</option>${phoneOpts.models.filter((m) => m.screen || m.keys >= 0).map((m) => `<option value="${m.id}" ${x.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
           <label>Adresse MAC<input data-f="mac" value="${esc(fmtMac((x.mac || "").replace(/[^0-9a-f]/gi, "")))}" placeholder="44:DB:D2:29:FA:7C" autocomplete="off"></label>
           <button type="button" class="btn ghost sm" data-rm title="Retirer ce téléphone">Retirer</button>
-          <span class="hint full">${x.last_provisioned ? `Dernier provisioning : ${esc(fmtDateTime(x.last_provisioned.at))} depuis ${esc(x.last_provisioned.ip)}` : "Pas encore provisionné : même lien de provisioning que le téléphone principal."}</span></div>`).join("")}
+          ${xpanel(x)}</div>`).join("")}
         <button type="button" class="btn ghost sm" id="addph" ${extra.length >= 5 ? "disabled" : ""}>+ Ajouter un téléphone</button>`;
       extraBox.querySelectorAll(".xph").forEach((row) => {
         const i = Number(row.dataset.i);
         row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => { extra[i][el.dataset.f] = el.value; keepExtra(); }));
         row.querySelector("[data-rm]").onclick = () => { extra.splice(i, 1); keepExtra(); drawExtra(); };
+        row.querySelector("[data-xtog]")?.addEventListener("click", (e) => {
+          const p = row.querySelector(".provwrap"), b = e.currentTarget; p.hidden = !p.hidden; b.classList.toggle("on", !p.hidden); b.setAttribute("aria-expanded", String(!p.hidden));
+        });
+        row.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => { navigator.clipboard?.writeText(b.dataset.copy); b.textContent = "Copié ✓"; setTimeout(() => { b.textContent = "Copier"; }, 1500); });
+        row.querySelector("[data-xnotify]")?.addEventListener("click", async (e) => {
+          const b = e.currentTarget;
+          try { await api("POST", `/api/extensions/${u.id}/phone/notify`, { action: "resync" }); b.textContent = "Envoyé ✓"; } catch (err) { b.textContent = err.message; }
+        });
       });
       $("#addph").onclick = () => { extra.push({ model: u.phone.model || "", mac: "", label: "" }); keepExtra(); drawExtra(); extraBox.querySelector(".xph:last-of-type [data-f=mac]")?.focus(); };
     };

@@ -699,8 +699,10 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/phone-options", { preHandler: requireUser }, async () => ({
     ...pbx.phoneOptions(), provisioning_url: await pbx.provisioningUrl(sipServer()), timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris" }));
   app.get("/api/extensions/:id/phone.cfg", { preHandler: requireUser }, async (req, reply) => {
-    const { user, text, format } = await pbx.phoneConfig(req.params.id, sipServer());
-    const base = user.phone.mac || "poste-" + user.id;
+    // ?mac= : fichier d'un téléphone supplémentaire du poste
+    const mac = String(req.query?.mac || "").toLowerCase().replace(/[^0-9a-f]/g, "") || null;
+    const { user, text, format } = await pbx.phoneConfig(req.params.id, sipServer(), mac);
+    const base = (mac && user.phone.mac) || user.phone.mac || "poste-" + user.id;
     const fname = format === "grandstream" ? `cfg${base}.xml` : format === "snom" ? `${base}.xml` : `${base}.cfg`;
     reply.header("content-disposition", `attachment; filename="${fname}"`);
     return reply.type("text/plain; charset=utf-8").send(text);
