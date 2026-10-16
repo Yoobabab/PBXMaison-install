@@ -73,3 +73,19 @@ test("contactSource : adresse réelle du poste (PBX seul : Contact ; multi-tenan
   assert.deepEqual(contactSource({ ...c, path: "" }, true).slice(1, 3), ["192.168.1.18", "5060"]);
   assert.deepEqual(contactSource(c, false).slice(1, 3), ["192.168.1.18", "5060"]);
 });
+
+test("Surveillance : numéros vers l'étranger ou surtaxés", async () => {
+  const { numberRisk, deviceCategory } = await import("../lib/watch.mjs");
+  assert.equal(numberRisk("0048525223031"), "intl");
+  assert.equal(numberRisk("+44 20 1234 5678"), "intl");
+  assert.equal(numberRisk("+33612345678"), null);
+  assert.equal(numberRisk("0612345678"), null);
+  assert.equal(numberRisk("0899 12 34 56"), "premium");
+  assert.equal(numberRisk("0825123456"), "premium");
+  assert.equal(numberRisk("0800123456"), null);
+  assert.equal(numberRisk("118712"), "premium");
+  assert.equal(numberRisk("3949"), "premium");
+  assert.equal(numberRisk("201"), null);
+  assert.equal(numberRisk("15"), null);
+  assert.equal(deviceCategory("phone"), "phone"); assert.equal(deviceCategory("mobile"), "app"); assert.equal(deviceCategory("web"), "softphone");
+});

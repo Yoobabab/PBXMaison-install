@@ -357,6 +357,13 @@ labx px "module unload res_pjsip_outbound_registration.so" >/dev/null 2>&1 || tr
 R="$(hapi GET '/api/telephonie?minutes=60')"
 echo "$R" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit(d.events.some(e=>e.kind==="auth"&&e.ip==="127.0.0.13"&&/poste 201/.test(e.text))?0:1)' \
   && pass "Console du serveur › Téléphonie : mot de passe refusé affiché (poste 201, adresse réelle)" || { echo "$R" | cut -c1-600 >> "$OUT"; fail "journal téléphonie"; }
+# Surveillance : un événement d'un PBX remonte dans la console du serveur et se marque « vérifié »
+sudo -u postgres psql -d cx_clia -qc "INSERT INTO pbxmaison_watch (key, kind, extension, text) VALUES ('e2e:1', 'intl', '201', 'Appel vers l''étranger : 0044201234 depuis le poste 201 (non abouti).')" >/dev/null 2>&1 || true
+R="$(hapi GET '/api/surveillance?days=7')"
+WID="$(echo "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const e=JSON.parse(s).events.find(x=>x.pbx==="clia"&&x.kind==="intl");console.log(e?e.id:"")})')"
+[[ -n "$WID" ]] && hapi POST /api/surveillance/ok "{\"pbx\":\"clia\",\"id\":\"$WID\"}" | grep -q '"ok":true' \
+  && [[ "$(sudo -u postgres psql -d cx_clia -tAc "SELECT reviewed_by FROM pbxmaison_watch WHERE key = 'e2e:1'")" == irt-admin@test.invalid ]] \
+  && pass "Surveillance : appel vers l'étranger de cli a affiché dans la console du serveur et marqué vérifié" || { echo "$R" | cut -c1-400 >> "$OUT"; fail "surveillance"; }
 hapi POST /api/telephonie/bloquer '{"ip":"203.0.113.7"}' >/dev/null
 R="$(hapi GET '/api/telephonie?minutes=15')"
 if [[ "$R" == *'"ip":"203.0.113.7","jail":"callikoe-manual"'* ]]; then

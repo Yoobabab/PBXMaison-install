@@ -978,7 +978,7 @@ function connect() {
   const socket = new JsSIP.WebSocketInterface(me.sip.ws_url);
   ua = new JsSIP.UA({
     sockets: [socket], uri: `sip:${me.sip.user}@${me.sip.domain}`, authorization_user: me.sip.auth_user, password: me.sip.password,
-    display_name: me.sip.display_name, register: true, register_expires: 300, session_timers: false, user_agent: "Callikoe-Web/1.0",
+    display_name: me.sip.display_name, register: true, register_expires: 300, session_timers: false, user_agent: IN_APP ? "Callikoe-App/0.1 (web)" : "Callikoe-Web/1.0",
   });
   ua.on("connecting", () => setReg("wait"));
   ua.on("registered", () => setReg("on"));

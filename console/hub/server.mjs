@@ -240,7 +240,7 @@ export async function buildApp({ db } = {}) {
       trunks: sum("trunks"), trunks_ok: sum("trunks_ok"),
       expiring: list.filter((p) => p.expires_at && Date.parse(p.expires_at) - now < 30 * 86400000).length,
     };
-    return { pbx: list, totals, max: 250, signing: signingInfo() };
+    return { pbx: list, totals, max: 250, signing: signingInfo(), watch_pending: await watchPending() };
   });
   app.post("/api/pbx/:slug/suspendre", { preHandler: requireRole("super", "admin") }, async (req) => {
     if (!SLUG_RE.test(req.params.slug)) throw new UserError("PBX inconnu.", null, 404);
@@ -251,6 +251,35 @@ export async function buildApp({ db } = {}) {
     if (!SLUG_RE.test(req.params.slug)) throw new UserError("PBX inconnu.", null, 404);
     etatCache.at = 0;
     return runHost(["reactiver", req.params.slug], `Réactivation du PBX ${req.params.slug}`, req);
+  });
+
+  // ---------------------------------------------------------------- Surveillance : appels étranger / surtaxés, changements d'adresse des appareils
+  const hostJson = (args, timeout = 60_000) => new Promise((res) => execFile(HOST_CMD[0], [...HOST_CMD.slice(1), ...args], { timeout, maxBuffer: 32 << 20 },
+    (e, o, err) => { try { res({ ok: !e, data: JSON.parse(String(o || "").trim().split("\n").pop()) }); } catch { res({ ok: false, error: String(err || o || "").replace(/\x1b\[[0-9;]*m/g, "").trim() }); } }));
+  let watchCache = { at: 0, pending: 0 };
+  const watchPending = async () => {
+    if (Date.now() - watchCache.at < 60_000) return watchCache.pending;
+    watchCache.at = Date.now();
+    const r = await hostJson(["surveillance", "liste", "30"]);
+    if (r.ok) watchCache.pending = r.data.events.filter((e) => !e.reviewed_at).length;
+    return watchCache.pending;
+  };
+  app.get("/api/surveillance", { preHandler: requireUser }, async (req) => {
+    const days = Math.min(90, Math.max(1, Number(req.query?.days) || 30));
+    const r = await hostJson(["surveillance", "liste", String(days)]);
+    if (!r.ok) throw new UserError("Surveillance illisible : réessaie dans un instant.");
+    watchCache = { at: Date.now(), pending: r.data.events.filter((e) => !e.reviewed_at && Date.parse(e.at) > Date.now() - 30 * 86400_000).length };
+    return r.data;
+  });
+  app.post("/api/surveillance/ok", { preHandler: requireRole("super", "admin", "tech") }, async (req) => {
+    const slug = String(req.body?.pbx || ""), id = String(req.body?.id || "");
+    if (!SLUG_RE.test(slug) || !/^\d+$/.test(id)) throw new UserError("Événement inconnu.");
+    const who = currentUser(req).email;
+    const r = await hostJson(["surveillance", "ok", slug, id, who]);
+    if (!r.ok) throw new UserError("Impossible d'enregistrer la vérification.");
+    watchCache.at = 0;
+    await audit(req, `Surveillance : événement ${id} de ${slug} vérifié`, true, String(req.body?.text || "").slice(0, 200));
+    return { ok: true };
   });
 
   // ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP, adresses bloquées)

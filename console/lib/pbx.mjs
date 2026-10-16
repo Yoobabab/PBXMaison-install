@@ -8,6 +8,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
 import { CX_MODE, KAMAILIO_URI, VAR as CX_VAR } from "./config.mjs";
+import { numberRisk, deviceCategory, CATEGORY_LABELS } from "./watch.mjs";
 import { runConfigure } from "./admin.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, contactSource, connectionType, modelById } from "./phones.mjs";
@@ -284,7 +285,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         // Multi-tenant : le Via du dessus est celui de l'aiguilleur ; l'adresse locale du poste est celle de son Contact
         const localIp = CX_MODE === "tenant" && c.path ? (/@\[?([^\]:;>]+)/.exec(c.uri || "")?.[1] || "") : c.via || "";
         return { user_agent: c.user_agent || "", ip: sourceIp || localIp, source_ip: sourceIp, source_port: source?.[2] || "",
-          local_ip: localIp, device: row.id.endsWith("-web") ? { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" } : identifyDevice(c.user_agent),
+          local_ip: localIp, device: row.id.endsWith("-web") ? (/Callikoe-App/i.test(c.user_agent || "") ? { ...identifyDevice(c.user_agent), kind: "mobile", label: "Appli mobile Callikoe" } : { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" }) : identifyDevice(c.user_agent),
           connection: connectionType(sourceIp, localIp, []) };
       })));
     }
@@ -673,7 +674,47 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       }
     }
     for (const id of prev.keys()) if (!reg.has(id)) await db.query("DELETE FROM pbxmaison_devices WHERE endpoint = $1", [id]);
+    await watchDevices(reg).catch(() => {});
+    if (++watchTick % 3 === 1) await watchCalls().catch(() => {});
     return reg;
+  }
+
+  // ------------------------------------------------------------------ Surveillance (console du serveur)
+  let watchTick = 0;
+  /** Un appareil (téléphone, softphone, appli) d'un poste se connecte depuis une autre adresse IP qu'avant. */
+  async function watchDevices(reg) {
+    const last = new Map((await db.query("SELECT key, ip FROM pbxmaison_last_ip")).rows.map((r) => [r.key, r.ip]));
+    for (const [ext, contacts] of reg) {
+      for (const c of contacts) {
+        const ip = c.source_ip || c.ip;
+        if (!ip || /^127\./.test(ip)) continue;
+        const cat = deviceCategory(c.device?.kind);
+        const key = `${ext}|${cat}`;
+        const before = last.get(key);
+        if (before === ip) continue;
+        await db.query(`INSERT INTO pbxmaison_last_ip (key, ip, at) VALUES ($1, $2, now()) ON CONFLICT (key) DO UPDATE SET ip = $2, at = now()`, [key, ip]);
+        last.set(key, ip);
+        if (!before) continue;   // première connexion connue : rien à signaler
+        const dev = c.device?.label || CATEGORY_LABELS[cat];
+        await db.query(`INSERT INTO pbxmaison_watch (key, kind, category, extension, text, detail) VALUES ($1, 'ip', $2, $3, $4, $5) ON CONFLICT (key) DO NOTHING`,
+          [`ip:${key}:${ip}:${Date.now()}`, cat, ext, `${dev} du poste ${ext} : connecté depuis une nouvelle adresse ${ip} (avant : ${before}).`,
+            { ip, before, user_agent: c.user_agent || "", local_ip: c.local_ip || "" }]);
+      }
+    }
+  }
+  /** Appels sortants vers l'étranger ou un numéro surtaxé (journal du jour). */
+  async function watchCalls() {
+    const cc = countryCode();
+    const { calls } = await callLog({ days: 1, direction: "out", limit: 5000 });
+    for (const c of calls) {
+      const risk = numberRisk(c.to.number, cc);
+      if (!risk) continue;
+      const who = c.from.ext ? `poste ${c.from.ext}` : c.from.number || "?";
+      const res = c.status === "answered" ? `décroché, ${c.talk || 0} s` : "non abouti";
+      await db.query(`INSERT INTO pbxmaison_watch (key, at, kind, extension, text, detail) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (key) DO NOTHING`,
+        [`call:${c.id}`, c.start, risk, c.from.ext || "", `${risk === "intl" ? "Appel vers l'étranger" : "Appel vers un numéro surtaxé"} : ${c.to.number} depuis le ${who} (${res}).`,
+          { number: c.to.number, status: c.status, talk: c.talk || 0, from: c.from.number }]);
+    }
   }
 
   async function listPhones() {

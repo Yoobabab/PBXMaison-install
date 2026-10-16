@@ -33,6 +33,7 @@ const ICONS = {
   lic: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
   sip: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
 };
 const icon = (k, s = 18) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ""}</svg>`;
@@ -43,7 +44,7 @@ function setNav(active, label = "") {
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
   const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []),
-    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
+    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   $("#nav").innerHTML = on ? `<div class="ng">${items.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`).join("")}</div>` : "";
   $("#user").innerHTML = on ? `<div class="sf-user"><span class="sf-av">${esc(state.user.email.charAt(0).toUpperCase())}</span>
     <span class="sf-mail" title="${esc(state.user.email)} · ${esc(state.user.role_label)}">${esc(state.user.email)}</span>
@@ -248,6 +249,7 @@ async function renderList() {
   app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Tableau de bord</h1>
       <p class="sub" style="margin:0">Tous les PBX du serveur. « Ouvrir » ouvre la console d'un PBX sans te reconnecter.</p></div>
       ${can("super", "admin") ? `<a class="btn ghost" href="#/restaurer">Restaurer un PBX</a><a class="btn" href="#/nouveau">+ Nouveau PBX</a>` : ""}</div>
+    ${d.watch_pending ? `<div class="flash warn">${d.watch_pending} événement${d.watch_pending > 1 ? "s" : ""} à vérifier (appels vers l'étranger ou surtaxés, appareils connectés depuis une nouvelle adresse) : <a href="#/surveillance">Surveillance</a>.</div>` : ""}
     ${!d.signing?.configured && can("super") ? `<div class="flash warn">Pour créer des PBX ici, installe d'abord la clé de signature des licences : <a href="#/cle">Clé de signature</a>.</div>` : ""}
     <div id="dash"></div>
     <div class="panel pad stack">
@@ -494,6 +496,74 @@ async function renderAudit() {
     </tbody></table></div></div>`;
 }
 
+// ---------------------------------------------------------------- Surveillance (appels étranger / surtaxés, changements d'adresse)
+const WATCH_KINDS = { intl: ["bad", "Étranger"], premium: ["wait", "Surtaxé"], ip: ["off", "Nouvelle adresse"] };
+const WATCH_CATS = { phone: "Téléphones", softphone: "Softphones", app: "Applis" };
+let watchF = { days: 30, state: "todo", kinds: new Set(["intl", "premium", "ip"]), cats: new Set(["phone", "softphone", "app"]), pbx: "", q: "" };
+async function renderWatch() {
+  setNav("watch", "Surveillance");
+  app.innerHTML = `<div class="bar"><div class="grow"><h1>Surveillance</h1>
+      <p class="sub" style="margin:0">Appels vers l'étranger ou des numéros surtaxés, et téléphones, softphones ou applis connectés depuis une nouvelle adresse, sur tous les PBX du serveur. Vérifie-les puis marque-les « OK » : il ne reste que ce qui n'a pas encore été regardé.</p></div>
+      <label>Période<select id="wdays">${[[7, "7 derniers jours"], [30, "30 derniers jours"], [90, "90 derniers jours"]].map(([v, l]) => `<option value="${v}" ${v === watchF.days ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+    <div id="wbody"><div class="empty"><span class="spin"></span></div></div>`;
+  $("#wdays").onchange = (e) => { watchF.days = Number(e.target.value); load(); };
+  let d = null;
+  async function load() {
+    try { d = await api("GET", `/api/surveillance?days=${watchF.days}`); } catch (e) { $("#wbody").innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+    if (location.hash === "#/surveillance") draw();
+  }
+  function draw() {
+    const pbxs = [...new Map(d.events.map((e) => [e.pbx, e.pbx_name])).entries()];
+    const q = watchF.q.trim().toLowerCase();
+    const base = d.events.filter((e) => (!watchF.pbx || e.pbx === watchF.pbx) && (!q || `${e.text} ${e.pbx_name} ${e.extension}`.toLowerCase().includes(q)));
+    const list = base.filter((e) => watchF.kinds.has(e.kind) && (e.kind !== "ip" || watchF.cats.has(e.category))
+      && (watchF.state === "all" || (watchF.state === "todo" ? !e.reviewed_at : !!e.reviewed_at)));
+    const cnt = (k) => base.filter((e) => e.kind === k && !e.reviewed_at).length;
+    const chk = (set, k, l, n) => `<label class="check wchk"><input type="checkbox" data-${set}="${k}" ${watchF[set].has(k) ? "checked" : ""}> ${l}${n !== undefined ? ` <span class="s">(${n})</span>` : ""}</label>`;
+    $("#wbody").innerHTML = `<div class="kpis">
+        ${kpi("call", "Appels vers l'étranger", cnt("intl"), "à vérifier", cnt("intl") ? "warn" : "good")}
+        ${kpi("lic", "Numéros surtaxés", cnt("premium"), "à vérifier", cnt("premium") ? "warn" : "good")}
+        ${kpi("phone", "Nouvelles adresses", cnt("ip"), "appareils connectés d'ailleurs", cnt("ip") ? "warn" : "good")}
+      </div>
+      <div class="panel pad stack">
+        <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <label style="flex:1;min-width:200px">Rechercher<input id="wq" type="search" placeholder="Numéro, poste, PBX, adresse IP…" value="${esc(watchF.q)}" autocomplete="off"></label>
+          <label>PBX<select id="wpbx"><option value="">Tous</option>${pbxs.map(([k, n]) => `<option value="${esc(k)}" ${k === watchF.pbx ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+          <label>Afficher<select id="wstate"><option value="todo" ${watchF.state === "todo" ? "selected" : ""}>À vérifier</option><option value="done" ${watchF.state === "done" ? "selected" : ""}>Déjà vérifiés</option><option value="all" ${watchF.state === "all" ? "selected" : ""}>Tout</option></select></label>
+        </div>
+        <div class="wfil"><span class="dl">Types</span>${chk("kinds", "intl", "Appels vers l'étranger")}${chk("kinds", "premium", "Numéros surtaxés")}${chk("kinds", "ip", "Changements d'adresse")}</div>
+        <div class="wfil ${watchF.kinds.has("ip") ? "" : "dim"}"><span class="dl">Appareils</span>${Object.entries(WATCH_CATS).map(([k, l]) => chk("cats", k, l, base.filter((e) => e.kind === "ip" && e.category === k && !e.reviewed_at).length)).join("")}</div>
+      </div>
+      <div class="panel"><div class="ph"><h2>Événements</h2><span class="s">${list.length}</span></div>
+        ${list.length ? list.slice(0, 500).map((e) => `<div class="sipev-row"><div class="sipev-meta"><span class="s">${fmtDate(e.at)}</span>
+            <span class="pill ${(WATCH_KINDS[e.kind] || ["off"])[0]}">${esc((WATCH_KINDS[e.kind] || [, e.kind])[1])}${e.kind === "ip" ? ` · ${esc(({ phone: "Téléphone", softphone: "Softphone", app: "Appli" })[e.category] || "")}` : ""}</span>
+            <strong>${esc(e.pbx_name)}</strong>
+            <span class="grow"></span>
+            ${e.reviewed_at ? `<span class="s">✓ Vérifié par ${esc(e.reviewed_by)} le ${fmtDate(e.reviewed_at)}</span>`
+              : can("super", "admin", "tech") ? `<button class="btn ghost sm" data-wok="${esc(e.pbx)}|${esc(e.id)}">${e.kind === "ip" ? "OK, c'est normal" : "OK, pas une fraude"}</button>` : ""}</div>
+            <div>${esc(e.text)}</div></div>`).join("")
+          : `<div class="empty">${watchF.state === "todo" ? "Rien à vérifier : tout a été regardé." : "Aucun événement."}</div>`}</div>`;
+    $("#wq").oninput = (e) => { watchF.q = e.target.value; const p = e.target.selectionStart; draw(); const i = $("#wq"); i.focus(); i.setSelectionRange(p, p); };
+    $("#wpbx").onchange = (e) => { watchF.pbx = e.target.value; draw(); };
+    $("#wstate").onchange = (e) => { watchF.state = e.target.value; draw(); };
+    app.querySelectorAll("[data-kinds],[data-cats]").forEach((cb) => cb.onchange = () => {
+      const set = cb.dataset.kinds ? watchF.kinds : watchF.cats, k = cb.dataset.kinds || cb.dataset.cats;
+      cb.checked ? set.add(k) : set.delete(k); draw();
+    });
+    app.querySelectorAll("[data-wok]").forEach((b) => b.onclick = async () => {
+      const [pbx, id] = b.dataset.wok.split("|");
+      b.disabled = true;
+      try {
+        await api("POST", "/api/surveillance/ok", { pbx, id, text: b.closest(".sipev-row").lastElementChild.textContent });
+        const ev = d.events.find((x) => x.pbx === pbx && String(x.id) === id);
+        if (ev) { ev.reviewed_at = new Date().toISOString(); ev.reviewed_by = state.user.email; }
+        draw();
+      } catch (err) { b.disabled = false; $("#wbody").insertAdjacentHTML("afterbegin", `<div class="flash bad">${esc(err.message)}</div>`); }
+    });
+  }
+  await load();
+}
+
 // ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP)
 const SIP_KINDS = { erreur: ["bad", "Erreur"], auth: ["wait", "Mot de passe refusé"], refus: ["off", "Adresse inconnue"], robot: ["off", "Robot / fraude"], flood: ["wait", "Trop de messages"] };
 let sipMin = 60, sipFilter = "", sipKind = "", sipTimer = null, sipShow = 200;
@@ -596,6 +666,7 @@ function route() {
   if (h === "#/cle" && can("super")) return renderSigning();
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
   if (h === "#/telephonie") return renderTelephonie();
+  if (h === "#/surveillance") return renderWatch();
   return renderList();
 }
 window.addEventListener("hashchange", route);

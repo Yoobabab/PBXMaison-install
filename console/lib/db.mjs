@@ -77,6 +77,24 @@ export function createDb(cfg) {
         created_by text NOT NULL DEFAULT '',
         used_at timestamptz
       );
+      CREATE TABLE IF NOT EXISTS pbxmaison_watch (
+        id bigserial PRIMARY KEY,
+        key text UNIQUE NOT NULL,
+        at timestamptz NOT NULL DEFAULT now(),
+        kind text NOT NULL,
+        category text NOT NULL DEFAULT '',
+        extension text NOT NULL DEFAULT '',
+        text text NOT NULL,
+        detail jsonb NOT NULL DEFAULT '{}',
+        reviewed_at timestamptz,
+        reviewed_by text NOT NULL DEFAULT ''
+      );
+      CREATE INDEX IF NOT EXISTS pbxmaison_watch_at ON pbxmaison_watch (at DESC);
+      CREATE TABLE IF NOT EXISTS pbxmaison_last_ip (
+        key text PRIMARY KEY,
+        ip text NOT NULL,
+        at timestamptz NOT NULL DEFAULT now()
+      );
       CREATE TABLE IF NOT EXISTS pbxmaison_web_invites (
         token_hash text PRIMARY KEY,
         extension text NOT NULL,
