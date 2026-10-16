@@ -355,3 +355,5 @@ label.ck input{width:auto}
   .in-app .sp-top{padding-right:60px}
   .in-app .pmenu{top:calc(60px + env(safe-area-inset-top));bottom:auto}
 }
+.sp-display #kbd{font-size:20px}
+.sp-display #kbd.on{color:var(--accent,#d8141c)}

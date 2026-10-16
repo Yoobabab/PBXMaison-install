@@ -848,12 +848,14 @@ window.addEventListener("hashchange", () => { if (!location.hash.includes("regla
 // ------------------------------------------------------------------ Panneau d'appel (clavier / appel en cours)
 const KEYS = [["1", ""], ["2", "ABC"], ["3", "DEF"], ["4", "GHI"], ["5", "JKL"], ["6", "MNO"], ["7", "PQRS"], ["8", "TUV"], ["9", "WXYZ"], ["*", ""], ["0", "+"], ["#", ""]];
 
+const TOUCH = IN_APP || (window.matchMedia?.("(pointer: coarse)").matches ?? false);
 function openDrawer(open) {
   drawerOpen = open;
   $("#drawer").classList.toggle("open", open); $("#drawer").setAttribute("aria-hidden", String(!open));
   $("#scrim").classList.toggle("on", open);
   renderCallbar();
-  if (open && !session) setTimeout(() => $("#num")?.focus(), 60);
+  // Sur mobile, pas de clavier du téléphone par-dessus le pavé : il s'ouvre avec le bouton ⌨ (recherche par nom)
+  if (open && !session && !TOUCH) setTimeout(() => $("#num")?.focus(), 60);
 }
 
 function renderDrawer() {
@@ -866,7 +868,7 @@ function renderDialer(d) {
   const ready = regState === "on";
   d.innerHTML = `<div class="dr-head"><strong>Appeler</strong><button class="ghost-ic" id="drclose" title="Fermer">${I.x()}</button></div>
     <div class="dr-body">
-      <div class="sp-display"><input id="num" placeholder="Saisissez un nom ou un numéro" autocomplete="off"><button class="bk" id="bk" title="Effacer">⌫</button></div>
+      <div class="sp-display">${TOUCH ? '<button class="bk" id="kbd" title="Taper un nom (clavier)" aria-label="Clavier">⌨</button>' : ""}<input id="num" placeholder="${TOUCH ? "Numéro, ou ⌨ pour un nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}><button class="bk" id="bk" title="Effacer">⌫</button></div>
       <ul class="sugg" id="sugg"></ul>
       <div class="pad-grid">${KEYS.map(([k, l]) => `<button class="key" data-k="${k}"><b>${k}</b><span>${l}</span></button>`).join("")}</div>
       <div class="sp-actions"><button class="btn round call" id="dial" ${ready ? "" : "disabled"} title="Appeler">${I.phone(26)}</button></div>
@@ -882,8 +884,15 @@ function renderDialer(d) {
       + dir.flatMap((c) => c.phones.slice(0, 2).map((ph) => `<li data-call="${esc(ph.number)}">${avatar(c.name, "", "sm")}<span class="grow"><strong>${esc(c.name)}</strong><span class="s">${esc(c.company ? c.company + " · " : "")}${esc(fmtNum(ph.number))}</span></span>${I.phone(16)}</li>`)).join("");
     wireCalls($("#sugg"));
   };
-  $$("[data-k]", d).forEach((b) => b.onclick = () => { num.value += b.dataset.k; num.focus(); sugg(); if (session) dtmf(b.dataset.k); });
-  $("#bk").onclick = () => { num.value = num.value.slice(0, -1); num.focus(); sugg(); };
+  const keep = () => { if (!TOUCH) num.focus(); };
+  $$("[data-k]", d).forEach((b) => b.onclick = () => { num.value += b.dataset.k; keep(); sugg(); if (session) dtmf(b.dataset.k); });
+  $("#bk").onclick = () => { num.value = num.value.slice(0, -1); keep(); sugg(); };
+  $("#kbd")?.addEventListener("click", () => {
+    const on = num.getAttribute("inputmode") === "none";
+    num.setAttribute("inputmode", on ? "text" : "none");
+    num.blur(); if (on) setTimeout(() => num.focus(), 30);
+    $("#kbd").classList.toggle("on", on);
+  });
   num.oninput = sugg;
   const go = () => { const v = num.value.trim(); if (!v) return; if (isDialable(v)) call(v); else { const c = contacts.find((x) => `${x.id} ${x.name}`.toLowerCase().includes(v.toLowerCase())); if (c) call(c.id); } };
   num.onkeydown = (e) => { if (e.key === "Enter") go(); };
