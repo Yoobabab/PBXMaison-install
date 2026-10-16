@@ -1,0 +1,64 @@
+[2026-10-16 09:17:44] Asterisk 22.11.0 built by root @ 113d28a51ade on a x86_64 running Linux on 2026-10-14 13:00:32 UTC
+[2026-10-16 09:17:48] VERBOSE[7676] res_pjsip_logger.c: <--- Transmitting SIP request (587 bytes) to UDP:127.0.0.2:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport;branch=z9hG4bKPj58a9dc36-471b-4fbd-92c2-abe2ae17e223
+Route: <sip:127.0.0.2:5060;lr>
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+CSeq: 60373 REGISTER
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+Expires: 300
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-16 09:17:48] VERBOSE[7681] res_pjsip_logger.c: <--- Received SIP response (723 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6001;received=127.0.0.1;branch=z9hG4bKPj58a9dc36-471b-4fbd-92c2-abe2ae17e223
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK728c.9cfef9bfc7d309516e9cb7a7bf10d335.0
+CSeq: 60373 REGISTER
+WWW-Authenticate: Digest realm="asterisk",nonce="1792142268/b0cea8a2ed8857944f63d022e786bebf",opaque="52082dfb4c1e04f5",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-16 09:17:48] VERBOSE[7676] res_pjsip_logger.c: <--- Transmitting SIP request (878 bytes) to UDP:127.0.0.2:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport;branch=z9hG4bKPj50784541-e441-4612-a0bc-3dc664852a9f
+Route: <sip:127.0.0.2:5060;lr>
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+CSeq: 60374 REGISTER
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+Expires: 300
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Max-Forwards: 70
+User-Agent: PBXMaison
+Authorization: Digest username="accta", realm="asterisk", nonce="1792142268/b0cea8a2ed8857944f63d022e786bebf", uri="sip:127.0.0.50:5070", response="956b17d9108154811d5b8807bb127c1e", algorithm=MD5, cnonce="3cb007a740bf43e8908d11a1130fd307", opaque="52082dfb4c1e04f5", qop=auth, nc=00000001
+Content-Length:  0
+
+
+[2026-10-16 09:17:48] VERBOSE[7681] res_pjsip_logger.c: <--- Received SIP response (717 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6001;received=127.0.0.1;branch=z9hG4bKPj50784541-e441-4612-a0bc-3dc664852a9f
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK428c.a8eab7b82a352578b847881a65e55a00.0
+CSeq: 60374 REGISTER
+Date: Fri, 16 Oct 2026 09:17:48 GMT
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;alias=127.0.0.50~5070~1;line=uwmswqn>;expires=299
+Expires: 300
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+

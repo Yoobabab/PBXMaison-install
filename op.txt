@@ -1,0 +1,300 @@
+[Oct 16 09:17:44] ERROR[9653] res_pjsip_config_wizard.c: Unable to load config file 'pjsip_wizard.conf'
+[Oct 16 09:17:44] ERROR[9653] res_pjsip_config_wizard.c: Unable to load config file 'pjsip_wizard.conf'
+[Oct 16 09:17:44] ERROR[9653] res_pjsip_config_wizard.c: Unable to load config file 'pjsip_wizard.conf'
+[Oct 16 09:17:44] ERROR[9653] file.c: Error opening directory - /home/runner/work/PBXMaison-install/PBXMaison-install/tests/e2e/multi-lab/op/lib/keys: No such file or directory
+[Oct 16 09:17:44] WARNING[9653] res_crypto.c: Unable to open key directory '/home/runner/work/PBXMaison-install/PBXMaison-install/tests/e2e/multi-lab/op/lib/keys'
+[Oct 16 09:17:44] WARNING[9653] res_musiconhold.c: No music on hold classes configured, disabling music on hold.
+[Oct 16 09:17:44] WARNING[9653] res_stun_monitor.c: Unable to load config res_stun_monitor.conf
+[Oct 16 09:17:44] NOTICE[9653] res_smdi.c: Unable to load config smdi.conf: SMDI disabled
+[Oct 16 09:17:44] NOTICE[9653] res_smdi.c: No SMDI interfaces are available to listen on, not starting SMDI listener.
+[Oct 16 09:17:44] NOTICE[9653] res_fax.c: Configuration file 'res_fax.conf' not found, using default options.
+[Oct 16 09:17:44] ERROR[9653] config_options.c: Unable to load config file 'pjsip_notify.conf'
+[Oct 16 09:17:44] ERROR[9653] res_pjsip_config_wizard.c: Unable to load config file 'pjsip_wizard.conf'
+[Oct 16 09:17:44] ERROR[9653] res_calendar.c: Unable to load config calendar.conf
+[Oct 16 09:17:44] ERROR[9653] config_options.c: Unable to load config file 'agents.conf'
+[Oct 16 09:17:44] ERROR[9653] app_agent_pool.c: Unable to load config. Not loading module.
+[Oct 16 09:17:44] ERROR[9653] config_options.c: Unable to load config file 'confbridge.conf'
+[Oct 16 09:17:44] ERROR[9653] app_confbridge.c: Unable to load config. Not loading module.
+[Oct 16 09:17:44] ERROR[9653] config_options.c: Unable to load config file 'res_parking.conf'
+[Oct 16 09:17:44] WARNING[9653] cdr_csv.c: unable to load config: cdr.conf
+[Oct 16 09:17:44] WARNING[9653] cdr_manager.c: Failed to load configuration file. Module not activated.
+[Oct 16 09:17:44] WARNING[9653] cel_manager.c: Failed to load configuration file. CEL manager Module not activated.
+[Oct 16 09:17:44] ERROR[9653] cdrel_custom/config.c: Unable to load cdr_custom.conf. Not logging CDRs to custom files
+[Oct 16 09:17:44] ERROR[9653] cdrel_custom/config.c: Unable to load cel_custom.conf. Not logging CELs to custom files
+[Oct 16 09:17:44] ERROR[9653] cdrel_custom/config.c: Unable to load cdr_sqlite3_custom.conf. Not logging CDRs to custom database
+[Oct 16 09:17:44] ERROR[9653] cdrel_custom/config.c: Unable to load cel_sqlite3_custom.conf. Not logging CELs to custom database
+[Oct 16 09:17:44] ERROR[9653] app_amd.c: Configuration file amd.conf missing.
+[Oct 16 09:17:44] WARNING[9653] app_followme.c: No follow me config file (followme.conf), so no follow me
+[Oct 16 09:17:44] ERROR[9653] config_options.c: Unable to load config file 'res_http_media_cache.conf'
+[Oct 16 09:17:44] NOTICE[9653] res_http_media_cache.c: Could not load res_http_media_cache config; using defaults
+[Oct 16 09:17:44] WARNING[9653] app_voicemail.c: Failed to load configuration file.
+[Oct 16 09:17:44] ERROR[9653] res_clialiases.c: res_clialiases configuration file 'cli_aliases.conf' not found
+[Oct 16 09:17:44] WARNING[9653] app_minivm.c: Failed to load configuration file. Module activated with default settings.
+[Oct 16 09:17:44] WARNING[9653] app_festival.c: No such configuration file festival.conf
+[Oct 16 09:17:44] ERROR[9653] chan_unistim.c: Unable to load config unistim.conf
+[Oct 16 09:17:44] ERROR[9653] config_options.c: Unable to load config file 'prometheus.conf'
+[Oct 16 09:17:44] NOTICE[9653] app_queue.c: No queuerules.conf file found, queues will not follow penalty rules
+[Oct 16 09:17:44] NOTICE[9653] app_queue.c: No call queueing config file (queues.conf), so no call queues
+[Oct 16 09:17:44] WARNING[9653] loader.c: Some non-required modules failed to load.
+[Oct 16 09:17:44] WARNING[9653] loader.c: Module 'res_adsi' has been loaded but may be removed in a future release.
+[Oct 16 09:17:44] WARNING[9653] loader.c: Module 'app_getcpeid' has been loaded but may be removed in a future release.
+[Oct 16 09:17:44] WARNING[9653] loader.c: Module 'app_adsiprog' has been loaded but may be removed in a future release.
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_stasis_recording.so', missing dependency: res_stasis
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_sounds.so', missing dependencies: res_ari, res_stasis
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_stasis_answer.so', missing dependency: res_stasis
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_stasis_broadcast.so', missing dependencies: res_stasis, res_ari
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_channels.so', missing dependencies: res_ari, res_stasis, res_stasis_answer, res_stasis_playback, res_stasis_recording
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'app_stasis.so', missing dependencies: res_stasis, res_ari
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_asterisk.so', missing dependencies: res_ari, res_stasis
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'app_stasis_broadcast.so', missing dependencies: res_stasis, res_stasis_broadcast
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_stasis_playback.so', missing dependencies: res_stasis, res_stasis_recording
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_recordings.so', missing dependencies: res_ari, res_stasis, res_stasis_recording
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_odbc_transaction.so': /usr/lib/asterisk/modules/res_odbc_transaction.so: undefined symbol: ast_odbc_class_get_isolation
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_bridges.so', missing dependencies: res_ari, res_stasis, res_stasis_recording, res_stasis_playback
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_events.so', missing dependencies: res_ari, res_stasis, res_http_websocket
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_endpoints.so', missing dependencies: res_ari, res_stasis
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_stasis_device_state.so', missing dependency: res_stasis
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_device_states.so', missing dependencies: res_ari, res_stasis, res_stasis_device_state
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'func_odbc.so', missing dependency: res_odbc
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'cdr_odbc.so', missing dependency: res_odbc
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_applications.so', missing dependencies: res_ari, res_stasis
+[Oct 16 09:17:44] ERROR[9653] loader.c: Error loading module 'res_ari_playbacks.so', missing dependencies: res_ari, res_stasis, res_stasis_playback
+[Oct 16 09:17:44] ERROR[9653] loader.c: Failed to resolve dependencies for res_websocket_client
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_websocket_client declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_stun_monitor declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: Failed to resolve dependencies for res_aeap
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_aeap declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: Failed to resolve dependencies for res_speech_aeap
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_speech_aeap declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: Failed to resolve dependencies for chan_websocket
+[Oct 16 09:17:44] ERROR[9653] loader.c: chan_websocket declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_pjsip_notify declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_calendar declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: app_agent_pool declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: app_confbridge declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: Declined modules which depend on app_confbridge: app_page
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_parking declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: cdr_csv declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: cdr_manager declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: cel_manager declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: cdr_custom declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: cel_custom declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: cdr_sqlite3_custom declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: cel_sqlite3_custom declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: Failed to resolve dependencies for res_stasis_snoop
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_stasis_snoop declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: app_amd declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: app_followme declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: app_alarmreceiver declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: app_festival declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: chan_unistim declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: res_prometheus declined to load.
+[Oct 16 09:17:44] ERROR[9653] loader.c: app_queue declined to load.
+[Oct 16 09:17:44] VERBOSE[9653] asterisk.c: Asterisk Ready.
+[Oct 16 09:17:44] NOTICE[9683] res_pjsip/pjsip_distributor.c: Request 'OPTIONS' from '<sip:op@127.0.0.50>' failed for '10.1.0.58:5060' (callid: 26c14393-ba84-4077-a659-84c93179f354) - No matching endpoint found
+[Oct 16 09:17:44] NOTICE[9683] res_pjsip/pjsip_distributor.c: Request 'OPTIONS' from '<sip:op@127.0.0.50>' failed for '10.1.0.58:5060' (callid: 26c14393-ba84-4077-a659-84c93179f354) - No matching endpoint found
+[Oct 16 09:17:44] NOTICE[9683] res_pjsip/pjsip_distributor.c: Request 'OPTIONS' from '<sip:op@127.0.0.50>' failed for '10.1.0.58:5060' (callid: 26c14393-ba84-4077-a659-84c93179f354) - Failed to authenticate
+[Oct 16 09:17:45] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (659 bytes) from UDP:10.1.0.58:5060 --->
+OPTIONS sip:127.0.0.50:5070 SIP/2.0
+Record-Route: <sip:10.1.0.58;r2=on;lr=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Via: SIP/2.0/UDP 10.1.0.58;branch=z9hG4bK5a04.89730063b47b5b728cbff042b06b372f.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;received=127.0.0.1;rport=6002;branch=z9hG4bKPjed88b06c-2040-47eb-b6df-fb88b75ab91f
+From: <sip:op@127.0.0.50>;tag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.0.58:5060>
+Call-ID: b68d96c0-7be8-4853-ba81-0721df47728a
+CSeq: 6903 OPTIONS
+Max-Forwards: 69
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[Oct 16 09:17:45] NOTICE[9683] res_pjsip/pjsip_distributor.c: Request 'OPTIONS' from '<sip:op@127.0.0.50>' failed for '10.1.0.58:5060' (callid: b68d96c0-7be8-4853-ba81-0721df47728a) - No matching endpoint found
+[Oct 16 09:17:45] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (824 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.0.58;rport=5060;received=10.1.0.58;branch=z9hG4bK5a04.89730063b47b5b728cbff042b06b372f.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPjed88b06c-2040-47eb-b6df-fb88b75ab91f
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Call-ID: b68d96c0-7be8-4853-ba81-0721df47728a
+From: <sip:op@127.0.0.50>;tag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22
+To: <sip:127.0.0.50>;tag=z9hG4bK5a04.89730063b47b5b728cbff042b06b372f.0
+CSeq: 6903 OPTIONS
+WWW-Authenticate: Digest realm="asterisk",nonce="1792142265/0619036d2bbc42a258a80fae9b553c10",opaque="699d2d7b204fd97d",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[Oct 16 09:17:45] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (950 bytes) from UDP:10.1.0.58:5060 --->
+OPTIONS sip:127.0.0.50:5070 SIP/2.0
+Record-Route: <sip:10.1.0.58;r2=on;lr=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Via: SIP/2.0/UDP 10.1.0.58;branch=z9hG4bK2a04.3b128b4478be2deb702c614c44ae5c9b.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;received=127.0.0.1;rport=6002;branch=z9hG4bKPj4b00abd0-b761-4e1d-9805-f66cdf244f6a
+From: <sip:op@127.0.0.50>;tag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.0.58:5060>
+Call-ID: b68d96c0-7be8-4853-ba81-0721df47728a
+CSeq: 6904 OPTIONS
+Max-Forwards: 69
+User-Agent: PBXMaison
+Authorization: Digest username="acctb", realm="asterisk", nonce="1792142265/0619036d2bbc42a258a80fae9b553c10", uri="sip:127.0.0.50:5070", response="185ec19128c14baaee2ffc00937fe8f5", algorithm=MD5, cnonce="2e2c942067c34645b899fd4d044c27dd", opaque="699d2d7b204fd97d", qop=auth, nc=00000001
+Content-Length:  0
+
+
+[Oct 16 09:17:45] NOTICE[9683] res_pjsip/pjsip_distributor.c: Request 'OPTIONS' from '<sip:op@127.0.0.50>' failed for '10.1.0.58:5060' (callid: b68d96c0-7be8-4853-ba81-0721df47728a) - No matching endpoint found
+[Oct 16 09:17:45] NOTICE[9683] res_pjsip/pjsip_distributor.c: Request 'OPTIONS' from '<sip:op@127.0.0.50>' failed for '10.1.0.58:5060' (callid: b68d96c0-7be8-4853-ba81-0721df47728a) - Failed to authenticate
+[Oct 16 09:17:45] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (824 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.0.58;rport=5060;received=10.1.0.58;branch=z9hG4bK2a04.3b128b4478be2deb702c614c44ae5c9b.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPj4b00abd0-b761-4e1d-9805-f66cdf244f6a
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22>
+Call-ID: b68d96c0-7be8-4853-ba81-0721df47728a
+From: <sip:op@127.0.0.50>;tag=c9adb5aa-95bc-41b9-b6e8-6b35cfb28d22
+To: <sip:127.0.0.50>;tag=z9hG4bK2a04.3b128b4478be2deb702c614c44ae5c9b.0
+CSeq: 6904 OPTIONS
+WWW-Authenticate: Digest realm="asterisk",nonce="1792142265/0619036d2bbc42a258a80fae9b553c10",opaque="42a3c4780c81aba2",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[Oct 16 09:17:45] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (831 bytes) from UDP:10.1.0.58:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Record-Route: <sip:10.1.0.58;r2=on;lr=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Via: SIP/2.0/UDP 10.1.0.58;branch=z9hG4bK6a09.5827d582430ac118d63fa42922ca4268.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;received=127.0.0.1;rport=6002;branch=z9hG4bKPjfe6b16ad-9ecc-4043-bc96-07fdcfa62c17
+From: <sip:acctb@127.0.0.50>;tag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20
+To: <sip:acctb@127.0.0.50>
+Call-ID: d976ae2e-00b6-423b-ba55-ec4b31ea643d
+CSeq: 45880 REGISTER
+Contact: <sip:cx105d26a857046b23@10.1.0.58:5060;line=irbqfxi>
+Expires: 300
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Max-Forwards: 69
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[Oct 16 09:17:45] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (835 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.0.58;rport=5060;received=10.1.0.58;branch=z9hG4bK6a09.5827d582430ac118d63fa42922ca4268.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPjfe6b16ad-9ecc-4043-bc96-07fdcfa62c17
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Call-ID: d976ae2e-00b6-423b-ba55-ec4b31ea643d
+From: <sip:acctb@127.0.0.50>;tag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20
+To: <sip:acctb@127.0.0.50>;tag=z9hG4bK6a09.5827d582430ac118d63fa42922ca4268.0
+CSeq: 45880 REGISTER
+WWW-Authenticate: Digest realm="asterisk",nonce="1792142265/0619036d2bbc42a258a80fae9b553c10",opaque="4dd935633f83175e",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[Oct 16 09:17:45] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (1122 bytes) from UDP:10.1.0.58:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Record-Route: <sip:10.1.0.58;r2=on;lr=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Via: SIP/2.0/UDP 10.1.0.58;branch=z9hG4bK7a09.ec1fde12c5f9767e25c10ec0b98b8ce4.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;received=127.0.0.1;rport=6002;branch=z9hG4bKPja886f0c7-70b0-49ab-9274-ecf06b7fb411
+From: <sip:acctb@127.0.0.50>;tag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20
+To: <sip:acctb@127.0.0.50>
+Call-ID: d976ae2e-00b6-423b-ba55-ec4b31ea643d
+CSeq: 45881 REGISTER
+Contact: <sip:cx105d26a857046b23@10.1.0.58:5060;line=irbqfxi>
+Expires: 300
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Max-Forwards: 69
+User-Agent: PBXMaison
+Authorization: Digest username="acctb", realm="asterisk", nonce="1792142265/0619036d2bbc42a258a80fae9b553c10", uri="sip:127.0.0.50:5070", response="e3e20fbc240bea53e3e2c0627023bb86", algorithm=MD5, cnonce="1f32332273e84c758aedef027b3b0b84", opaque="4dd935633f83175e", qop=auth, nc=00000001
+Content-Length:  0
+
+
+[Oct 16 09:17:45] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (805 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.0.58;rport=5060;received=10.1.0.58;branch=z9hG4bK7a09.ec1fde12c5f9767e25c10ec0b98b8ce4.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPja886f0c7-70b0-49ab-9274-ecf06b7fb411
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20>
+Call-ID: d976ae2e-00b6-423b-ba55-ec4b31ea643d
+From: <sip:acctb@127.0.0.50>;tag=6b3e948d-b8f1-49cc-ba4f-b78f66bc5b20
+To: <sip:acctb@127.0.0.50>;tag=z9hG4bK7a09.ec1fde12c5f9767e25c10ec0b98b8ce4.0
+CSeq: 45881 REGISTER
+Date: Fri, 16 Oct 2026 09:17:45 GMT
+Contact: <sip:cx105d26a857046b23@10.1.0.58:5060;line=irbqfxi>;expires=299
+Expires: 300
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[Oct 16 09:17:48] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (831 bytes) from UDP:10.1.0.58:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Record-Route: <sip:10.1.0.58;r2=on;lr=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Via: SIP/2.0/UDP 10.1.0.58;branch=z9hG4bK728c.9cfef9bfc7d309516e9cb7a7bf10d335.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;received=127.0.0.1;rport=6001;branch=z9hG4bKPj58a9dc36-471b-4fbd-92c2-abe2ae17e223
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+CSeq: 60373 REGISTER
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+Expires: 300
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Max-Forwards: 69
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[Oct 16 09:17:48] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (835 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.0.58;rport=5060;received=10.1.0.58;branch=z9hG4bK728c.9cfef9bfc7d309516e9cb7a7bf10d335.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6001;received=127.0.0.1;branch=z9hG4bKPj58a9dc36-471b-4fbd-92c2-abe2ae17e223
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK728c.9cfef9bfc7d309516e9cb7a7bf10d335.0
+CSeq: 60373 REGISTER
+WWW-Authenticate: Digest realm="asterisk",nonce="1792142268/b0cea8a2ed8857944f63d022e786bebf",opaque="52082dfb4c1e04f5",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[Oct 16 09:17:48] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (1122 bytes) from UDP:10.1.0.58:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Record-Route: <sip:10.1.0.58;r2=on;lr=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Via: SIP/2.0/UDP 10.1.0.58;branch=z9hG4bK428c.a8eab7b82a352578b847881a65e55a00.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;received=127.0.0.1;rport=6001;branch=z9hG4bKPj50784541-e441-4612-a0bc-3dc664852a9f
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+CSeq: 60374 REGISTER
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+Expires: 300
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Max-Forwards: 69
+User-Agent: PBXMaison
+Authorization: Digest username="accta", realm="asterisk", nonce="1792142268/b0cea8a2ed8857944f63d022e786bebf", uri="sip:127.0.0.50:5070", response="956b17d9108154811d5b8807bb127c1e", algorithm=MD5, cnonce="3cb007a740bf43e8908d11a1130fd307", opaque="52082dfb4c1e04f5", qop=auth, nc=00000001
+Content-Length:  0
+
+
+[Oct 16 09:17:48] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (805 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.0.58;rport=5060;received=10.1.0.58;branch=z9hG4bK428c.a8eab7b82a352578b847881a65e55a00.0
+Via: SIP/2.0/UDP 10.1.0.58:5060;rport=6001;received=127.0.0.1;branch=z9hG4bKPj50784541-e441-4612-a0bc-3dc664852a9f
+Record-Route: <sip:10.1.0.58;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=005b3cf7-efca-4bda-b280-248bcaf5bee4>
+Call-ID: 2d3aa38f-14e4-43a6-ae74-e2db12cd275c
+From: <sip:accta@127.0.0.50>;tag=005b3cf7-efca-4bda-b280-248bcaf5bee4
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK428c.a8eab7b82a352578b847881a65e55a00.0
+CSeq: 60374 REGISTER
+Date: Fri, 16 Oct 2026 09:17:48 GMT
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>;expires=299
+Expires: 300
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+

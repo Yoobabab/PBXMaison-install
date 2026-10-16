@@ -1,0 +1,91 @@
+Callikoe — installation du serveur multi-tenant (2026-10-16 09:15:35)
+
+[1/9] Vérification de la machine
+  ✔ Ubuntu 24.04.5 LTS · 15988 Mo de RAM · 85 Go libres
+
+[2/9] Paquets système
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+ systemctl restart packagekit.service php8.3-fpm.service
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+  ✔ Node.js v22.23.3, PostgreSQL, Nginx, Certbot, fail2ban
+
+[3/9] Téléchargement de Callikoe
+  ✔ Code installé dans /opt/pbxmaison (4a713b89a87bb5e866e3bb2374005fe412b47c64 · 4a713b8 · version 1.5.0)
+
+[4/9] Moteur téléphonique (Asterisk précompilé)
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+  ✔ Asterisk 22.11.0 installé (sons en français inclus)
+
+[5/9] Base de données
+  ✔ PostgreSQL prêt (une base par PBX client)
+
+[6/9] Console web
+  … installation des modules de la console (1 à 2 minutes)
+  ✔ Code installé ; une console par PBX client (callikoe-host)
+
+[7/9] Réseau et accès web
+  ✔ Configuration du serveur vérifiée (hub.e2e.invalid)
+  ✔ Aiguilleur SIP actif (5060, IP 10.1.0.58)
+  ✔ Serveur web prêt
+  ✔ Protection anti-intrusion sur l'aiguilleur SIP
+  ✔ Téléphonie acceptée seulement depuis les pays autorisés (FR)
+  ⚠ hub.e2e.invalid ne pointe pas encore vers 10.1.0.58 : console du serveur en HTTP en attendant ; relance l'installeur une fois le DNS en place pour le certificat.
+curl: (7) Failed to connect to 127.0.0.1 port 8800 after 0 ms: Couldn't connect to server
+  ✔ Console du serveur : http://hub.e2e.invalid
+  ✔ IP publique 10.1.0.58
+
+[8/9] Sécurité : pare-feu et fail2ban
+  ⚠ Pare-feu non configuré (PBXM_NO_FIREWALL=1)
+  ✔ fail2ban actif (réglages : console › Sécurité)
+
+[9/9] Assistant de configuration
+curl: (7) Failed to connect to 127.0.0.1 port 8800 after 0 ms: Couldn't connect to server
+
+✔ Serveur multi-tenant prêt en 0 min 50 s
+
+  ⚠ Pare-feu non configuré (PBXM_NO_FIREWALL=1)
+
+  PBX clients : 0
+
+  Console du serveur : http://hub.e2e.invalid
+  Première connexion (compte super administrateur) : http://hub.e2e.invalid/?jeton=a002fe314bc413d3fd961bbd079a98fa
+
+  Ensuite : connecte-toi à la console du serveur et crée les PBX clients (bouton « Nouveau PBX »).
+

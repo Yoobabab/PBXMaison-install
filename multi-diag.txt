@@ -1,0 +1,93 @@
+== tables de l'aiguilleur
+			name: cx5ec1e09543a53c66
+			name: 33465001540
+			name: 33465001550
+			name: 0465001540
+			name: cx105d26a857046b23
+			name: 0465001550
+			name: +33465001540
+			name: +33465001550
+Oct 16 09:17:42 runnervm8k3b6 callikoe-aiguilleur[9254]: tables rechargées
+Oct 16 09:17:42 runnervm8k3b6 callikoe-aiguilleur[9312]: tables rechargées
+Oct 16 09:17:42 runnervm8k3b6 callikoe-aiguilleur[9380]: tables rechargées
+Oct 16 09:17:43 runnervm8k3b6 callikoe-aiguilleur[9451]: table tru : Ok. Htable reloaded. (chargé 4 / attendu 8)
+Oct 16 09:17:43 runnervm8k3b6 callikoe-aiguilleur[9483]: table ops : Ok. Htable reloaded. (chargé 1 / attendu 2)
+Oct 16 09:17:43 runnervm8k3b6 callikoe-aiguilleur[9492]: rechargement incomplet : redémarrage de l'aiguilleur
+Oct 16 09:17:43 runnervm8k3b6 callikoe-aiguilleur[9569]: tables rechargées
+Oct 16 09:17:43 runnervm8k3b6 callikoe-aiguilleur[9627]: tables rechargées
+total 4
+drwxrwx---  2 kamailio kamailio   80 Oct 16 09:17 .
+drwxr-xr-x 38 root     root     1140 Oct 16 09:17 ..
+-rw-r--r--  1 kamailio kamailio    5 Oct 16 09:17 kamailio.pid
+srw-------  1 kamailio kamailio    0 Oct 16 09:17 kamailio_ctl
+User=kamailio
+Environment='CFGFILE=/etc/kamailio/kamailio.cfg'
+Environment='SHM_MEMORY=64'
+Environment='PKG_MEMORY=8'
+EnvironmentFile=-/etc/default/kamailio
+EnvironmentFile=-/etc/default/kamailio.d/*
+ExecStart=/usr/sbin/kamailio -P /run/kamailio/kamailio.pid -f $CFGFILE -m $SHM_MEMORY -M $PKG_MEMORY
+Oct 16 09:18:07 runnervm8k3b6 /usr/sbin/kamailio[9498]: NOTICE: {1 40991 REGISTER 96d18b3e-ada4-4476-a057-756f855bb92a} <script>: CALLIKOE-ACL 127.0.0.12 REGISTER b.e2e.invalid
+Oct 16 09:18:10 runnervm8k3b6 /usr/sbin/kamailio[9499]: NOTICE: {1 9388 REGISTER bccffad5-df8a-4e2d-90df-9a8678b4d27f} <script>: CALLIKOE-ACL 127.0.0.11 REGISTER a.e2e.invalid
+Oct 16 09:18:10 runnervm8k3b6 /usr/sbin/kamailio[9500]: NOTICE: {1 15850 REGISTER 1586cd64-bcc5-435f-a253-3d036529e3fe} <script>: CALLIKOE-ACL 127.0.0.13 REGISTER b.e2e.invalid
+Oct 16 09:18:12 runnervm8k3b6 /usr/sbin/kamailio[9497]: NOTICE: {1 40992 REGISTER 96d18b3e-ada4-4476-a057-756f855bb92a} <script>: CALLIKOE-ACL 127.0.0.12 REGISTER b.e2e.invalid
+Oct 16 09:18:15 runnervm8k3b6 /usr/sbin/kamailio[9498]: NOTICE: {1 9389 REGISTER bccffad5-df8a-4e2d-90df-9a8678b4d27f} <script>: CALLIKOE-ACL 127.0.0.11 REGISTER a.e2e.invalid
+Oct 16 09:18:15 runnervm8k3b6 /usr/sbin/kamailio[9499]: NOTICE: {1 15851 REGISTER 1586cd64-bcc5-435f-a253-3d036529e3fe} <script>: CALLIKOE-ACL 127.0.0.13 REGISTER b.e2e.invalid
+Oct 16 09:18:17 runnervm8k3b6 /usr/sbin/kamailio[9500]: NOTICE: {1 40993 REGISTER 96d18b3e-ada4-4476-a057-756f855bb92a} <script>: CALLIKOE-ACL 127.0.0.12 REGISTER b.e2e.invalid
+Oct 16 09:18:20 runnervm8k3b6 /usr/sbin/kamailio[9497]: NOTICE: {1 9390 REGISTER bccffad5-df8a-4e2d-90df-9a8678b4d27f} <script>: CALLIKOE-ACL 127.0.0.11 REGISTER a.e2e.invalid
+Oct 16 09:18:20 runnervm8k3b6 /usr/sbin/kamailio[9498]: NOTICE: {1 15852 REGISTER 1586cd64-bcc5-435f-a253-3d036529e3fe} <script>: CALLIKOE-ACL 127.0.0.13 REGISTER b.e2e.invalid
+Oct 16 09:18:22 runnervm8k3b6 /usr/sbin/kamailio[9499]: NOTICE: {1 40994 REGISTER 96d18b3e-ada4-4476-a057-756f855bb92a} <script>: CALLIKOE-ACL 127.0.0.12 REGISTER b.e2e.invalid
+Oct 16 09:18:25 runnervm8k3b6 /usr/sbin/kamailio[9500]: NOTICE: {1 9391 REGISTER bccffad5-df8a-4e2d-90df-9a8678b4d27f} <script>: CALLIKOE-ACL 127.0.0.11 REGISTER a.e2e.invalid
+Oct 16 09:18:25 runnervm8k3b6 /usr/sbin/kamailio[9497]: NOTICE: {1 15853 REGISTER 1586cd64-bcc5-435f-a253-3d036529e3fe} <script>: CALLIKOE-ACL 127.0.0.13 REGISTER b.e2e.invalid
+== SIP vu par clia
+[2026-10-16 09:17:48] VERBOSE[7676] res_pjsip_logger.c: <--- Transmitting SIP request (587 bytes) to UDP:127.0.0.2:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Route: <sip:127.0.0.2:5060;lr>
+To: <sip:accta@127.0.0.50>
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+[2026-10-16 09:17:48] VERBOSE[7681] res_pjsip_logger.c: <--- Received SIP response (723 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK728c.9cfef9bfc7d309516e9cb7a7bf10d335.0
+[2026-10-16 09:17:48] VERBOSE[7676] res_pjsip_logger.c: <--- Transmitting SIP request (878 bytes) to UDP:127.0.0.2:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Route: <sip:127.0.0.2:5060;lr>
+To: <sip:accta@127.0.0.50>
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+[2026-10-16 09:17:48] VERBOSE[7681] res_pjsip_logger.c: <--- Received SIP response (717 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK428c.a8eab7b82a352578b847881a65e55a00.0
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;alias=127.0.0.50~5070~1;line=uwmswqn>;expires=299
+[2026-10-16 09:17:34] ERROR[7637] loader.c: cel_sqlite3_custom declined to load.
+[2026-10-16 09:17:34] ERROR[7637] loader.c: app_amd declined to load.
+[2026-10-16 09:17:34] ERROR[7637] loader.c: app_followme declined to load.
+[2026-10-16 09:17:34] ERROR[7637] loader.c: app_alarmreceiver declined to load.
+[2026-10-16 09:17:34] ERROR[7637] loader.c: func_odbc declined to load.
+[2026-10-16 09:17:34] ERROR[7637] loader.c: app_festival declined to load.
+[2026-10-16 09:17:34] ERROR[7637] loader.c: res_prometheus declined to load.
+[2026-10-16 09:17:44] WARNING[7676] res_pjsip_outbound_authenticator_digest.c: noendpoint:127.0.0.2: Authentication credentials not accepted by server. Credential failed to authenticate (PJSIP_EFAILED
+== opérateur simulé
+To: <sip:acctb@127.0.0.50>
+Contact: <sip:cx105d26a857046b23@10.1.0.58:5060;line=irbqfxi>
+[Oct 16 09:17:45] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (835 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:acctb@127.0.0.50>;tag=z9hG4bK6a09.5827d582430ac118d63fa42922ca4268.0
+[Oct 16 09:17:45] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (1122 bytes) from UDP:10.1.0.58:5060 --->
+To: <sip:acctb@127.0.0.50>
+Contact: <sip:cx105d26a857046b23@10.1.0.58:5060;line=irbqfxi>
+[Oct 16 09:17:45] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (805 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 200 OK
+To: <sip:acctb@127.0.0.50>;tag=z9hG4bK7a09.ec1fde12c5f9767e25c10ec0b98b8ce4.0
+Contact: <sip:cx105d26a857046b23@10.1.0.58:5060;line=irbqfxi>;expires=299
+[Oct 16 09:17:48] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (831 bytes) from UDP:10.1.0.58:5060 --->
+To: <sip:accta@127.0.0.50>
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+[Oct 16 09:17:48] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (835 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK728c.9cfef9bfc7d309516e9cb7a7bf10d335.0
+[Oct 16 09:17:48] VERBOSE[9688] res_pjsip_logger.c: <--- Received SIP request (1122 bytes) from UDP:10.1.0.58:5060 --->
+To: <sip:accta@127.0.0.50>
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>
+[Oct 16 09:17:48] VERBOSE[9683] res_pjsip_logger.c: <--- Transmitting SIP response (805 bytes) to UDP:10.1.0.58:5060 --->
+SIP/2.0 200 OK
+To: <sip:accta@127.0.0.50>;tag=z9hG4bK428c.a8eab7b82a352578b847881a65e55a00.0
+Contact: <sip:cx5ec1e09543a53c66@10.1.0.58:5060;line=uwmswqn>;expires=299
