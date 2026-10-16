@@ -28,7 +28,7 @@ const DNS_API = process.env.PBXM_DNS_API || "https://api.callikoe.fr";
 const MANAGED = ["callikoe.fr", "callikoe.com"];
 const isManaged = (f) => MANAGED.some((d) => String(f || "").endsWith("." + d));
 export const EDITIONS = { basic: "Basic", pro: "Pro", enterprise: "Enterprise" };
-export const SC = [4, 8, 16, 24, 32, 48, 64, 96, 128];
+export const SC = [2, 4, 8, 16, 24, 32, 48, 64, 96, 128];
 export const COUNTRIES = [
   { code: "FR", name: "France", dial: "33", tz: "Europe/Paris" }, { code: "BE", name: "Belgique", dial: "32", tz: "Europe/Brussels" },
   { code: "CH", name: "Suisse", dial: "41", tz: "Europe/Zurich" }, { code: "LU", name: "Luxembourg", dial: "352", tz: "Europe/Luxembourg" },
@@ -387,7 +387,8 @@ export async function buildApp({ db } = {}) {
   const LIC_RE = /^PBXM(-[A-Z0-9]{4}){4}$/;
   const regTenants = () => readJson(TENANTS, {}).tenants || [];
   // Rapproche la table des PBX réels : licences des PBX existants reprises, licences des PBX supprimés rendues disponibles
-  let portalSync = { at: 0, error: "" };
+  let portalSync = { at: 0, error: "" }, portalEditions = null;
+  const edNames = () => (portalMode() && portalEditions ? { ...EDITIONS, ...portalEditions } : EDITIONS);
   const suspending = new Map();
   setInterval(() => { if (portalMode()) syncLicenses(true).catch(() => {}); }, 5 * 60_000).unref();
   async function syncLicenses(force = false) {
@@ -418,6 +419,7 @@ export async function buildApp({ db } = {}) {
     const pbx = (d.pbx || []).map((p) => ({ slug: p.slug, name: p.name, fqdn: p.fqdn, license: p.license, pbx_id: reg.find((t) => t.slug === p.slug)?.pbx_id || "", suspended: !!p.suspended }));
     let r; try { r = await portal("/v1/hub/sync", { pbx, version: process.env.CX_VERSION || "" }); portalSync.error = ""; }
     catch (e) { portalSync.error = e.message; return; }
+    if (r.editions && typeof r.editions === "object") portalEditions = Object.fromEntries(Object.entries(r.editions).filter(([k, v]) => EDITIONS[k] && typeof v === "string").map(([k, v]) => [k, v.slice(0, 30)]));
     const keys = [];
     for (const l of r.licenses || []) {
       if (!LIC_RE.test(l.key)) continue;
@@ -498,7 +500,7 @@ export async function buildApp({ db } = {}) {
     const rows = (await db.query("SELECT * FROM hub_licenses ORDER BY created_at DESC")).rows.map(licRow);
     const d = await etat();
     const pbx = (d?.pbx || regTenants()).map((p) => ({ slug: p.slug, name: p.name, fqdn: p.fqdn, company: p.company || "", suspended: !!p.suspended }));
-    return { licenses: rows, pbx, editions: EDITIONS, sc: SC, durations: DURATIONS, signing: signingInfo(), portal_error: portalMode() ? portalSync.error : "" };
+    return { licenses: rows, pbx, editions: edNames(), sc: SC, durations: DURATIONS, signing: signingInfo(), portal_error: portalMode() ? portalSync.error : "" };
   });
   app.post("/api/licenses", { preHandler: requireRole("super", "admin") }, async (req) => {
     needSign();
@@ -558,7 +560,7 @@ export async function buildApp({ db } = {}) {
   };
 
   // ---------------------------------------------------------------- Création d'un PBX (licence signée ici)
-  app.get("/api/pbx/options", { preHandler: requireUser }, async () => ({ editions: EDITIONS, sc: SC, countries: COUNTRIES, timezones: TIMEZONES,
+  app.get("/api/pbx/options", { preHandler: requireUser }, async () => ({ editions: edNames(), sc: SC, countries: COUNTRIES, timezones: TIMEZONES,
     languages: LANGUAGES, durations: DURATIONS, domains: MANAGED, signing: signingInfo() }));
   app.get("/api/fqdn-check", { preHandler: requireUser }, async (req) => {
     const fqdn = String(req.query?.fqdn || "").toLowerCase();
