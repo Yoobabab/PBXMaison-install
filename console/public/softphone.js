@@ -245,7 +245,7 @@ if (IN_APP) document.documentElement.classList.add("in-app");
 const NAV = IN_APP
   ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
   : [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
+const TITLES = { clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
 // Responsable : onglet Plannings (dans le menu de l'appli, où la barre du bas est déjà pleine)
 const navItems = () => !me?.user?.manager || IN_APP ? NAV : [...NAV.slice(0, -1), ["planning", "Plannings", I.cal], NAV.at(-1)];
 
@@ -261,7 +261,7 @@ function renderShell() {
   root.innerHTML = `<div class="sp-app">
     <aside class="rail">
       <a class="rail-logo" href="#/equipe" title="Callikoe"><i></i></a>
-      <nav>${navItems().map(([k, l, ic]) => k === "clavier" ? `<a href="#" data-dial>${ic()}<span>${l}</span></a>` : `<a href="#/${k}" data-r="${k}">${ic()}<span>${l}</span><b class="badge" id="b-${k}" hidden></b></a>`).join("")}</nav>
+      <nav>${navItems().map(([k, l, ic]) => k === "clavier" && !IN_APP ? `<a href="#" data-dial>${ic()}<span>${l}</span></a>` : `<a href="#/${k}" data-r="${k}">${ic()}<span>${l}</span><b class="badge" id="b-${k}" hidden></b></a>`).join("")}</nav>
       <button class="rail-me" id="mebtn" title="Mon statut">${avatar(me.user.name, myPresence().cls, "sm", "me-av")}</button>
     </aside>
     <div class="sp-body">
@@ -347,7 +347,7 @@ function refreshPresence() {
 // ------------------------------------------------------------------ Navigation
 function route() {
   const [p, s] = location.hash.replace(/^#\/?/, "").split("/");
-  page = TITLES[p] && (p !== "planning" || me.user.manager) ? p : "equipe"; sub = s || "";
+  page = TITLES[p] && (p !== "planning" || me.user.manager) && (p !== "clavier" || IN_APP) ? p : "equipe"; sub = s || "";
   $$(".rail [data-r]").forEach((a) => a.classList.toggle("on", a.dataset.r === page));
   $("#title").textContent = TITLES[page];
   if (page === "appels") store.set(`callikoe_seen_${me.user.id}`, new Date().toISOString());
@@ -358,7 +358,7 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning })[page](el);
+  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, clavier: (x) => renderDialer(x, true) })[page](el);
 }
 
 // ------------------------------------------------------------------ Plannings d'appels (responsables)
@@ -885,6 +885,8 @@ const KEYS = [["1", ""], ["2", "ABC"], ["3", "DEF"], ["4", "GHI"], ["5", "JKL"],
 
 const TOUCH = IN_APP || (window.matchMedia?.("(pointer: coarse)").matches ?? false);
 function openDrawer(open) {
+  // Appli : le clavier est une page comme les autres (barre du bas visible), le panneau ne sert qu'aux appels en cours
+  if (open && !session && IN_APP) { if (location.hash !== "#/clavier") location.hash = "#/clavier"; open = false; }
   drawerOpen = open;
   $("#drawer").classList.toggle("open", open); $("#drawer").setAttribute("aria-hidden", String(!open));
   $("#scrim").classList.toggle("on", open);
@@ -895,19 +897,26 @@ function openDrawer(open) {
 
 function renderDrawer() {
   const d = $("#drawer"); if (!d) return;
-  if (!session) return renderDialer(d);
+  if (!session) {
+    if (!IN_APP) return renderDialer(d);
+    d.innerHTML = ""; // pas de second clavier caché (mêmes identifiants que la page Clavier)
+    const ready = regState === "on", hint = $("#dhint"), btn = $("#dial");
+    if (btn) btn.disabled = !ready;
+    if (hint && !hint.classList.contains("err")) hint.innerHTML = ready ? "Appeler avec : <strong>ce téléphone</strong>" : regState === "fail" ? "Connexion refusée par le PBX." : "Connexion au PBX…";
+    return;
+  }
   renderInCall(d);
 }
 
-function renderDialer(d) {
+function renderDialer(d, asPage = false) {
   const ready = regState === "on";
-  d.innerHTML = `<div class="dr-head"><strong>Appeler</strong><button class="ghost-ic" id="drclose" title="Fermer">${I.x()}</button></div>
-    <div class="dr-body">
+  d.innerHTML = `${asPage ? "" : `<div class="dr-head"><strong>Appeler</strong><button class="ghost-ic" id="drclose" title="Fermer">${I.x()}</button></div>`}
+    <div class="dr-body ${asPage ? "sp-dialpage" : ""}">
       <div class="sp-display">${TOUCH ? `<button class="bk" id="kbd" title="Clavier du téléphone (chercher un nom)" aria-label="Clavier">${svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.5h.01M9.5 12.5h.01M13 12.5h.01M16.5 12.5h.01M8 15.5h8"/>', 20)}</button>` : ""}<input id="num" placeholder="${TOUCH ? "Numéro ou nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}>${TOUCH ? '<span class="bk" aria-hidden="true"></span>' : '<button class="bk" id="bk" title="Effacer">⌫</button>'}</div>
       <ul class="sugg strip" id="sugg"></ul>
       <div class="pad-grid">${KEYS.map(([k, l]) => `<button class="key" data-k="${k}"><b>${k}</b><span>${l}</span></button>`).join("")}</div>
       <div class="sp-actions ${TOUCH ? "touch" : ""}">${TOUCH ? "<span></span>" : ""}<button class="btn round call" id="dial" ${ready ? "" : "disabled"} title="Appeler">${I.phone(26)}</button>${TOUCH ? '<button class="bkk" id="bk" title="Effacer (appui long : tout effacer)" aria-label="Effacer" hidden>⌫</button>' : ""}</div>
-      <p class="hint center" id="dhint">${ready ? "Appeler avec : <strong>ce navigateur</strong>" : regState === "fail" ? "Connexion refusée par le PBX." : "Connexion au PBX…"}</p>
+      <p class="hint center" id="dhint">${ready ? `Appeler avec : <strong>${IN_APP ? "ce téléphone" : "ce navigateur"}</strong>` : regState === "fail" ? "Connexion refusée par le PBX." : "Connexion au PBX…"}</p>
     </div>`;
   const num = $("#num");
   const sugg = () => {
@@ -937,7 +946,7 @@ function renderDialer(d) {
   const go = () => { const v = num.value.trim(); if (!v) return; if (isDialable(v)) call(v); else { const c = contacts.find((x) => `${x.id} ${x.name}`.toLowerCase().includes(v.toLowerCase())); if (c) call(c.id); } };
   num.onkeydown = (e) => { if (e.key === "Enter") go(); };
   $("#dial").onclick = go;
-  $("#drclose").onclick = () => openDrawer(false);
+  $("#drclose")?.addEventListener("click", () => openDrawer(false));
   syncBk();
 }
 
