@@ -1102,7 +1102,7 @@ async function renderUser(id, tab = "general") {
       <div class="phv-wrap"><div id="phv"></div><div id="phvpanel" class="phv-panel"></div></div>
       <details class="phv-list"><summary>Vue en liste</summary><div class="keys" id="keys"></div></details>
       <div class="row"><button type="button" class="btn ghost sm" id="addkey">+ Ajouter une touche</button>
-        <button type="button" class="btn ghost sm" id="addall" title="Une BLF pour chaque utilisateur qui n'en a pas encore">Tous les users</button></div></form>`;
+        <button type="button" class="btn ghost sm" id="addall" title="Une BLF pour chaque utilisateur qui n'en a pas encore">Remplir BLF</button></div></form>`;
   } else if (tab === "messagerie") {
     const vm = u.voicemail;
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
