@@ -43,6 +43,7 @@ const I = {
   vm: () => svg('<circle cx="6.5" cy="12" r="3.5"/><circle cx="17.5" cy="12" r="3.5"/><path d="M6.5 15.5h11"/>'),
   gear: () => svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   cal: () => svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h3M13 14h3M8 17.5h3"/>'),
+  spk: () => svg('<path d="M4 9.5v5h3.5L12 19V5L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
   keypad: () => svg('<circle cx="6" cy="5" r="1.3"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="5" r="1.3"/><circle cx="6" cy="11" r="1.3"/><circle cx="12" cy="11" r="1.3"/><circle cx="18" cy="11" r="1.3"/><circle cx="6" cy="17" r="1.3"/><circle cx="12" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/><circle cx="12" cy="22" r="1.1"/>'),
   star: (on) => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>`,
   x: () => svg('<path d="M6 6l12 12M18 6 6 18"/>'),
@@ -236,7 +237,10 @@ const IN_APP = (() => {
     return sessionStorage.getItem("callikoe_app") === "1" || !!window.ReactNativeWebView;
   } catch { return !!window.CALLIKOE_APP; }
 })();
-const toApp = (type) => { try { window.ReactNativeWebView?.postMessage(JSON.stringify({ type })); } catch { /* hors appli */ } };
+const toApp = (type, extra = {}) => { try { window.ReactNativeWebView?.postMessage(JSON.stringify({ type, ...extra })); } catch { /* hors appli */ } };
+// Appli mobile : le son d'un appel passe par l'écouteur (oreille), le bouton Haut-parleur bascule
+let speakerOn = false;
+const appAudio = (call) => { if (!call) speakerOn = false; if (IN_APP) toApp("audio", { call, speaker: speakerOn }); };
 if (IN_APP) document.documentElement.classList.add("in-app");
 const NAV = IN_APP
   ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
@@ -899,10 +903,10 @@ function renderDialer(d) {
   const ready = regState === "on";
   d.innerHTML = `<div class="dr-head"><strong>Appeler</strong><button class="ghost-ic" id="drclose" title="Fermer">${I.x()}</button></div>
     <div class="dr-body">
-      <div class="sp-display">${TOUCH ? `<button class="bk" id="kbd" title="Clavier du téléphone (chercher un nom)" aria-label="Clavier">${svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.5h.01M9.5 12.5h.01M13 12.5h.01M16.5 12.5h.01M8 15.5h8"/>', 20)}</button>` : ""}<input id="num" placeholder="${TOUCH ? "Numéro ou nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}><button class="bk" id="bk" title="Effacer">⌫</button></div>
+      <div class="sp-display">${TOUCH ? `<button class="bk" id="kbd" title="Clavier du téléphone (chercher un nom)" aria-label="Clavier">${svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.5h.01M9.5 12.5h.01M13 12.5h.01M16.5 12.5h.01M8 15.5h8"/>', 20)}</button>` : ""}<input id="num" placeholder="${TOUCH ? "Numéro ou nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}>${TOUCH ? '<span class="bk" aria-hidden="true"></span>' : '<button class="bk" id="bk" title="Effacer">⌫</button>'}</div>
       <ul class="sugg strip" id="sugg"></ul>
       <div class="pad-grid">${KEYS.map(([k, l]) => `<button class="key" data-k="${k}"><b>${k}</b><span>${l}</span></button>`).join("")}</div>
-      <div class="sp-actions"><button class="btn round call" id="dial" ${ready ? "" : "disabled"} title="Appeler">${I.phone(26)}</button></div>
+      <div class="sp-actions ${TOUCH ? "touch" : ""}">${TOUCH ? "<span></span>" : ""}<button class="btn round call" id="dial" ${ready ? "" : "disabled"} title="Appeler">${I.phone(26)}</button>${TOUCH ? '<button class="bkk" id="bk" title="Effacer (appui long : tout effacer)" aria-label="Effacer" hidden>⌫</button>' : ""}</div>
       <p class="hint center" id="dhint">${ready ? "Appeler avec : <strong>ce navigateur</strong>" : regState === "fail" ? "Connexion refusée par le PBX." : "Connexion au PBX…"}</p>
     </div>`;
   const num = $("#num");
@@ -916,19 +920,25 @@ function renderDialer(d) {
     wireCalls($("#sugg"));
   };
   const keep = () => { if (!TOUCH) num.focus(); };
-  $$("[data-k]", d).forEach((b) => b.onclick = () => { num.value += b.dataset.k; keep(); sugg(); if (session) dtmf(b.dataset.k); });
-  $("#bk").onclick = () => { num.value = num.value.slice(0, -1); keep(); sugg(); };
+  const syncBk = () => { if (TOUCH) $("#bk").hidden = !num.value; };
+  $$("[data-k]", d).forEach((b) => b.onclick = () => { num.value += b.dataset.k; keep(); sugg(); syncBk(); if (session) dtmf(b.dataset.k); });
+  let bkHold = null, bkLong = false;
+  $("#bk").onclick = () => { if (bkLong) { bkLong = false; return; } num.value = num.value.slice(0, -1); keep(); sugg(); syncBk(); };
+  // Appui long sur ⌫ : tout effacer
+  $("#bk").addEventListener("pointerdown", () => { bkLong = false; bkHold = setTimeout(() => { bkLong = true; num.value = ""; sugg(); syncBk(); }, 600); });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) $("#bk").addEventListener(ev, () => clearTimeout(bkHold));
   $("#kbd")?.addEventListener("click", () => {
     const on = num.getAttribute("inputmode") === "none";
     num.setAttribute("inputmode", on ? "text" : "none");
     num.blur(); if (on) setTimeout(() => num.focus(), 30);
     $("#kbd").classList.toggle("on", on);
   });
-  num.oninput = sugg;
+  num.oninput = () => { sugg(); syncBk(); };
   const go = () => { const v = num.value.trim(); if (!v) return; if (isDialable(v)) call(v); else { const c = contacts.find((x) => `${x.id} ${x.name}`.toLowerCase().includes(v.toLowerCase())); if (c) call(c.id); } };
   num.onkeydown = (e) => { if (e.key === "Enter") go(); };
   $("#dial").onclick = go;
   $("#drclose").onclick = () => openDrawer(false);
+  syncBk();
 }
 
 function callState() {
@@ -952,6 +962,7 @@ function renderInCall(d) {
         ${vid ? `<button class="opt ${camOff ? "on" : ""}" id="cam" ${est ? "" : "disabled"}>${camOff ? I.videooff() : I.video()}<span>${camOff ? "Caméra coupée" : "Caméra"}</span></button>
         <button class="opt" id="fs">${I.full()}<span>Plein écran</span></button>` : ""}
         <button class="opt ${muted ? "on" : ""}" id="mute">${muted ? I.micoff() : I.mic()}<span>${muted ? "Micro coupé" : "Muet"}</span></button>
+        ${IN_APP ? `<button class="opt ${speakerOn ? "on" : ""}" id="spk">${I.spk()}<span>Haut-parleur</span></button>` : ""}
         <button class="opt ${held ? "on" : ""}" id="hold" ${est ? "" : "disabled"}>${I.pause()}<span>${held ? "Reprendre" : "Attente"}</span></button>
         <button class="opt" id="kp" ${est ? "" : "disabled"}>${I.keypad()}<span>Clavier</span></button>
         <button class="opt" id="xfer" ${est ? "" : "disabled"}>${I.xfer()}<span>Transférer</span></button>
@@ -969,6 +980,7 @@ function renderInCall(d) {
   $("#fs")?.addEventListener("click", () => { const v = $("#vstage"); document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen?.().catch(() => {}); });
   if (vid) drawVideos();
   $("#mute").onclick = () => { muted ? session.unmute({ audio: true }) : session.mute({ audio: true }); renderDrawer(); renderCallbar(); };
+  $("#spk")?.addEventListener("click", () => { speakerOn = !speakerOn; appAudio(true); renderDrawer(); });
   $("#hold").onclick = () => { held ? session.unhold() : session.hold(); setTimeout(() => { renderDrawer(); renderCallbar(); }, 300); };
   $("#kp").onclick = () => { $("#dtmf").hidden = !$("#dtmf").hidden; $("#xferbox").hidden = true; };
   $("#xfer").onclick = () => { $("#xferbox").hidden = !$("#xferbox").hidden; $("#dtmf").hidden = true; $("#xnum").focus(); };
@@ -1035,9 +1047,10 @@ function connect() {
       : { direction: "out", number: callInfo?.number || remote.uri.user, name: nameOf(callInfo?.number || remote.uri.user) || roomName(callInfo?.number), video: !!callInfo?.video };
     if (originator === "remote") callInfo.offerVideo = /\bm=video [1-9]/.test(String(s._request?.body || ""));
     s.on("peerconnection", (e) => hookAudio(e.peerconnection));
+    if (originator !== "remote" || callInfo.intercom) appAudio(true);
     s.on("icecandidate", (e) => { if (e.candidate.type === "srflx" || e.candidate.type === "relay") e.ready(); });
     s.on("progress", () => { if (callInfo.direction === "out") { callInfo.ringing = true; stopTone?.(); stopTone = tone(RINGBACK, "tones"); renderDrawer(); renderCallbar(); } });
-    s.on("accepted", () => { stopTone?.(); stopTone = null; startedAt = Date.now(); hideIncoming(); openDrawer(true); renderDrawer(); tick(); });
+    s.on("accepted", () => { appAudio(true); stopTone?.(); stopTone = null; startedAt = Date.now(); hideIncoming(); openDrawer(true); renderDrawer(); tick(); });
     s.on("confirmed", () => { renderDrawer(); renderCallbar(); });
     s.on("hold", () => renderDrawer()); s.on("unhold", () => renderDrawer());
     s.on("ended", () => finish("answered"));
@@ -1122,7 +1135,7 @@ function tick() {
 function renderCallbarTime() { const s = $("#callbar .s"); if (s && session) s.innerHTML = callState(); }
 
 function finish(status, cause) {
-  stopTone?.(); stopTone = null; clearInterval(timer); hideIncoming();
+  stopTone?.(); stopTone = null; clearInterval(timer); hideIncoming(); appAudio(false);
   if (callInfo) addHistory({ direction: callInfo.direction, number: callInfo.number, name: callInfo.name, status, at: new Date().toISOString(), duration: startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0 });
   const msg = status === "failed" && cause && !["Canceled", "Terminated"].includes(cause) ? ({ Busy: "Occupé", Rejected: "Refusé", Unavailable: "Indisponible", "Not Found": "Numéro inconnu", "User Denied Media Access": "Accès au micro refusé" }[cause] || cause) : "";
   const wasIncomingMissed = status === "missed";
