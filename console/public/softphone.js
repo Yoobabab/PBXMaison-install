@@ -868,7 +868,7 @@ function renderDialer(d) {
   const ready = regState === "on";
   d.innerHTML = `<div class="dr-head"><strong>Appeler</strong><button class="ghost-ic" id="drclose" title="Fermer">${I.x()}</button></div>
     <div class="dr-body">
-      <div class="sp-display">${TOUCH ? `<button class="bk" id="kbd" title="Chercher un nom avec le clavier" aria-label="Chercher un nom">${I.search()}</button>` : ""}<input id="num" placeholder="${TOUCH ? "Numéro ou nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}><button class="bk" id="bk" title="Effacer">⌫</button></div>
+      <div class="sp-display">${TOUCH ? `<button class="bk" id="kbd" title="Clavier du téléphone (chercher un nom)" aria-label="Clavier">${svg('<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 9.5h.01M9.5 9.5h.01M13 9.5h.01M16.5 9.5h.01M6 12.5h.01M9.5 12.5h.01M13 12.5h.01M16.5 12.5h.01M8 15.5h8"/>', 20)}</button>` : ""}<input id="num" placeholder="${TOUCH ? "Numéro ou nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}><button class="bk" id="bk" title="Effacer">⌫</button></div>
       <ul class="sugg strip" id="sugg"></ul>
       <div class="pad-grid">${KEYS.map(([k, l]) => `<button class="key" data-k="${k}"><b>${k}</b><span>${l}</span></button>`).join("")}</div>
       <div class="sp-actions"><button class="btn round call" id="dial" ${ready ? "" : "disabled"} title="Appeler">${I.phone(26)}</button></div>
