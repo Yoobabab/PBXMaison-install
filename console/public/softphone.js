@@ -1,4 +1,3 @@
-import { renderPlanning, planningSummary } from "./planning-ui.js";
 // Softphone web Callikoe — WebRTC via JsSIP, connecté au PBX par https://<fqdn>/ws
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -361,8 +360,12 @@ function renderPage() {
 // ------------------------------------------------------------------ Plannings d'appels (responsables)
 async function pagePlanning(el) {
   el.innerHTML = '<p class="s" style="padding:16px">Chargement…</p>';
-  let cf;
-  try { cf = await api("GET", "/api/u/plannings"); } catch (err) { el.innerHTML = `<div class="sp-banner warn">${esc(err.message)}</div>`; return; }
+  let cf, renderPlanning, planningSummary;
+  try {
+    // Chargé seulement à l'ouverture de l'onglet : une erreur ici ne bloque jamais le reste du softphone
+    ({ renderPlanning, planningSummary } = await import("./planning-ui.js"));
+    cf = await api("GET", "/api/u/plannings");
+  } catch (err) { el.innerHTML = `<div class="sp-banner warn">${esc(err.message)}</div>`; return; }
   if (sub) {
     const plan = cf.plannings.find((x) => x.id === sub);
     if (!plan) { el.innerHTML = '<div class="sp-banner warn">Planning introuvable.</div>'; return; }

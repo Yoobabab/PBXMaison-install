@@ -15,7 +15,14 @@
 <audio id="remote" autoplay></audio>
 <audio id="ringer" autoplay></audio>
 <audio id="tones" autoplay></audio>
+<script>
+// Si le softphone ne démarre pas (navigateur trop ancien, fichier manquant…), on l'affiche au lieu de tourner sans fin
+window.__spErr = function (msg) { var r = document.getElementById("root"); if (r && r.querySelector(".sp-loading")) r.innerHTML = '<div class="sp-loading" style="flex-direction:column;gap:12px;padding:24px;text-align:center"><strong>Le softphone n\'a pas pu démarrer</strong><span class="s">' + String(msg).replace(/[<>&]/g, "") + '</span><button class="btn" onclick="location.reload()">Recharger</button></div>'; };
+window.addEventListener("error", function (e) { window.__spErr((e.message || "erreur") + (e.filename ? " (" + e.filename.split("/").pop() + ":" + e.lineno + ")" : "")); });
+window.addEventListener("unhandledrejection", function (e) { window.__spErr(e.reason && e.reason.message || e.reason); });
+setTimeout(function () { window.__spErr("Délai dépassé : vérifie la connexion au PBX."); }, 20000);
+</script>
 <script src="/vendor/jssip-3.10.1.min.js"></script>
-<script type="module" src="/softphone.js"></script>
+<script type="module" src="/softphone.js" onerror="window.__spErr('Fichier softphone.js introuvable')"></script>
 </body>
 </html>
