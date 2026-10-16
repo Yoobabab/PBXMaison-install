@@ -774,6 +774,10 @@ export async function buildApp({ db, ami } = {}) {
     const f = admin.captureFile(req.params.name);
     return reply.type("application/vnd.tcpdump.pcap").header("content-disposition", `attachment; filename="${path.basename(f)}"`).header("cache-control", "private, no-store").send(fs.createReadStream(f));
   });
+  app.get("/api/capture/file/:name/:call", { preHandler: requireUser }, async (req, reply) => {
+    const f = admin.captureCallFile(req.params.name, req.params.call);
+    return reply.type("application/vnd.tcpdump.pcap").header("content-disposition", `attachment; filename="${req.params.name.replace(/\.pcap$/, "")}-${path.basename(f)}"`).header("cache-control", "private, no-store").send(fs.createReadStream(f));
+  });
   app.delete("/api/capture/file/:name", { preHandler: requireUser }, async (req) => admin.deleteCapture(req.params.name));
 
   // ---------------------------------------------------------------- Codes raccourcis

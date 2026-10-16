@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { APP_DIR, CONFIGURE_CMD, VAR, installState, pbxEnv, isConfigured } from "./config.mjs";
 import { UserError, displayName } from "./users.mjs";
+import { splitPcapFile } from "./pcap-split.mjs";
 import { validateRule, describeRule, buildOutboundDialplan, rangesText, CID_MODES } from "./outbound.mjs";
 import { defaultSecurity, validateSecurity, buildSecurityDialplan, securityGlobals, sipAcl, ipAllowed, checkIp, COUNTRIES } from "./security.mjs";
 import { defaultShortcodes, validateShortcodes, buildShortcodesDialplan, shortcodesList } from "./shortcodes.mjs";
@@ -329,10 +330,23 @@ export function createAdminService({ db, ami, pbx }) {
       files = fs.readdirSync(CAP_DIR).filter((f) => capPath(f)).map((f) => {
         const s2 = fs.statSync(path.join(CAP_DIR, f));
         let ready = true; try { fs.accessSync(path.join(CAP_DIR, f), fs.constants.R_OK); } catch { ready = false; }
-        return { name: f, size: s2.size, at: s2.mtime.toISOString(), mode: f.includes("-all.") ? "all" : "sip", ready };
+        return { name: f, size: s2.size, at: s2.mtime.toISOString(), mode: f.includes("-all.") ? "all" : "sip", ready, calls: ready ? captureCalls(f) : [] };
       }).sort((x, y) => y.name.localeCompare(x.name));
     } catch { /* pas encore de capture */ }
     return { running: !!st.running, files };
+  }
+  // Un fichier par appel (SIP + audio de l'appel), préparé une fois la capture terminée
+  const callsDir = (name) => path.join(CAP_DIR, name.replace(/\.pcap$/, ".appels"));
+  function captureCalls(name) {
+    const dir = callsDir(name), idx = path.join(dir, "index.json");
+    try { return JSON.parse(fs.readFileSync(idx, "utf8")).calls; } catch { /* pas encore découpée */ }
+    try { return splitPcapFile(path.join(CAP_DIR, name), dir); } catch { return []; }
+  }
+  function captureCallFile(name, call) {
+    if (!capPath(name) || !/^appel-\d{2,3}-[A-Za-z0-9+_-]+-vers-[A-Za-z0-9+_-]+\.pcap$/.test(String(call || ""))) throw Object.assign(new UserError("Capture introuvable."), { status: 404 });
+    const f = path.join(callsDir(name), call);
+    if (!fs.existsSync(f)) throw Object.assign(new UserError("Capture introuvable."), { status: 404 });
+    return f;
   }
   async function startCapture({ seconds = 60, mode = "sip" } = {}) {
     const secs = Number(seconds);
@@ -348,7 +362,7 @@ export function createAdminService({ db, ami, pbx }) {
     if (!f || !fs.existsSync(f)) throw Object.assign(new UserError("Capture introuvable."), { status: 404 });
     return f;
   }
-  function deleteCapture(name) { fs.rmSync(captureFile(name), { force: true }); return { ok: true }; }
+  function deleteCapture(name) { const f = captureFile(name); fs.rmSync(f, { force: true }); fs.rmSync(callsDir(name), { recursive: true, force: true }); return { ok: true }; }
 
   /** Nouvelle clé de licence (générée par le portail) : vérifiée et appliquée par pbx-configure (root). */
   async function setLicense(token) {
@@ -558,7 +572,7 @@ export function createAdminService({ db, ami, pbx }) {
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,
     getShortcodes, setShortcodes, pollStatusCodes,
     getBackups, setBackups, runBackup, testRemote, restoreBackup, restoreStatus, stageUpload,
-    getUpdates, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, deleteCapture,
+    getUpdates, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, captureCallFile, deleteCapture,
     getAlerts, setAlerts, clearAlerts, logAlert, monitor,
     listGateways, saveGateway, deleteGateway, gatewaySetup,
     getSystem, firewallCheck, systemAction, purgeCdr,

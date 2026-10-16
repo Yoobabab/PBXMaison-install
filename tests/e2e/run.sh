@@ -377,6 +377,7 @@ sleep 9
 CAPF="$(api GET /api/capture | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const f=JSON.parse(s).files.find(x=>x.ready);console.log(f?f.name:"")})')"
 [[ -n "$CAPF" ]] && curl -sS -b "$JAR" "$API/api/capture/file/$CAPF" -o cap.pcap && [[ "$(od -An -tx1 -N4 cap.pcap | tr -d ' ')" =~ ^(d4c3b2a1|a1b2c3d4|4d3cb2a1|0a0d0d0a)$ ]] \
   && pass "Capture réseau : fichier pcap téléchargeable (Wireshark)" || fail "capture pcap : $CAPF $(od -An -tx1 -N4 cap.pcap 2>/dev/null)"
+api GET /api/capture | grep -q '"calls":\[' && pass "Capture réseau : capture analysée (un fichier par appel)" || fail "capture : découpage par appel"
 api GET /api/updates/status | grep -q '"running":' && pass "Mises à jour : état lisible (pbx-configure)" || fail "état mise à jour"
 api POST /api/alerts/check '{}' | grep -q '"sending_enabled":false' && pass "Alertes : surveillance active (envoi des e-mails en préparation)" || fail "alertes"
 

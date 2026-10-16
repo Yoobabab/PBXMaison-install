@@ -579,7 +579,12 @@ async function pageCapture() {
       <div class="row">${d.running ? '<button type="button" class="btn" id="capstop">Arrêter la capture</button>' : '<button class="btn">Démarrer la capture</button>'}</div></div></form>
     <div class="panel" style="margin-top:18px"><div class="ph"><h2>Captures</h2></div>
       ${d.files.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Contenu</th><th>Taille</th><th></th></tr></thead><tbody>${d.files.map((f) => `<tr><td>${fmtDT(f.at)}</td><td>${f.mode === "all" ? "SIP + audio" : "SIP"}</td><td>${f.ready ? size(f.size) : pill("wait", "en cours")}</td>
-        <td class="acts">${f.ready ? `<a class="btn ghost sm" href="/api/capture/file/${encodeURIComponent(f.name)}" download>Télécharger</a> <button class="btn ghost sm" data-capdel="${H.esc(f.name)}">Supprimer</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Aucune capture.</div>'}</div>`;
+        <td class="acts">${f.ready ? `<a class="btn ghost sm" href="/api/capture/file/${encodeURIComponent(f.name)}" download>Tout télécharger</a> <button class="btn ghost sm" data-capdel="${H.esc(f.name)}">Supprimer</button>` : ""}</td></tr>
+        ${f.ready ? `<tr class="capcalls"><td colspan="4">${f.calls?.length ? `<div class="s" style="margin-bottom:6px">${f.calls.length} appel${f.calls.length > 1 ? "s" : ""} dans cette capture : un fichier par appel (sa signalisation${f.mode === "all" ? " et son audio" : ""}).</div>
+          ${f.calls.map((c, i) => `<div class="capcall"><span class="grow"><strong>Appel ${i + 1}</strong> · ${H.esc(c.from_name ? `${c.from_name} (${c.from})` : c.from || "?")} → ${H.esc(c.to || "?")}
+            <span class="s">· ${fmtDT(c.start)} · ${c.duration} s · ${c.answered ? "décroché" : c.status ? `refusé (${H.esc(c.status)})` : "sans réponse"}${f.mode === "all" ? ` · ${c.audio_packets ? `audio ${c.audio_packets} paquets` : "pas d'audio"}` : ""}</span></span>
+            <a class="btn ghost sm" href="/api/capture/file/${encodeURIComponent(f.name)}/${encodeURIComponent(c.file)}" download>Télécharger</a></div>`).join("")}`
+          : '<span class="s">Aucun appel dans cette capture (seulement des enregistrements ou tests de présence).</span>'}</td></tr>` : ""}`).join("")}</tbody></table></div>` : '<div class="empty">Aucune capture.</div>'}</div>`;
   H.$("#capf").onsubmit = async (e) => {
     e.preventDefault();
     try { const r = await H.api("POST", "/api/capture/start", H.formData(e.target)); H.setFlash({ text: `Capture démarrée pour ${r.seconds} s : reproduis l'appel maintenant.` }); pageCapture(); }

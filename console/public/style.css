@@ -658,3 +658,8 @@ tr.sel td{background:var(--accent-soft, rgba(216,20,28,.06))}
 .ubulk-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
 .ubulk-row .grow{flex:1;min-width:200px;display:flex;flex-direction:column}
 .ubulk-qr svg{width:84px;height:84px;display:block;background:#fff;border-radius:6px}
+
+/* Capture réseau : un fichier par appel */
+tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
+.capcall{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.capcall .grow{flex:1;min-width:220px}
