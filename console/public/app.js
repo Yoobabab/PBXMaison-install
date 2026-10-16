@@ -452,15 +452,15 @@ async function renderDashboard() {
   const left = Math.floor((new Date(d.pbx.expires_at) - Date.now()) / 86400000);
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>${esc(d.pbx.name)}</h1>
     <p class="sub" style="margin:0">${esc(d.pbx.company)} · <span class="mono">${esc(d.pbx.fqdn)}</span></p></div></div>
-    <div class="cards">
-      <a class="card" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
+    <div class="cards dash-cards">
+      <a class="card tone-${d.trunks.total === 0 ? "grey" : d.trunks.registered === d.trunks.total ? "green" : "red"}" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
         <div class="s">${d.trunks.total === 0 ? "Aucun trunk : ajoute ton opérateur" : d.trunks.registered === d.trunks.total ? "Tous opérationnels" : "Au moins un trunk en défaut"}</div></a>
-      <a class="card" href="#/utilisateurs"><div class="k">Postes connectés</div><div class="v">${d.extensions.registered}<small> / ${d.extensions.total}</small></div>
+      <a class="card tone-blue" href="#/utilisateurs"><div class="k">Postes connectés</div><div class="v">${d.extensions.registered}<small> / ${d.extensions.total}</small></div>
         <div class="s">${d.extensions.total === 0 ? "Aucun poste créé" : "téléphones enregistrés"}</div></a>
-      <a class="card" href="#/appels"><div class="k">Appels en cours</div><div class="v">${d.calls.available ? d.calls.active : "—"}<small> / ${d.pbx.max_calls}</small></div>
+      <a class="card tone-violet" href="#/appels"><div class="k">Appels en cours</div><div class="v">${d.calls.available ? d.calls.active : "—"}<small> / ${d.pbx.max_calls}</small></div>
         <div class="s">${d.calls.available ? "limite de la licence" : "moteur injoignable"}</div></a>
-      <div class="card"><div class="k">Licence</div><div class="v" style="font-size:18px">${esc(d.pbx.edition)}</div>
-        <div class="s">expire le ${fmtDate(d.pbx.expires_at)}${left < 30 ? ` · <strong style="color:var(--warn)">${left} jours</strong>` : ""}</div></div>
+      <a class="card tone-brand" href="#/systeme"><div class="k">Licence</div><div class="v">Callikoe ${esc(({ basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" })[d.pbx.edition] || d.pbx.edition)}</div>
+        <div class="s">valable jusqu'au ${fmtDate(d.pbx.expires_at)}${left < 30 ? ` · <strong>${left} jours restants</strong>` : ""}</div></a>
     </div>
     <div class="grid2">
       <div class="panel"><div class="ph"><h2>Serveur</h2></div><dl>
