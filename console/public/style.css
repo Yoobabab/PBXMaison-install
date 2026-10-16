@@ -808,3 +808,6 @@ tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
 .sys-lic-b>div{display:flex;flex-direction:column;gap:4px}.sys-lic-b .pill{align-self:flex-start}
 .altable td{vertical-align:middle}.altable .nw{width:1%}
 .al-inline{flex-direction:row;align-items:center;gap:8px;margin:6px 0 0;font-weight:500;font-size:13px}.al-inline input{width:80px}
+.sys-lic-side{display:flex;flex-direction:column;gap:12px;justify-content:space-between}.sys-lic-side .btn{align-self:flex-start}
+.sys-lic-side .kpis{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.sys-lic .cx-lic-card{min-height:170px}

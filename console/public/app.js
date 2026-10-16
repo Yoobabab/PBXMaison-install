@@ -1692,13 +1692,13 @@ async function renderSystem() {
   const ED = { basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" };
   const pct = l?.max_calls ? Math.min(100, Math.round(100 * l.usage.calls / l.max_calls)) : 0;
   app.innerHTML = `${takeFlash()}<h1>Système</h1><p class="sub">Licence, certificat, installation et code pour le portail.</p>
-    ${l ? `<div class="panel sys-lic"><div class="ph"><h2>Licence</h2><a class="btn ghost sm" href="#/licence">Détails et changement de licence</a></div>
-      <div class="pad sys-lic-b">
-        <div><span class="dl">Édition</span><strong>Callikoe ${esc(ED[l.edition] || l.edition || "")}</strong></div>
-        <div><span class="dl">Appels simultanés</span><strong>${l.usage.calls} / ${l.max_calls}</strong><span class="cx-bar"><i style="width:${pct}%"></i></span></div>
-        <div><span class="dl">Validité</span><strong>${l.expires_at ? new Date(l.expires_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }) : "Sans date d'expiration"}</strong>${l.days_left != null ? `<span class="pill ${l.days_left <= 30 ? "wait" : "ok"}">${l.days_left} jours restants</span>` : ""}</div>
-        <div><span class="dl">Utilisateurs · trunks</span><strong>${l.usage.users} · ${l.usage.trunks}</strong></div>
-      </div></div>` : ""}
+    ${l ? `<div class="cx-lic sys-lic"><div class="cx-lic-card"><span class="cx-lic-ed">Callikoe ${esc(ED[l.edition] || l.edition || "")}</span>
+        <div class="cx-lic-key mono">${esc(l.key || "—")}</div>
+        <div class="cx-lic-meta"><span>${esc(l.pbx?.company || l.pbx?.name || "")}</span><span>${l.expires_at ? `Valable jusqu'au ${new Date(l.expires_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}` : "Sans date d'expiration"}</span></div></div>
+      <div class="sys-lic-side"><div class="kpis" style="margin:0">
+        <div class="kpi"><div><div class="k">Appels simultanés</div><div class="v">${l.usage.calls}<small>/${l.max_calls}</small></div><div class="s"><span class="cx-bar"><i style="width:${pct}%"></i></span></div></div></div>
+        <div class="kpi ${l.days_left != null && l.days_left <= 30 ? "warn" : "good"}"><div><div class="k">Jours restants</div><div class="v">${l.days_left ?? "∞"}</div>${l.days_left != null && l.days_left <= 30 ? '<div class="s">Pense à renouveler</div>' : ""}</div></div></div>
+        <a class="btn ghost" href="#/licence">Détails et changement de licence</a></div></div>` : ""}
     <div class="grid2">
       <div class="panel"><div class="ph"><h2>Certificat et configuration</h2></div>
         <div class="pad stack">
