@@ -357,3 +357,12 @@ label.ck input{width:auto}
 }
 .sp-display #kbd{font-size:20px}
 .sp-display #kbd.on{color:var(--accent,#d8141c)}
+
+/* Pavé de numérotation : les suggestions tiennent sur une ligne de hauteur fixe, le pavé ne bouge jamais */
+.sugg.strip{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;overflow-y:hidden;height:52px;margin:0 0 8px;padding:2px 0;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.sugg.strip::-webkit-scrollbar{display:none}
+.sugg.strip li{flex:none;max-width:72%;padding:6px 10px 6px 6px;border:1px solid var(--line);border-radius:24px;gap:8px}
+.sugg.strip li .grow strong,.sugg.strip li .grow .s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;font-size:13px;line-height:1.2}
+.sugg.strip li .grow .s{font-size:11px}
+.sugg.strip li > svg{flex:none}
+.sp-display #kbd svg{width:20px;height:20px}

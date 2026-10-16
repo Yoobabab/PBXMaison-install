@@ -868,8 +868,8 @@ function renderDialer(d) {
   const ready = regState === "on";
   d.innerHTML = `<div class="dr-head"><strong>Appeler</strong><button class="ghost-ic" id="drclose" title="Fermer">${I.x()}</button></div>
     <div class="dr-body">
-      <div class="sp-display">${TOUCH ? '<button class="bk" id="kbd" title="Taper un nom (clavier)" aria-label="Clavier">⌨</button>' : ""}<input id="num" placeholder="${TOUCH ? "Numéro, ou ⌨ pour un nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}><button class="bk" id="bk" title="Effacer">⌫</button></div>
-      <ul class="sugg" id="sugg"></ul>
+      <div class="sp-display">${TOUCH ? `<button class="bk" id="kbd" title="Chercher un nom avec le clavier" aria-label="Chercher un nom">${I.search()}</button>` : ""}<input id="num" placeholder="${TOUCH ? "Numéro ou nom" : "Saisissez un nom ou un numéro"}" autocomplete="off" ${TOUCH ? 'inputmode="none"' : ""}><button class="bk" id="bk" title="Effacer">⌫</button></div>
+      <ul class="sugg strip" id="sugg"></ul>
       <div class="pad-grid">${KEYS.map(([k, l]) => `<button class="key" data-k="${k}"><b>${k}</b><span>${l}</span></button>`).join("")}</div>
       <div class="sp-actions"><button class="btn round call" id="dial" ${ready ? "" : "disabled"} title="Appeler">${I.phone(26)}</button></div>
       <p class="hint center" id="dhint">${ready ? "Appeler avec : <strong>ce navigateur</strong>" : regState === "fail" ? "Connexion refusée par le PBX." : "Connexion au PBX…"}</p>

@@ -1052,7 +1052,7 @@ async function renderUser(id, tab = "general") {
         <h3 class="full sec">Téléphone et provisioning automatique</h3>
         <label>Modèle<select name="phone.model"><option value="">— Saisie manuelle / softphone —</option>${o.models.map((m) => `<option value="${m.id}" ${ph.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
         <label>Adresse MAC<input name="phone.mac" value="${esc(fmtMac(ph.mac))}" placeholder="44:DB:D2:29:FA:7B" autocomplete="off"><span class="hint">Sur l'étiquette sous le téléphone.</span></label>
-        ${ph.mac ? `<div class="full provbox">
+        ${ph.mac ? `<details class="full provwrap" ${u.registered ? "" : "open"}><summary>Provisioning et page web du téléphone ${u.registered ? '<span class="pill ok">Téléphone connecté</span>' : ""}</summary><div class="provbox">
           <div><span class="dl">Lien de provisioning</span><span class="mono">${esc(o.provisioning_url)}</span> <button class="copy" type="button" data-copy="${esc(o.provisioning_url)}">Copier</button>
             <div class="hint">À saisir dans le téléphone (page web › Paramètres › Auto Provision › Server URL) ou en option DHCP 66. Le téléphone télécharge ensuite <span class="mono">${esc(ph.mac)}.cfg</span>.</div></div>
           <div class="row"><a class="btn ghost sm" href="/api/extensions/${esc(u.id)}/phone.cfg" download>Télécharger le .cfg</a>
@@ -1062,7 +1062,7 @@ async function renderUser(id, tab = "general") {
           <div><span class="dl">Page web du téléphone</span>${localIp ? `<a href="http://${esc(localIp)}" target="_blank" rel="noopener" class="mono">http://${esc(localIp)}</a> · ` : ""}utilisateur <span class="mono">admin</span> · mot de passe
             <span class="secret"><input type="password" readonly value="${esc(ph.admin_password)}" id="adminpw"></span> <button class="copy" type="button" data-copy="${esc(ph.admin_password)}">Copier</button>
             <button type="button" class="btn link" id="adminreset">Réinitialiser</button>
-            <div class="hint">Appliqué au prochain provisioning.</div></div></div>` : ""}
+            <div class="hint">Appliqué au prochain provisioning.</div></div></div></details>` : ""}
         <h3 class="full sec">Téléphones supplémentaires <span class="hint" style="font-weight:400">(même poste ${esc(u.id)} : ils sonnent ensemble, mêmes réglages et touches)</span></h3>
         <div class="full" id="extraph"></div>
         <h3 class="full sec">Réglages du téléphone</h3>
@@ -1101,7 +1101,7 @@ async function renderUser(id, tab = "general") {
       <div class="phv-wrap"><div id="phv"></div><div id="phvpanel" class="phv-panel"></div></div>
       <details class="phv-list"><summary>Vue en liste</summary><div class="keys" id="keys"></div></details>
       <div class="row"><button type="button" class="btn ghost sm" id="addkey">+ Ajouter une touche</button>
-        <button type="button" class="btn ghost sm" id="addall">+ BLF pour tous les utilisateurs</button></div></form>`;
+        <button type="button" class="btn ghost sm" id="addall" title="Une BLF pour chaque utilisateur qui n'en a pas encore">+ BLF pour tous</button></div></form>`;
   } else if (tab === "messagerie") {
     const vm = u.voicemail;
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
@@ -1397,7 +1397,7 @@ function wireKeys(u, users) {
       ${k.type === "none" ? "" : `<label>Libellé à l'écran<input data-pv="label" value="${esc(k.label)}" maxlength="24" placeholder="${k.type === "line" ? "facultatif" : ""}"></label>`}
       <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
       <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button>
-        <button type="button" class="btn ghost sm" data-multi>+ Plusieurs BLF à partir d'ici</button></div>
+        <button type="button" class="btn ghost sm" data-multi title="Remplir les touches suivantes avec des BLF, à partir de celle-ci">+ BLF en série</button></div>
       <div id="blfmulti"></div>`;
     pnl.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { setKey(m, i, { type: b.dataset.t, value: "", label: b.dataset.t === "status" ? "Ne pas déranger" : "" }); drawAll(); });
     pnl.querySelectorAll("[data-pv]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {

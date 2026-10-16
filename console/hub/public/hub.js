@@ -33,6 +33,7 @@ const ICONS = {
   lic: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
   sip: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9z"/>',
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
@@ -44,9 +45,16 @@ function setNav(active, label = "") {
   const on = !!state.user;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []),
-    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"], ["#/pays", "Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
-  $("#nav").innerHTML = on ? `<div class="ng">${items.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`).join("")}</div>` : "";
+  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : [])];
+  // Paramètres : regroupés dans un menu repliable (ouvert quand on est sur une de ses pages)
+  const settings = [...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"],
+    ["#/pays", "IP Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
+  const link = ([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`;
+  let setOpen = settings.some(([, , k]) => k === active);
+  try { if (!setOpen) setOpen = localStorage.getItem("cxhub_settings") === "1"; } catch { /* */ }
+  $("#nav").innerHTML = on ? `<div class="ng">${items.map(link).join("")}</div>
+    <details class="ng-set" ${setOpen ? "open" : ""}><summary>${icon("gear")}<span>Paramètres</span></summary><div class="ng">${settings.map(link).join("")}</div></details>` : "";
+  $("#nav .ng-set")?.addEventListener("toggle", (e) => { try { localStorage.setItem("cxhub_settings", e.target.open ? "1" : "0"); } catch { /* */ } });
   $("#user").innerHTML = on ? `<div class="sf-user"><span class="sf-av">${esc(state.user.email.charAt(0).toUpperCase())}</span>
     <span class="sf-mail" title="${esc(state.user.email)} · ${esc(state.user.role_label)}">${esc(state.user.email)}</span>
     <button id="logout" title="Se déconnecter" aria-label="Se déconnecter">${icon("out", 17)}</button></div>` : "";
@@ -577,12 +585,12 @@ const GEO_COUNTRIES = [["FR", "France"], ["BE", "Belgique"], ["CH", "Suisse"], [
   ["US", "États-Unis"], ["CA", "Canada"], ["BR", "Brésil"], ["MX", "Mexique"], ["TR", "Turquie"], ["IL", "Israël"], ["AE", "Émirats arabes unis"],
   ["IN", "Inde"], ["CN", "Chine"], ["JP", "Japon"], ["AU", "Australie"], ["UA", "Ukraine"], ["RU", "Russie"]];
 async function renderGeo() {
-  setNav("globe", "Pays autorisés");
+  setNav("globe", "IP Pays autorisés");
   let d;
   try { d = await api("GET", "/api/pays"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
   const sel = new Set(d.countries || []);
   const edit = can("super", "admin");
-  app.innerHTML = `${takeFlash()}<h1>Pays autorisés</h1>
+  app.innerHTML = `${takeFlash()}<h1>IP Pays autorisés</h1>
     <p class="sub">Les téléphones, softphones, applis et opérateurs ne peuvent joindre les PBX du serveur (SIP 5060 / 5061) que depuis les pays cochés. Tout le reste est bloqué avant même d'arriver au PBX. Les opérateurs de tes trunks et les adresses de la liste ci-dessous sont toujours acceptés.</p>
     <div class="kpis">
       ${kpi("globe", "Filtre", d.active ? "Actif" : "Inactif", d.active ? `${sel.size} pays autorisé${sel.size > 1 ? "s" : ""}` : "téléphonie acceptée de partout", d.active ? "good" : "warn")}

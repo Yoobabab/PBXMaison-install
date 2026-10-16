@@ -66,6 +66,14 @@ legend{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.0
 .wfil .dl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);min-width:80px}
 .wfil.dim{opacity:.5}
 .wchk{margin:0}
+.ng-set{margin-top:4px;border:0!important;padding:0!important;background:none!important;box-shadow:none!important}
+.ng-set>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;color:var(--side-ink);font-size:14px;font-weight:500}
+.ng-set>summary svg{flex:none;opacity:.85}
+.ng-set>summary::-webkit-details-marker{display:none}
+.ng-set>summary::after{content:"▸";margin-left:auto;transition:transform .15s;opacity:.7}
+.ng-set[open]>summary::after{transform:rotate(90deg)}
+.ng-set>summary:hover{background:var(--side-hover);color:#fff}
+.ng-set>.ng{padding-left:8px;margin-top:2px}
 .geo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px 14px}
 .geo-c{margin:0}
 .geo-c[hidden]{display:none}
