@@ -371,7 +371,7 @@ async function renderNew() {
         <label>Langue<select name="language">${opt(Object.entries(o.languages), "fr")}</select></label>
       </fieldset>
       <fieldset><legend>Licence</legend>
-        <div class="seg lic-mode"><label class="on"><input type="radio" name="license_mode" value="new" checked>Nouvelle licence</label><label class="${free.length ? "" : "dim"}"><input type="radio" name="license_mode" value="existing" ${free.length ? "" : "disabled"}>Licence existante${free.length ? ` <span class="cnt">${free.length}</span>` : ""}</label></div>
+        <div class="seg lic-mode"><label class="on"><input type="radio" name="license_mode" value="new" checked>Nouvelle licence</label><label class="${free.length ? "" : "dim"}"><input type="radio" name="license_mode" value="existing" ${free.length ? "" : "disabled"}>Licence dispo${free.length ? ` <span class="cnt">${free.length}</span>` : ""}</label></div>
         <div class="stack lic-new">
           <label>Édition<select name="edition">${opt(Object.entries(o.editions), "pro")}</select></label>
           <label>Appels simultanés<select name="simultaneous_calls">${opt(o.sc.map((n) => [n, `${n} appels`]), 8)}</select></label>
