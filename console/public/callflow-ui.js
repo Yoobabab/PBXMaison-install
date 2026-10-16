@@ -4,8 +4,9 @@ import { renderFlowEditor, flowSummary } from "./flow-editor.js";
 import { renderPlanning, planningSummary } from "./planning-ui.js";
 let h = null;
 const TABS = [["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
-  ["svi", "SVI", "ivr"], ["messageries", "Messageries de groupe", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["traceur", "Traceur", ""], ["renvois", "Où sont les renvois ?", ""], ["planning", "Planning", "planning"]];
-const HIDDEN_TABS = ["planning"]; // ouvert depuis Routages
+  ["svi", "SVI", "ivr"], ["messageries", "Messageries", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["depannage", "Dépannage", ""], ["traceur", "Traceur", ""], ["renvois", "Renvois actifs", ""], ["planning", "Planning", "planning"]];
+const HIDDEN_TABS = ["planning", "traceur", "renvois"]; // planning : ouvert depuis Routages ; traceur et renvois : dans Dépannage
+const DIAG_TABS = [["depannage", "Test d'appel"], ["traceur", "Traceur"], ["renvois", "Renvois actifs"]];
 const KIND_TAB = Object.fromEntries(TABS.filter((t) => t[2]).map(([s, , k]) => [k, s]));
 const RANGES = { group: 600, queue: 700, ivr: 800, groupvm: 900, conf: 500 };
 const IVR_KEYS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#"];
@@ -26,7 +27,9 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   const tab = TABS.find((t) => t[0] === sub) && (sub !== "planning" || id) ? sub : "routages";
   const kind = TABS.find((t) => t[0] === tab)[2];
   const head = `<div class="bar"><div class="grow"><h1>Gestion d'appels</h1><p class="sub" style="margin:0">Où vont les appels entrants : routages par numéro (avec leurs horaires), groupes, files d'attente, SVI.</p></div></div>
-    <nav class="tabs">${TABS.filter(([s]) => !HIDDEN_TABS.includes(s) && (s !== "regles" || tab === "regles" || objs("rule").length)).map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab || (s === "routages" && tab === "planning") ? "on" : ""}">${l}</a>`).join("")}</nav>`;
+    <nav class="tabs">${TABS.filter(([s]) => !HIDDEN_TABS.includes(s) && (s !== "regles" || tab === "regles" || objs("rule").length)).map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab || (s === "routages" && tab === "planning") || (s === "depannage" && DIAG_TABS.some(([k]) => k === tab)) ? "on" : ""}">${l}</a>`).join("")}</nav>
+    ${DIAG_TABS.some(([k]) => k === tab) ? `<nav class="subtabs">${DIAG_TABS.map(([k, l]) => `<a href="#/gestion/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}`;
+  if (tab === "depannage") return renderDiag(head, id);
   if (tab === "traceur") return renderTracer(head, id);
   if (tab === "renvois") return renderForwards(head);
   if (id && kind === "planning") {
@@ -611,6 +614,68 @@ function treeNode(n, label, current) {
   return `<li class="tn ${n.status}${current ? " cur" : ""}">${label ? `<span class="tl">${esc(label)}</span>` : ""}
     <div class="tb"><span class="ti">${ICON[n.type] || "•"}</span><div><strong>${esc(n.title)}</strong>${n.detail?.length ? `<div class="td">${n.detail.map(esc).join("<br>")}</div>` : ""}</div></div>
     ${n.children?.length ? `<ul>${n.children.map((c) => treeNode(c.node, c.label, c.current)).join("")}</ul>` : ""}</li>`;
+}
+
+// ---------------------------------------------------------------- Dépannage : test d'appel sans déranger le client
+const DEV_KIND = { phone: "☎", web: "🖥", mobile: "📱" };
+async function renderDiag(head, arg) {
+  const mode = sessionStorage.getItem("cf_diag_mode") === "out" ? "out" : "in";
+  const users = cf.users;
+  h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed"><div class="pad stack">
+    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant depuis un poste"]].map(([k, l]) => `<label class="${mode === k ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${mode === k ? "checked" : ""}>${l}</label>`).join("")}</div>
+    <form id="dgf" class="dg-form" novalidate>
+      ${mode === "in" ? `<label class="grow">Numéro appelé<input id="dgnum" placeholder="SDA du client (04 12 34 56 78) ou numéro interne (201, 600…)" value="${esc(arg && mode === "in" ? decodeURIComponent(arg) : sessionStorage.getItem("cf_diag_in") || "")}" autocomplete="off"></label>`
+        : `<label>Depuis le poste<select id="dgext">${users.map((u) => `<option value="${esc(u.id)}" ${sessionStorage.getItem("cf_diag_ext") === u.id ? "selected" : ""}>${esc(u.id)} · ${esc(u.name)}</option>`).join("")}</select></label>
+           <label class="grow">Numéro composé<input id="dgnum" placeholder="06 12 34 56 78, 0032…, 112…" value="${esc(sessionStorage.getItem("cf_diag_out") || "")}" autocomplete="off"></label>`}
+      <button class="btn">Lancer le test silencieux</button>
+    </form>
+    <p class="hint" style="margin:0">${mode === "in"
+      ? "Le PBX calcule le chemin de l'appel à cet instant (horaires, planning, statuts, renvois) et interroge chaque téléphone concerné pour vérifier qu'il répond. <strong>Rien ne sonne chez le client.</strong> Ensuite, tu peux faire sonner un poste 2 secondes pour une preuve réelle."
+      : "Le PBX vérifie tout ce qu'il ferait si ce poste composait ce numéro : droits du poste, numéros bloqués, pays autorisés, règle sortante, trunk et état chez l'opérateur, numéro présenté. <strong>Aucun appel n'est passé.</strong>"}</p>
+    <div id="dgres"></div></div></div>`;
+  h.app.querySelectorAll("[name=dgm]").forEach((r) => r.onchange = () => { sessionStorage.setItem("cf_diag_mode", r.value); renderDiag(head); });
+  const res = h.$("#dgres");
+  const verdictBox = (v, at, extra = "") => `<div class="dg-verdict ${v.level}"><span class="dg-vi">${v.level === "ok" ? "✔" : v.level === "warn" ? "!" : "✖"}</span><div><strong>${esc(v.text)}</strong>
+    <div class="s">Test du ${esc(new Date(at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }))}${extra}</div></div>
+    <button type="button" class="btn ghost sm" data-copytxt="${esc(`Test du ${new Date(at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })} : ${v.text}`)}">Copier pour le client</button></div>`;
+  const wireCopy = () => res.querySelectorAll("[data-copytxt]").forEach((b) => b.onclick = () => { navigator.clipboard?.writeText(b.dataset.copytxt); b.textContent = "Copié ✓"; });
+  h.$("#dgf").onsubmit = async (e) => {
+    e.preventDefault();
+    const number = h.$("#dgnum").value.trim(); if (!number) { h.$("#dgnum").focus(); return; }
+    const btn = h.$("#dgf button"); btn.disabled = true;
+    res.innerHTML = `<p class="hint">${mode === "in" ? "Calcul du chemin et interrogation des téléphones…" : "Vérification…"}</p>`;
+    try {
+      if (mode === "in") {
+        sessionStorage.setItem("cf_diag_in", number);
+        const r = await h.api("POST", "/api/diag/inbound", { number });
+        res.innerHTML = `${verdictBox(r.verdict, r.at)}
+          ${r.targets.length ? `<h3 class="cf-h">Postes qui sonneraient</h3><div class="dg-targets">${r.targets.map((t) => `<div class="dg-t">
+            <div class="dg-th"><strong>${esc(t.ext)} · ${esc(t.name)}</strong>${t.rings ? "" : ` <span class="pill wait">${t.status === "away" ? "Absent" : t.status === "dnd" ? "Ne pas déranger" : "ne sonne pas"}</span>`}</div>
+            ${t.devices.length ? `<ul class="dg-devs">${t.devices.map((d) => `<li class="${d.state}"><span>${DEV_KIND[d.kind] || "•"}</span><span class="grow"><strong>${esc(d.label)}</strong> <span class="s">${esc(d.text)}${d.local_ip ? ` · ${esc(d.local_ip)}` : ""}</span></span></li>`).join("")}</ul>` : '<p class="s" style="margin:4px 0">Aucun appareil connecté.</p>'}
+            ${t.devices.length ? `<div class="row"><button type="button" class="btn ghost sm" data-ring="${esc(t.ext)}">Faire sonner 2 s (preuve réelle)</button><span class="dg-ringres s"></span></div>` : ""}</div>`).join("")}</div>` : ""}
+          <details class="dg-tree" ${r.targets.length ? "" : "open"}><summary>Chemin de l'appel en ce moment</summary><ul class="tree">${treeNode(r.root, "")}</ul></details>`;
+        res.querySelectorAll("[data-ring]").forEach((b) => b.onclick = async () => {
+          const out = b.parentElement.querySelector(".dg-ringres");
+          if (!confirm(`Faire sonner le poste ${b.dataset.ring} pendant environ 2 secondes ? Le nom affiché sera « TEST Callikoe ».`)) return;
+          b.disabled = true; out.textContent = "Ça sonne…";
+          try {
+            const x = await h.api("POST", "/api/diag/ring", { ext: b.dataset.ring });
+            out.innerHTML = x.results.map((y) => `<span class="pill ${y.rang ? "ok" : "bad"}">${esc(y.label)} : ${y.rang ? "a sonné ✔" : "n'a pas sonné"}</span>`).join(" ") + (x.answered ? ' <span class="pill wait">quelqu\'un a décroché</span>' : "");
+          } catch (err) { out.textContent = err.message; }
+          b.disabled = false;
+        });
+      } else {
+        const ext = h.$("#dgext").value;
+        sessionStorage.setItem("cf_diag_out", number); sessionStorage.setItem("cf_diag_ext", ext);
+        const r = await h.api("POST", "/api/diag/outbound", { ext, number });
+        res.innerHTML = `${verdictBox(r.verdict, r.at, ` · poste ${esc(r.ext)} → ${esc(r.number)}`)}
+          <ol class="dg-steps">${r.steps.map((s) => `<li class="${s.status}"><span class="dg-vi">${s.status === "ok" ? "✔" : s.status === "bad" ? "✖" : s.status === "warn" ? "!" : "i"}</span><div><strong>${esc(s.title)}</strong>${s.detail ? `<div class="s">${esc(s.detail)}</div>` : ""}</div></li>`).join("")}</ol>`;
+      }
+      wireCopy();
+    } catch (err) { res.innerHTML = `<div class="flash bad">${esc(err.message)}</div>`; }
+    btn.disabled = false;
+  };
+  if (arg && mode === "in") h.$("#dgf").requestSubmit();
 }
 
 // ---------------------------------------------------------------- Renvois actifs

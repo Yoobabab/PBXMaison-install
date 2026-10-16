@@ -80,7 +80,7 @@ export async function buildApp({ db, ami } = {}) {
     if (!row) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'existe plus." }); }
     req.role = row.role;
     if (!u.mfa) return reply.code(403).send({ error: "Active d'abord la double authentification.", need_totp_setup: true });
-    if (row.role === "lecture" && req.method !== "GET" && !/^\/api\/(reauth|logout|totp\/)/.test(req.url)) return reply.code(403).send({ error: "Compte en lecture seule : modification impossible." });
+    if (row.role === "lecture" && req.method !== "GET" && !/^\/api\/(reauth|logout|totp\/|diag\/(inbound|outbound))/.test(req.url)) return reply.code(403).send({ error: "Compte en lecture seule : modification impossible." });
     const path = req.url.split("?")[0];
     if (row.role === "client" && (CLIENT_DENY.test(path) || (req.method !== "GET" && /^\/api\/trunks(\/|$)/.test(path))))
       return reply.code(403).send({ error: "Accès restreint : cette partie est réservée à l'installateur." });
@@ -117,7 +117,7 @@ export async function buildApp({ db, ami } = {}) {
     [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
   app.addHook("onResponse", async (req, reply) => {
     if (req.method === "GET" || !req.url.startsWith("/api/") || reply.statusCode >= 400) return;
-    if (/^\/api\/(login|logout|reauth|u\/|invite\/|accounts|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
+    if (/^\/api\/(login|logout|reauth|u\/|invite\/|accounts|diag\/|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
     const u = currentUser(req); if (!u) return;
     const path = req.url.split("?")[0];
     const label = AUDIT_LABEL.find(([re]) => re.test(path))?.[1] || "Console";
@@ -767,6 +767,22 @@ export async function buildApp({ db, ami } = {}) {
     reply.type("text/csv; charset=utf-8").header("content-disposition", 'attachment; filename="annuaire.csv"').send(await pbx.contactsCsv()));
   app.get("/api/trace", { preHandler: requireUser }, async (req) => pbx.trace(req.query?.n));
   app.get("/api/forwards", { preHandler: requireUser }, async () => ({ forwards: await pbx.forwardsReport() }));
+  // Dépannage : tests d'appel (journalisés comme toute action de la console)
+  app.post("/api/diag/inbound", { preHandler: requireUser }, async (req) => {
+    const r = await pbx.diagInbound(String(req.body?.number || "").slice(0, 30));
+    await audit(req, `Dépannage : test d'appel entrant vers ${r.query}`, r.verdict.level !== "bad", r.verdict.text);
+    return r;
+  });
+  app.post("/api/diag/outbound", { preHandler: requireUser }, async (req) => {
+    const r = await pbx.diagOutbound(String(req.body?.ext || ""), String(req.body?.number || "").slice(0, 30));
+    await audit(req, `Dépannage : test d'appel sortant ${r.ext} → ${r.number}`, r.verdict.level !== "bad", r.verdict.text);
+    return r;
+  });
+  app.post("/api/diag/ring", { preHandler: requireUser }, async (req) => {
+    const r = await pbx.ringTest(String(req.body?.ext || ""));
+    await audit(req, `Dépannage : test de sonnerie du poste ${r.ext}`, r.results.some((x) => x.rang), r.results.map((x) => `${x.label} : ${x.rang ? "a sonné" : "n'a pas sonné"}`).join(", "));
+    return r;
+  });
 
   app.get("/api/routes", { preHandler: requireUser }, async () => pbx.getRoutes());
   app.put("/api/routes", { preHandler: requireUser }, async (req) => pbx.setRoutes(req.body || {}));

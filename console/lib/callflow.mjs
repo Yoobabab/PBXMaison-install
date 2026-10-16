@@ -724,6 +724,9 @@ export function buildCallflowDialplan(m) {
   }
   for (const o of byKind(m.objects, "planning")) L.push("", ...buildPlanning(o, m, tz, year));
 
+  // Dépannage : test de sonnerie (console › Gestion d'appels › Dépannage), sans journal d'appel
+  L.push("", "[cx-ringtest]", "exten => _XXX,1,Set(CDR_PROP(disable)=1)", ' same => n,Set(CALLERID(all)="TEST Callikoe" <0>)', " same => n,Dial(PJSIP/${EXTEN}&PJSIP/${EXTEN}-web,12)", " same => n,Hangup()");
+
   // Messagerie d'un utilisateur en destination directe
   L.push("", "[vm-direct]", "exten => _XXX,1,VoiceMail(${EXTEN}@default,u)", " same => n,Hangup()", "");
   return L.join("\n");
@@ -965,7 +968,7 @@ function memberNode(id, m) {
   const u = m.users.get(id);
   if (!u) return node("user", `${id} (supprimé)`, { status: "bad" });
   const devs = m.registered.get(id) || [];
-  const nd = node("member", `${id} · ${displayName(u)}`, { detail: [] });
+  const nd = node("member", `${id} · ${displayName(u)}`, { detail: [], ext: id });
   if (u.options.disabled) { nd.status = "bad"; nd.detail.push("Désactivé : ne sonne pas"); }
   else if (u.status !== "available") { nd.status = "warn"; nd.detail.push(`${USTATUS[u.status]} : ne sonne pas`); }
   else if (!u.options.accept_group_calls) { nd.status = "warn"; nd.detail.push("Refuse les appels de groupe : ne sonne pas"); }
@@ -1089,7 +1092,7 @@ function expandUser(id, m, path, depth) {
   const u = m.users.get(id);
   if (!u) return node("user", `Utilisateur ${id} (supprimé)`, { status: "bad" });
   const devs = m.registered.get(id) || [];
-  const nd = node("user", `${id} · ${displayName(u)}`, { detail: [`Statut : ${USTATUS[u.status]}`] });
+  const nd = node("user", `${id} · ${displayName(u)}`, { detail: [`Statut : ${USTATUS[u.status]}`], ext: id });
   if (u.options.disabled) { nd.status = "bad"; nd.detail.push("Utilisateur désactivé : l'appelant entend « service indisponible »."); return nd; }
   const vmDest = (d) => d.type === "voicemail" ? { type: "user_vm", target: id } : d.type === "extension" ? { type: "user", target: d.target } : d;
   if (u.status === "away" || u.status === "dnd") {

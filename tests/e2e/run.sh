@@ -262,6 +262,13 @@ echo "$R" | grep -q '"override":"x"' && echo "$R" | grep -q '"name":"Planning te
 R2="$(plrule)"
 [[ "$R2" == "Planning test · Dehors" ]] && pass "Planning forcé : l'appel suit le scénario forcé" || { echo "règle CDR : $R2" >> "$OUT"; fail "planning forcé"; }
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$VJ" "$API/api/u/plannings")" == 403 ]] && pass "Planning : un utilisateur sans rôle Responsable est refusé" || fail "planning non responsable"
+# Dépannage : tests d'appel silencieux (entrant, sortant) et test de sonnerie
+R="$(api POST /api/diag/inbound '{"number":"04 65 00 15 41"}')"
+echo "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);process.exit(r.verdict&&r.targets.some(t=>t.ext==="205")&&r.root.title.includes("SDA")?0:1)})' && pass "Dépannage : test entrant silencieux (chemin de maintenant, poste 205, état des appareils)" || { echo "$R" | cut -c1-400 >> "$OUT"; fail "diag entrant"; }
+R="$(api POST /api/diag/outbound '{"ext":"204","number":"06 12 34 56 78"}')"
+echo "$R" | grep -q 'dstny' && echo "$R" | grep -q '"number":"0612345678"' && pass "Dépannage : test sortant silencieux (règle / trunk / numéro présenté)" || { echo "$R" | cut -c1-400 >> "$OUT"; fail "diag sortant"; }
+api POST /api/diag/outbound '{"ext":"204","number":"0899123456"}' | grep -q '"level":"bad"' && pass "Dépannage : numéro surtaxé signalé comme bloqué" || fail "diag surtaxé"
+sudo /usr/sbin/asterisk -rx 'dialplan show cx-ringtest' | grep -q 'TEST Callikoe' && pass "Dépannage : contexte du test de sonnerie chargé" || fail "cx-ringtest"
 if python3 webrtc.py http://127.0.0.1 204 "$PA" 205 "$PB" "" callflow 2>&1 | tee -a "$OUT" | tail -1 | grep -q "Gestion d'appels OK"; then pass "Appels réels : groupe 600 et SVI 800 (touche 1)"; else
   sudo tail -n 30 /var/log/asterisk/messages | cut -c1-220 >> "$OUT"; fail "appels gestion d'appels"; fi
 

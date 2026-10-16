@@ -753,5 +753,28 @@ tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
 }
 
 /* Onglets : défilement horizontal au besoin (petits écrans), sans barre de défilement ni flèches visibles */
+.tabs{flex-wrap:wrap}
 .tabs,.fx-tabs{overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none}
 .tabs::-webkit-scrollbar,.fx-tabs::-webkit-scrollbar{display:none}
+
+/* ---------------- Dépannage (Gestion d'appels) */
+.subtabs{display:flex;gap:6px;margin:12px 0 0;flex-wrap:wrap}
+.subtabs a{padding:6px 14px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-weight:600;font-size:13.5px;text-decoration:none}
+.subtabs a.on{background:var(--ink);border-color:var(--ink);color:var(--panel)}
+.dg-mode{align-self:flex-start}
+.dg-form{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}.dg-form label{margin:0}.dg-form .grow{flex:1;min-width:240px}
+.dg-verdict{display:flex;gap:12px;align-items:center;padding:14px 16px;border-radius:12px;border:1px solid var(--line);flex-wrap:wrap}
+.dg-verdict>div{flex:1;min-width:220px}
+.dg-verdict.ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+.dg-verdict.warn{background:var(--warn-soft)}.dg-verdict.bad{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 35%,transparent)}
+.dg-vi{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:14px;background:var(--panel);color:var(--muted)}
+.ok>.dg-vi{color:var(--ok)}.warn>.dg-vi{color:var(--warn)}.bad>.dg-vi{color:var(--bad)}
+.dg-targets{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.dg-t{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.dg-devs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.dg-devs li{display:flex;gap:8px;align-items:baseline}.dg-devs li.bad strong{color:var(--bad)}
+.dg-ringres .pill{margin-left:4px}
+.dg-tree{margin-top:14px}.dg-tree summary{cursor:pointer;font-weight:600}
+.dg-steps{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.dg-steps li{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.dg-steps li.bad{border-color:var(--bad);background:var(--bad-soft)}.dg-steps li.warn{background:var(--warn-soft)}

@@ -16,6 +16,8 @@ import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, pr
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
 import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, PHONE_TYPES } from "./contacts.mjs";
+import { pathNow, ringTargets, parseContacts, deviceStates, inboundVerdict, simulateOutbound } from "./diagnose.mjs";
+import { defaultSecurity } from "./security.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
 import { sees, nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 
@@ -286,7 +288,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         const sourceIp = source?.[1] || "";
         // Multi-tenant : le Via du dessus est celui de l'aiguilleur ; l'adresse locale du poste est celle de son Contact
         const localIp = CX_MODE === "tenant" && c.path ? (/@\[?([^\]:;>]+)/.exec(c.uri || "")?.[1] || "") : c.via || "";
-        return { user_agent: c.user_agent || "", ip: sourceIp || localIp, source_ip: sourceIp, source_port: source?.[2] || "",
+        return { uri: c.uri || "", user_agent: c.user_agent || "", ip: sourceIp || localIp, source_ip: sourceIp, source_port: source?.[2] || "",
           local_ip: localIp, device: row.id.endsWith("-web") ? (/Callikoe-App/i.test(c.user_agent || "") ? { ...identifyDevice(c.user_agent), kind: "mobile", label: "Appli mobile Callikoe" } : { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" }) : identifyDevice(c.user_agent),
           connection: connectionType(sourceIp, localIp, []) };
       })));
@@ -1179,6 +1181,64 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     });
   }
   async function trace(number) { return traceNumber(number, await traceModel()); }
+
+  // ------------------------------------------------------------------ Dépannage : tests d'appel
+  /** Interroge les appareils des postes (SIP OPTIONS) puis lit leur état. */
+  async function qualifyNow(exts) {
+    for (const e of exts) for (const id of [e, `${e}-web`]) { try { await ami.command(`pjsip qualify ${id}`); } catch { /* AOR sans contact */ } }
+    if (exts.length) await new Promise((r) => setTimeout(r, 1500));
+    try { return parseContacts(await ami.command("pjsip show contacts")); } catch { return []; }
+  }
+  async function diagInbound(number) {
+    const model = await traceModel();
+    const t = traceNumber(number, model);
+    const root = pathNow(t.root);
+    const exts = ringTargets(root).filter((x) => model.users.has(x));
+    const [reg, qual] = [await registrations(), await qualifyNow(exts)];
+    const targets = exts.map((ext) => {
+      const u = model.users.get(ext);
+      return { ext, name: displayName(u), status: u.status, rings: !u.options.disabled && u.status === "available",
+        devices: deviceStates(ext, reg.get(ext) || [], qual) };
+    });
+    return { query: t.query, kind: t.kind, at: new Date().toISOString(), root, targets, verdict: inboundVerdict(root, targets) };
+  }
+  async function diagOutbound(ext, number) {
+    checkExtNumber(ext);
+    const [users, routes, trunks] = await Promise.all([loadUsers(), getRoutes(), listTrunks()]);
+    const security = { ...defaultSecurity(), ...((await db.getSetting("security", {})) || {}) };
+    const rules = await db.getSetting("outbound_rules", []);
+    const byId = new Map(users.map((u) => [u.id, u]));
+    return { ext, at: new Date().toISOString(), ...simulateOutbound(number, { user: byId.get(ext), users: byId, security, rules, trunks, outboundTrunk: routes.outbound_trunk, cc: countryCode() }) };
+  }
+  /** Fait vraiment sonner un poste (« TEST Callikoe ») et raccroche dès que les appareils sonnent. */
+  async function ringTest(ext) {
+    checkExtNumber(ext);
+    const u = await getUser(ext);
+    if (!u.registered) throw new UserError("Aucun appareil connecté sur ce poste : rien ne peut sonner.");
+    const tag = `cxt${Date.now().toString(36)}`;
+    try {
+      await ami.action({ Action: "Originate", Channel: `Local/${ext}@cx-ringtest/n`, Application: "Wait", Data: "12", Async: "true",
+        CallerID: '"TEST Callikoe" <0>', Timeout: "15000", Variable: `CXTEST=${tag}` });
+    } catch { throw new UserError("Moteur téléphonique injoignable."); }
+    const rang = new Map(); let answered = false;
+    const t0 = Date.now();
+    const chans = async () => { try { return (await ami.command("core show channels concise")).map((l) => l.split("!")); } catch { return []; } };
+    while (Date.now() - t0 < 9000) {
+      await new Promise((r) => setTimeout(r, 300));
+      for (const c of await chans()) {
+        const m = /^PJSIP\/(\d{3})(-web)?-/.exec(c[0] || "");
+        if (!m || m[1] !== ext) continue;
+        if (c[4] === "Ringing") rang.set(m[2] ? "web" : "desk", true);
+        if (c[4] === "Up") answered = true;
+      }
+      const all = (reg) => reg.every((k) => rang.has(k));
+      if (answered || (rang.size && Date.now() - t0 > 1500 && all([...new Set((u.contacts || []).map((c) => (c.device?.kind === "web" || c.device?.kind === "mobile" ? "web" : "desk")))]))) break;
+    }
+    for (const c of await chans()) if ((c[0] || "").startsWith(`Local/${ext}@cx-ringtest`)) { try { await ami.command(`channel request hangup ${c[0]}`); } catch { /* déjà raccroché */ } }
+    const kinds = [...new Set((u.contacts || []).map((c) => (c.device?.kind === "web" || c.device?.kind === "mobile" ? "web" : "desk")))];
+    return { ext, name: displayName(u), at: new Date().toISOString(), answered,
+      results: kinds.map((k) => ({ kind: k, label: k === "web" ? "Softphone / appli" : (u.contacts.find((c) => c.device?.kind !== "web" && c.device?.kind !== "mobile")?.device?.label || "Téléphone"), rang: rang.has(k) })) };
+  }
   async function forwardsReport() { return listForwards(await traceModel()); }
 
 
@@ -1290,7 +1350,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
-    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
+    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }
 

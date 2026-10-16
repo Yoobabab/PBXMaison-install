@@ -81,6 +81,14 @@ export class Ami {
     });
   }
 
+  /** Action AMI brute (ex. Originate) ; renvoie la réponse. */
+  async action(fields) {
+    await this.connect();
+    const r = await this.send(fields);
+    if (r.Response === "Error") throw new Error(`AMI : ${r.Message || "erreur"}`);
+    return r;
+  }
+
   /** Commande CLI Asterisk ; renvoie les lignes de sortie. */
   async command(cmd) {
     await this.connect();
