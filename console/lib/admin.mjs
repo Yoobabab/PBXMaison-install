@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, execFile } from "node:child_process";
-import { APP_DIR, CONFIGURE_CMD, VAR, installState, pbxEnv, isConfigured } from "./config.mjs";
+import { APP_DIR, CONFIGURE_CMD, VAR, CX_MODE, installState, pbxEnv, isConfigured } from "./config.mjs";
 import { UserError, displayName } from "./users.mjs";
 import { splitPcapFile } from "./pcap-split.mjs";
 import { validateRule, describeRule, buildOutboundDialplan, rangesText, CID_MODES } from "./outbound.mjs";
@@ -104,8 +104,8 @@ export function createAdminService({ db, ami, pbx }) {
     return r.lines[0] || { ok: false, error: "Protection anti-intrusion injoignable." };
   }
   async function getSecurity() {
-    const [s, f2b] = await Promise.all([security(), f2bStatus()]);
-    return { settings: s, f2b, countries: COUNTRIES };
+    const [s, f2b] = await Promise.all([security(), CX_MODE === "tenant" ? { ok: true, active: true, auto: [], manual: [], server: true } : f2bStatus()]);
+    return { settings: s, f2b, countries: COUNTRIES, tenant: CX_MODE === "tenant" };
   }
   async function setSecurity(input, clientIp) {
     const cur = await security();
@@ -114,7 +114,9 @@ export function createAdminService({ db, ami, pbx }) {
       throw new UserError(`Ton adresse actuelle (${clientIp}) n'est pas dans la liste : tu perdrais l'accès à la console.`, "console_allow");
     }
     await db.setSetting("security", s);
-    if (input.f2b || input.whitelist) {
+    // Multi-tenant : réseaux autorisés appliqués par l'aiguilleur ; la protection anti-intrusion se règle dans la console du serveur
+    if (CX_MODE === "tenant") { if (input.sip_allow !== undefined) await pbx.publishRoutes().catch(() => {}); }
+    else if (input.f2b || input.whitelist) {
       const r = await runConfigure(["f2b", "settings", String(s.f2b.maxretry), String(s.f2b.findtime), String(s.f2b.bantime), s.whitelist.join(",")], { timeout: 30_000 });
       if (r.code !== 0 && r.code !== null) s.f2b_warning = "Réglages enregistrés, mais la protection anti-intrusion n'a pas pu être mise à jour.";
     }
@@ -122,6 +124,7 @@ export function createAdminService({ db, ami, pbx }) {
     return { ...(await getSecurity()), warning: s.f2b_warning };
   }
   async function banIp(ip, ban) {
+    if (CX_MODE === "tenant") throw new UserError("Sur ce serveur, les adresses bloquées se gèrent dans la console du serveur (Paramètres › Protection anti-intrusion).");
     const a = checkIp(ip);
     if (!a) throw new UserError("Adresse IP invalide.", "ip");
     const r = await runConfigure(["f2b", ban ? "ban" : "unban", a], { timeout: 20_000 });

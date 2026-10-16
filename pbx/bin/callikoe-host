@@ -14,6 +14,7 @@
 #    callikoe-host debloquer <ip> | bloquer <ip>          débloque une adresse / la bloque définitivement
 #    callikoe-host surveillance liste [jours] | ok <pbx> <id> <compte>   appels étranger / surtaxés, changements d'IP des appareils
 #    callikoe-host pays etat | regler <FR,BE> <ip,ip>      pays d'où la téléphonie est acceptée (le reste est bloqué)
+#    callikoe-host protection etat | regler <n> <min> <min> <ip,ip>   protection anti-intrusion du serveur (fail2ban)
 #    callikoe-host init | mettre-a-jour | dns | aiguilleur   usage interne (installeur, tâches planifiées)
 #
 #  Chaque PBX client a son moteur (callikoe-asterisk@<nom>), sa console (callikoe-console@<nom>), sa base (cx_<nom>),
@@ -202,51 +203,10 @@ EOF
   # Échecs de mot de passe et rafales : bannis vite. Adresse de PBX inconnue (souvent un ancien téléphone resté configuré) : bien plus tolérant.
   # Ces deux règles ne bloquent que le SIP (5060/5061) : SSH, le web et les consoles restent joignables.
   printf '[Definition]\nfailregex = CALLIKOE-AUTHFAIL <HOST>\n            CALLIKOE-FLOOD <HOST>$\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-sip.conf
-  printf '[Definition]\nfailregex = CALLIKOE-UNKNOWN <HOST>\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-sip-unknown.conf
+  printf '[Definition]\nfailregex = CALLIKOE-UNKNOWN <HOST>\n            CALLIKOE-ACL <HOST>\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-sip-unknown.conf
   printf '[Definition]\nfailregex = ^CALLIKOE-NEVER-MATCH <HOST>$\nignoreregex =\n' > /etc/fail2ban/filter.d/callikoe-manual.conf
   touch /var/log/pbxmaison-manual-ban.log
-  cat > /etc/fail2ban/jail.d/callikoe.conf <<'EOF'
-# Callikoe — serveur multi-tenant (réécrit par callikoe-host à chaque mise à jour)
-[callikoe-sip]
-enabled  = true
-backend  = systemd
-journalmatch = _SYSTEMD_UNIT=kamailio.service
-filter   = callikoe-sip
-maxretry = 5
-findtime = 10m
-bantime  = 60m
-port     = 5060,5061
-action   = %(banaction)s[name=callikoe-sip-udp, port="5060,5061", protocol="udp"]
-           %(banaction)s[name=callikoe-sip-tcp, port="5060,5061", protocol="tcp"]
-ignoreip = 127.0.0.1/8 ::1
-
-[callikoe-sip-unknown]
-enabled  = true
-backend  = systemd
-journalmatch = _SYSTEMD_UNIT=kamailio.service
-filter   = callikoe-sip-unknown
-maxretry = 40
-findtime = 10m
-bantime  = 30m
-port     = 5060,5061
-action   = %(banaction)s[name=callikoe-unk-udp, port="5060,5061", protocol="udp"]
-           %(banaction)s[name=callikoe-unk-tcp, port="5060,5061", protocol="tcp"]
-ignoreip = 127.0.0.1/8 ::1
-
-[sshd]
-enabled  = true
-backend  = systemd
-
-[callikoe-manual]
-enabled  = true
-backend  = auto
-filter   = callikoe-manual
-logpath  = /var/log/pbxmaison-manual-ban.log
-maxretry = 1
-bantime  = -1
-banaction = %(banaction_allports)s
-ignoreip = 127.0.0.1/8 ::1
-EOF
+  f2b_jails
   systemctl restart fail2ban >/dev/null 2>&1 || warn "fail2ban n'a pas redémarré (journalctl -u fail2ban)"
   ok "Protection anti-intrusion sur l'aiguilleur SIP"
   geo_init
@@ -288,7 +248,7 @@ SQL
   runuser -u postgres -- psql -q -c "REVOKE ALL ON DATABASE callikoe_hub FROM PUBLIC" >/dev/null
   # La console du serveur ne peut lancer que la création et la suppression de PBX
   cat > /etc/sudoers.d/callikoe-hub <<EOF
-callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host journal *, ${APP}/pbx/bin/callikoe-host surveillance *, ${APP}/pbx/bin/callikoe-host pays *, ${APP}/pbx/bin/callikoe-host debloquer *, ${APP}/pbx/bin/callikoe-host bloquer *, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *
+callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host journal *, ${APP}/pbx/bin/callikoe-host surveillance *, ${APP}/pbx/bin/callikoe-host pays *, ${APP}/pbx/bin/callikoe-host protection *, ${APP}/pbx/bin/callikoe-host debloquer *, ${APP}/pbx/bin/callikoe-host bloquer *, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *
 EOF
   chmod 440 /etc/sudoers.d/callikoe-hub
   visudo -cq -f /etc/sudoers.d/callikoe-hub || { rm -f /etc/sudoers.d/callikoe-hub; die "Règle sudo invalide (console du serveur)."; }
@@ -640,6 +600,77 @@ cmd_journal() {
   [[ "$min" =~ ^[0-9]+$ ]] && ((min >= 1 && min <= 43200)) || die "Durée invalide (1 minute à 30 jours)."
   node "$APP/pbx/lib/sip-journal.mjs" "$REG" "$min"
 }
+# Protection anti-intrusion (console du serveur › Protection anti-intrusion) : réglages communs à tous les PBX
+PROT=/etc/callikoe/protection.conf
+prot_load() { MAXRETRY=5; FINDTIME=10; BANTIME=60; LISTE_BLANCHE=""; [[ -f "$PROT" ]] && . "$PROT"; }
+f2b_jails() { # écrit les règles fail2ban du serveur à partir des réglages
+  prot_load
+  local ignore="127.0.0.1/8 ::1 ${LISTE_BLANCHE}"
+  cat > /etc/fail2ban/jail.d/callikoe.conf <<EOF
+# Callikoe — serveur multi-tenant (réécrit par callikoe-host : réglages dans la console du serveur)
+[callikoe-sip]
+enabled  = true
+backend  = systemd
+journalmatch = _SYSTEMD_UNIT=kamailio.service
+filter   = callikoe-sip
+maxretry = ${MAXRETRY}
+findtime = ${FINDTIME}m
+bantime  = ${BANTIME}m
+port     = 5060,5061
+action   = %(banaction)s[name=callikoe-sip-udp, port="5060,5061", protocol="udp"]
+           %(banaction)s[name=callikoe-sip-tcp, port="5060,5061", protocol="tcp"]
+ignoreip = ${ignore}
+
+[callikoe-sip-unknown]
+enabled  = true
+backend  = systemd
+journalmatch = _SYSTEMD_UNIT=kamailio.service
+filter   = callikoe-sip-unknown
+maxretry = 40
+findtime = 10m
+bantime  = 30m
+port     = 5060,5061
+action   = %(banaction)s[name=callikoe-unk-udp, port="5060,5061", protocol="udp"]
+           %(banaction)s[name=callikoe-unk-tcp, port="5060,5061", protocol="tcp"]
+ignoreip = ${ignore}
+
+[sshd]
+enabled  = true
+backend  = systemd
+ignoreip = ${ignore}
+
+[callikoe-manual]
+enabled  = true
+backend  = auto
+filter   = callikoe-manual
+logpath  = /var/log/pbxmaison-manual-ban.log
+maxretry = 1
+bantime  = -1
+banaction = %(banaction_allports)s
+ignoreip = 127.0.0.1/8 ::1
+EOF
+}
+cmd_protection() {
+  case "${1:-etat}" in
+    etat)
+      prot_load
+      PR_MAX="$MAXRETRY" PR_FIND="$FINDTIME" PR_BAN="$BANTIME" PR_WL="$LISTE_BLANCHE" PR_ACTIVE="$(systemctl is-active --quiet fail2ban && echo 1 || echo 0)" \
+        node -e 'const e=process.env;process.stdout.write(JSON.stringify({active:e.PR_ACTIVE==="1",maxretry:+e.PR_MAX,findtime:+e.PR_FIND,bantime:+e.PR_BAN,whitelist:e.PR_WL.split(/\s+/).filter(Boolean)})+"\n")' ;;
+    regler)
+      local mx="${2:-}" fi="${3:-}" ba="${4:-}" wl="${5:-}" a out=""
+      [[ "$mx" =~ ^[0-9]+$ ]] && ((mx >= 2 && mx <= 50)) || die "Échecs autorisés : entre 2 et 50."
+      [[ "$fi" =~ ^[0-9]+$ ]] && ((fi >= 1 && fi <= 1440)) || die "Fenêtre : entre 1 et 1440 minutes."
+      [[ "$ba" =~ ^[0-9]+$ ]] && ((ba >= 1 && ba <= 525600)) || die "Blocage : entre 1 minute et 1 an."
+      [[ "$wl" == - ]] && wl=""
+      for a in ${wl//,/ }; do [[ "$a" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]] || die "Adresse invalide : ${a}"; out+=" $a"; done
+      printf 'MAXRETRY=%s\nFINDTIME=%s\nBANTIME=%s\nLISTE_BLANCHE="%s"\n' "$mx" "$fi" "$ba" "${out# }" > "$PROT"
+      f2b_jails
+      fail2ban-client reload >/dev/null 2>&1 || systemctl restart fail2ban >/dev/null 2>&1 || true
+      cmd_protection etat ;;
+    *) die "Usage : callikoe-host protection etat | regler <échecs> <fenêtre min> <blocage min> <ip,ip>" ;;
+  esac
+}
+
 # Pays autorisés pour la téléphonie (console du serveur) : PAYS et adresses toujours acceptées
 GEO=/etc/callikoe/geo.conf
 cmd_pays() {
@@ -873,6 +904,7 @@ case "${1:-}" in
   journal) shift; cmd_journal "$@" ;;
   surveillance) shift; cmd_surveillance "$@" ;;
   pays) shift; cmd_pays "$@" ;;
+  protection) shift; cmd_protection "$@" ;;
   debloquer) shift; cmd_debloquer "$@" ;;
   bloquer) shift; cmd_bloquer "$@" ;;
   suspendre) shift; cmd_suspendre "$@" ;;

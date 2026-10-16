@@ -234,6 +234,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const data = {
       trunks: rows.map((r) => ({ contact_user: r.contact_user, host: r.host, port: r.port || 5060, transport: r.transport || "udp", proxy: r.op_proxy || null })),
       dids: [...new Set(rows.flatMap((r) => trunkDidList(r, countryCode())))],
+      // Réseaux autorisés pour les postes (Sécurité) : appliqués par l'aiguilleur SIP du serveur
+      sip_allow: ((await db.getSetting("security", {})) || {}).sip_allow || [],
     };
     fs.writeFileSync(path.join(CX_VAR, "kamailio-routes.json.new"), JSON.stringify(data));
     fs.renameSync(path.join(CX_VAR, "kamailio-routes.json.new"), path.join(CX_VAR, "kamailio-routes.json"));
@@ -1286,7 +1288,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
-    getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
+    getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
     loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }

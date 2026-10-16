@@ -40,7 +40,8 @@ export function didForms(did, cc = "33") {
  * → { dom: Map, tru: Map, prx: Map, conflicts: [] }
  */
 export function buildTables(tenants, routes = {}, ips = {}) {
-  const dom = new Map(), tru = new Map(), prx = new Map(), ops = new Map(), conflicts = [];
+  const dom = new Map(), tru = new Map(), prx = new Map(), ops = new Map(), acl = new Map(), conflicts = [];
+  const CIDR = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
   const claim = (map, key, value, slug, what) => {
     const k = String(key).toLowerCase();
     if (map.has(k) && map.get(k).slug !== slug) { conflicts.push({ key: k, what, kept: map.get(k).slug, refused: slug }); return; }
@@ -52,6 +53,9 @@ export function buildTables(tenants, routes = {}, ips = {}) {
     if (t.fqdn && HOST.test(t.fqdn)) claim(dom, t.fqdn, be, t.slug, "adresse");
     for (const a of t.aliases || []) if (HOST.test(a)) claim(dom, a, be, t.slug, "adresse");
     const r = routes[t.slug] || {};
+    // Réseaux autorisés pour les postes de ce PBX (console du PBX › Sécurité) : les autres adresses sont refusées par l'aiguilleur
+    const allow = (r.sip_allow || []).map((x) => (String(x).includes("/") ? String(x) : `${x}/32`)).filter((x) => CIDR.test(x));
+    if (allow.length) for (const d of [t.fqdn, ...(t.aliases || [])].filter((x) => x && HOST.test(x))) if (dom.get(String(d).toLowerCase())?.slug === t.slug) acl.set(String(d).toLowerCase(), { value: allow.join(","), slug: t.slug });
     for (const tr of r.trunks || []) {
       if (tr.contact_user && USER.test(tr.contact_user)) {
         claim(tru, tr.contact_user, be, t.slug, "compte de trunk");
@@ -70,7 +74,7 @@ export function buildTables(tenants, routes = {}, ips = {}) {
     }
     for (const did of r.dids || []) for (const f of didForms(did, t.cc || "33")) claim(tru, f, be, t.slug, "SDA");
   }
-  return { dom, tru, prx, ops, conflicts };
+  return { dom, tru, prx, ops, acl, conflicts };
 }
 
 /** Fichier db_text pour htable (les « : » des valeurs sont échappés). */
@@ -95,12 +99,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) { ips[h] = [h]; return; }
     try { ips[h] = (await dns.lookup(h, { all: true, family: 4 })).map((a) => a.address); } catch { ips[h] = []; }
   }));
-  const { dom, tru, prx, ops, conflicts } = buildTables(tenants, routes, ips);
+  const { dom, tru, prx, ops, acl, conflicts } = buildTables(tenants, routes, ips);
   fs.mkdirSync(dbDir, { recursive: true });
-  for (const [name, map] of [["dom", dom], ["tru", tru], ["prx", prx], ["ops", ops]]) {
+  for (const [name, map] of [["dom", dom], ["tru", tru], ["prx", prx], ["ops", ops], ["acl", acl]]) {
     fs.writeFileSync(path.join(dbDir, `${name}.new`), dbtext(map));
     fs.renameSync(path.join(dbDir, `${name}.new`), path.join(dbDir, name));
   }
-  fs.writeFileSync(path.join(dbDir, "version"), "table_name(str) table_version(int)\ndom:2\ntru:2\nprx:2\nops:2\n");
-  console.log(JSON.stringify({ ok: true, counts: { dom: dom.size, tru: tru.size, prx: prx.size, ops: ops.size }, conflicts }));
+  fs.writeFileSync(path.join(dbDir, "version"), "table_name(str) table_version(int)\ndom:2\ntru:2\nprx:2\nops:2\nacl:2\n");
+  console.log(JSON.stringify({ ok: true, counts: { dom: dom.size, tru: tru.size, prx: prx.size, ops: ops.size, acl: acl.size }, conflicts }));
 }

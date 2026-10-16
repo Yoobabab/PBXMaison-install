@@ -113,20 +113,24 @@ async function pageOutbound(sub) {
 // ================================================================ Sécurité
 async function pageSecurity(sub = "apercu") {
   H.setNav("sec");
-  const { settings: s, f2b, countries } = await H.api("GET", "/api/security");
-  const T = [["apercu", "Vue d'ensemble"], ["ip", "Adresses IP"], ["numeros", "Numéros bloqués"], ["pays", "International"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"], ["journal", "Connexions et journal"]];
+  const { settings: s, f2b, countries, tenant } = await H.api("GET", "/api/security");
+  // Serveur multi-tenant : adresses bloquées, protection automatique et liste blanche sont communes à tout le serveur
+  const SERVER_MANAGED = `<div class="note">Géré par la console du serveur (Paramètres › Protection anti-intrusion) : les adresses bloquées, la protection automatique et la liste blanche sont communes à tous les PBX du serveur.</div>`;
+  if (tenant && sub === "ip") sub = "apercu";
+  const T = [["apercu", "Vue d'ensemble"], ...(tenant ? [] : [["ip", "Adresses IP"]]), ["numeros", "Numéros bloqués"], ["pays", "Appel Pays autorisés"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"], ["journal", "Connexions et journal"]];
   const banned = [...(f2b.manual || []).map((ip) => ({ ip, manual: true })), ...(f2b.auto || []).map((ip) => ({ ip, manual: false }))];
   let body = "";
   if (sub === "apercu") {
     const score = [s.block_premium, s.intl.length < 10, s.max_user_calls > 0, s.max_duration > 0, f2b.active, s.console_allow.length > 0, s.max_per_hour > 0, s.max_intl_day > 0].filter(Boolean).length;
     body = `<div class="kpis">
       ${kpi("shield", "Niveau de protection", `${score}<small>/8</small>`, score >= 7 ? "Très bon" : score >= 5 ? "Correct" : "À renforcer", score >= 7 ? "good" : score >= 5 ? "" : "warn")}
-      ${kpi("ban", "Adresses bloquées", banned.length, f2b.ok ? (f2b.active ? "Protection anti-intrusion active" : "Protection arrêtée !") : "Protection injoignable", f2b.ok && f2b.active ? "" : "warn")}
+      ${tenant ? kpi("ban", "Anti-intrusion", "Serveur", "géré par la console du serveur") : kpi("ban", "Adresses bloquées", banned.length, f2b.ok ? (f2b.active ? "Protection anti-intrusion active" : "Protection arrêtée !") : "Protection injoignable", f2b.ok && f2b.active ? "" : "warn")}
       ${kpi("phone", "Numéros bloqués", s.in_block.length + s.out_block.length, `${s.in_block.length} entrants · ${s.out_block.length} sortants`)}
-      ${kpi("globe", "Pays autorisés", s.intl.length, s.intl.length ? s.intl.slice(0, 4).map((c) => "+" + c).join(" ") + (s.intl.length > 4 ? "…" : "") : "International bloqué")}
+      ${kpi("globe", "Appel Pays autorisés", s.intl.length, s.intl.length ? s.intl.slice(0, 4).map((c) => "+" + c).join(" ") + (s.intl.length > 4 ? "…" : "") : "International bloqué")}
     </div>
+    ${tenant ? SERVER_MANAGED : ""}
     <div class="panel"><div class="ph"><h2>Points de contrôle</h2></div><div class="cx-checks">
-      ${[[f2b.active, "Protection anti-intrusion (fail2ban)", `${s.f2b.maxretry} échecs en ${s.f2b.findtime} min → blocage ${s.f2b.bantime} min`, "ip"],
+      ${[tenant ? [true, "Protection anti-intrusion", "Gérée pour tout le serveur par la console du serveur", ""] : [f2b.active, "Protection anti-intrusion (fail2ban)", `${s.f2b.maxretry} échecs en ${s.f2b.findtime} min → blocage ${s.f2b.bantime} min`, "ip"],
         [s.block_premium, "Numéros surtaxés bloqués (089x, 118xxx)", "Évite les appels coûteux et la fraude", "regles"],
         [s.intl.length < 10, "International limité aux pays choisis", s.intl.length ? `${s.intl.length} pays autorisés` : "Aucun pays : tout l'international est bloqué", "pays"],
         [s.max_per_hour > 0, "Plafond anti-fraude : appels externes par heure", s.max_per_hour ? `${s.max_per_hour} par heure pour tout le standard, au-delà tout est refusé et une alerte est créée` : "Pas de plafond", "regles"],
@@ -167,7 +171,7 @@ async function pageSecurity(sub = "apercu") {
       </div><div class="actions" style="margin-top:16px"><button class="btn">Enregistrer</button></div></form>`;
   } else if (sub === "pays") {
     const sel = new Set(s.intl);
-    body = `<form id="intf" novalidate><div class="panel"><div class="ph"><h2>Pays autorisés en sortie</h2><span class="s"><span id="ncount">${sel.size}</span> sélectionné(s)</span></div>
+    body = `<form id="intf" novalidate><div class="panel"><div class="ph"><h2>Appel Pays autorisés</h2><span class="s"><span id="ncount">${sel.size}</span> sélectionné(s)</span></div>
       <div class="pad"><p class="hint" style="margin-top:0">Les appels vers l'international (00 + indicatif) sont bloqués, sauf vers les pays cochés. C'est la première protection contre la fraude téléphonique (appels piratés vers des numéros surtaxés à l'étranger).</p>
         <input type="search" id="cq" placeholder="Rechercher un pays…" style="margin-bottom:12px">
         <div class="cx-countries">${countries.map(([cc, n]) => `<label class="cx-cty" data-n="${H.esc(n.toLowerCase())}"><input type="checkbox" value="${cc}" ${sel.has(cc) ? "checked" : ""}><span>${H.esc(n)}</span><small>+${cc}</small></label>`).join("")}</div>
@@ -195,7 +199,7 @@ async function pageSecurity(sub = "apercu") {
         <label class="check"><input type="radio" name="sa_mode" value="all" ${sa ? "" : "checked"}> Peuvent se connecter depuis partout (télétravail, mobiles)</label>
         <label class="check"><input type="radio" name="sa_mode" value="list" ${sa ? "checked" : ""}> Seulement depuis ces réseaux (le plus sûr)</label>
         <label data-for="sa">Réseaux autorisés<textarea name="sip_allow" rows="4" class="mono" placeholder="IP publique des bureaux, ex. 203.0.113.5&#10;192.168.1.0/24">${H.esc((s.sip_allow || []).join("\n"))}</textarea>
-          <span class="hint">Un téléphone, une base DECT ou une appli qui se connecte d'ailleurs est refusé, même avec le bon mot de passe. Mets l'IP publique de chaque site (et le réseau local si le PBX est sur place). Le softphone web n'est pas concerné ; l'appli mobile hors des bureaux ne fonctionnera plus.</span></label>
+          <span class="hint">Un téléphone, une base DECT ou une appli qui se connecte d'ailleurs est refusé, même avec le bon mot de passe. Mets l'IP publique de chaque site (et le réseau local si le PBX est sur place). Le softphone web et l'appli Callikoe ne sont pas concernés ; une appli SIP (Zoiper…) hors de ces réseaux ne fonctionnera plus.</span></label>
       </div></div>
       <div class="actions"><button class="btn">Enregistrer</button></div></form>`;
   }

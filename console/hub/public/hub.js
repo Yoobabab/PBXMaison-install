@@ -34,6 +34,7 @@ const ICONS = {
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
   sip: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9z"/>',
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
@@ -48,7 +49,7 @@ function setNav(active, label = "") {
   const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : [])];
   // Paramètres : regroupés dans un menu repliable (ouvert quand on est sur une de ses pages)
   const settings = [...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"],
-    ["#/pays", "IP Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
+    ["#/protection", "Protection anti-intrusion", "shield"], ["#/pays", "IP Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   const link = ([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`;
   let setOpen = settings.some(([, , k]) => k === active);
   try { if (!setOpen) setOpen = localStorage.getItem("cxhub_settings") === "1"; } catch { /* */ }
@@ -573,6 +574,61 @@ async function renderWatch() {
   await load();
 }
 
+// ---------------------------------------------------------------- Protection anti-intrusion (commune à tous les PBX du serveur)
+async function renderProtection() {
+  setNav("shield", "Protection anti-intrusion");
+  let p, t;
+  try { [p, t] = await Promise.all([api("GET", "/api/protection"), api("GET", "/api/telephonie?minutes=15")]); }
+  catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+  const edit = can("super", "admin");
+  const blocked = new Map();
+  for (const b of t.banned) { const x = blocked.get(b.ip) || { ip: b.ip, why: [] }; x.why.push(b.label); blocked.set(b.ip, x); }
+  for (const ip of t.ignored) { const x = blocked.get(ip) || { ip, why: [] }; x.why.push("Ignorée 1 minute par l'anti-flood"); blocked.set(ip, x); }
+  app.innerHTML = `${takeFlash()}<h1>Protection anti-intrusion</h1>
+    <p class="sub">Commune à tous les PBX du serveur : une adresse qui se trompe trop souvent de mot de passe est bloquée pour la téléphonie (SIP 5060 / 5061). Le web et les consoles restent joignables.</p>
+    <div class="kpis">
+      ${kpi("shield", "Protection", p.active ? "Active" : "Arrêtée", `${p.maxretry} échecs en ${p.findtime} min → blocage ${p.bantime} min`, p.active ? "good" : "warn")}
+      ${kpi("lic", "Adresses bloquées", blocked.size, t.client_ip ? `ton adresse : <span class="mono">${esc(t.client_ip)}</span>` : "", blocked.has(t.client_ip) ? "warn" : "")}
+      ${kpi("users", "Liste blanche", p.whitelist.length, "adresses jamais bloquées")}
+    </div>
+    ${blocked.has(t.client_ip) ? `<div class="flash bad">Ton adresse actuelle (${esc(t.client_ip)}) est bloquée : tes téléphones ne peuvent pas s'enregistrer. ${edit ? `<button class="btn sm" data-unban="${esc(t.client_ip)}">Débloquer mon adresse</button>` : ""}</div>` : ""}
+    <div class="grid2">
+      <div class="panel"><div class="ph"><h2>Adresses bloquées</h2><span class="s">${blocked.size}</span></div>
+        ${blocked.size ? `<div class="table-wrap"><table><thead><tr><th>Adresse</th><th>Raison</th><th></th></tr></thead><tbody>
+          ${[...blocked.values()].map((b) => `<tr><td class="mono">${esc(b.ip)}${b.ip === t.client_ip ? ' <span class="pill bad">toi</span>' : ""}</td><td>${b.why.map(esc).join("<br>")}</td><td class="acts">${edit ? `<button class="btn ghost sm" data-unban="${esc(b.ip)}">Débloquer</button>` : ""}</td></tr>`).join("")}
+          </tbody></table></div>` : `<div class="empty">Aucune adresse bloquée.</div>`}
+        ${edit ? `<form id="banf" class="pad" style="border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end" novalidate>
+          <label style="flex:1;min-width:200px">Bloquer une adresse définitivement<input name="ip" placeholder="203.0.113.7" autocomplete="off"></label>
+          <button class="btn ghost">Bloquer</button><div class="form-near" style="flex-basis:100%"></div></form>` : ""}
+        <p class="hint pad" style="margin:0;border-top:1px solid var(--line)">Le détail de ce que chaque adresse a tenté est dans <a href="#/telephonie">Logs d'erreur</a>.</p></div>
+      <form id="protf" class="panel" novalidate><div class="ph"><h2>Protection automatique</h2></div><div class="pad stack">
+        <div class="grid3" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end">
+          <label>Échecs autorisés<input type="number" name="maxretry" min="2" max="50" value="${p.maxretry}" ${edit ? "" : "disabled"}></label>
+          <label>Sur une fenêtre de (min)<input type="number" name="findtime" min="1" max="1440" value="${p.findtime}" ${edit ? "" : "disabled"}></label>
+          <label>Blocage pendant (min)<input type="number" name="bantime" min="1" max="525600" value="${p.bantime}" ${edit ? "" : "disabled"}></label></div>
+        <label>Adresses jamais bloquées (liste blanche)<textarea name="whitelist" rows="4" placeholder="Une adresse ou un réseau par ligne : IP fixe des bureaux d'un client, d'IRT, d'un opérateur…" ${edit ? "" : "disabled"}>${esc(p.whitelist.join("\n"))}</textarea>
+          <span class="hint">Ces adresses ne sont jamais bloquées, même après des erreurs de mot de passe. Les appareils réglés sur une adresse de PBX inconnue sont bloqués beaucoup plus tard (40 essais en 10 min, 30 min de blocage).</span></label>
+        <div class="form-near"></div>
+        ${edit ? `<div class="actions"><button class="btn">Enregistrer et appliquer</button></div>` : ""}</div></form>
+    </div>`;
+  app.querySelectorAll("[data-unban]").forEach((b) => b.onclick = async () => {
+    b.disabled = true;
+    try { await api("POST", "/api/telephonie/debloquer", { ip: b.dataset.unban }); flash = { text: `Adresse ${b.dataset.unban} débloquée.` }; renderProtection(); }
+    catch (err) { b.disabled = false; flash = { cls: "bad", text: err.message }; renderProtection(); }
+  });
+  const bf = $("#banf");
+  if (bf) bindForm(bf, async (f) => {
+    const ip = String(f.ip || "").trim();
+    if (ip === t.client_ip) throw Object.assign(new Error("C'est ton adresse actuelle : tu bloquerais tes propres téléphones."), { field: "ip" });
+    await api("POST", "/api/telephonie/bloquer", { ip });
+    flash = { text: `Adresse ${ip} bloquée.` }; renderProtection();
+  });
+  if (edit) bindForm($("#protf"), async (f) => {
+    const r = await api("POST", "/api/protection", { maxretry: Number(f.maxretry), findtime: Number(f.findtime), bantime: Number(f.bantime), whitelist: String(f.whitelist || "").split(/\s+/).filter(Boolean) });
+    flash = { text: `Enregistré : ${r.maxretry} échecs en ${r.findtime} min → blocage ${r.bantime} min.` }; renderProtection();
+  });
+}
+
 // ---------------------------------------------------------------- Pays autorisés (téléphonie bloquée ailleurs)
 const GEO_COUNTRIES = [["FR", "France"], ["BE", "Belgique"], ["CH", "Suisse"], ["LU", "Luxembourg"], ["MC", "Monaco"], ["AD", "Andorre"],
   ["DE", "Allemagne"], ["ES", "Espagne"], ["IT", "Italie"], ["PT", "Portugal"], ["GB", "Royaume-Uni"], ["IE", "Irlande"], ["NL", "Pays-Bas"],
@@ -663,13 +719,7 @@ async function renderTelephonie() {
         ${kpi("call", "Robots refusés", c.robot || 0, "tentatives d'appels frauduleux bloquées")}
         ${kpi("lic", "Adresses bloquées", blocked.size, d.client_ip ? `ton adresse : <span class="mono">${esc(d.client_ip)}</span>` : "", mine ? "warn" : "")}
       </div>
-      <div class="panel"><div class="ph"><h2>Adresses bloquées</h2><span class="s">${blocked.size}</span></div>
-        ${blocked.size ? `<div class="table-wrap"><table><thead><tr><th>Adresse</th><th>Raison</th><th></th></tr></thead><tbody>
-          ${[...blocked.values()].map((b) => `<tr><td class="mono">${esc(b.ip)}${b.ip === d.client_ip ? ' <span class="pill bad">toi</span>' : ""}</td><td>${b.why.map(esc).join("<br>")}</td><td class="acts">${act(b.ip, true)}</td></tr>`).join("")}
-          </tbody></table></div>` : `<div class="empty">Aucune adresse bloquée.</div>`}
-        ${can("super", "admin") ? `<form id="banf" class="pad" style="border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end" novalidate>
-          <label style="flex:1;min-width:200px">Bloquer une adresse définitivement<input name="ip" placeholder="203.0.113.7" autocomplete="off"></label>
-          <button class="btn ghost">Bloquer</button><div class="form-near" style="flex-basis:100%"></div></form>` : ""}</div>
+      <div class="flash">${blocked.size} adresse${blocked.size > 1 ? "s" : ""} bloquée${blocked.size > 1 ? "s" : ""} en ce moment : liste, blocage et réglages dans <a href="#/protection">Protection anti-intrusion</a>.</div>
       ${d.by_ip.length ? `<div class="panel"><div class="ph"><h2>Adresses les plus actives</h2><span class="s">sur la période</span></div><div class="table-wrap"><table>
         <thead><tr><th>Adresse</th><th>Événements</th><th>Types</th><th>État</th><th></th></tr></thead><tbody>
         ${d.by_ip.slice(0, 15).map((x) => `<tr><td class="mono"><a href="#" data-ip="${esc(x.ip)}">${esc(x.ip)}</a>${x.ip === d.client_ip ? ' <span class="pill ok">toi</span>' : ""}</td><td>${x.count}</td>
@@ -700,13 +750,6 @@ async function renderTelephonie() {
       if (!confirm(`Bloquer définitivement ${b.dataset.ban} ? Plus aucun appareil à cette adresse ne pourra joindre les PBX du serveur.`)) return;
       act2("/api/telephonie/bloquer", b.dataset.ban, b);
     });
-    const bf = $("#banf");
-    if (bf) bindForm(bf, async (f) => {
-      const ip = String(f.ip || "").trim();
-      if (ip === d.client_ip) throw Object.assign(new Error("C'est ton adresse actuelle : tu bloquerais tes propres téléphones."), { field: "ip" });
-      await api("POST", "/api/telephonie/bloquer", { ip });
-      load();
-    });
   }
   await load();
   sipTimer = setInterval(() => { if (location.hash === "#/telephonie" && sipMin <= 1440 && !document.hidden && !document.activeElement?.closest?.("#sipbody")) load(); else if (location.hash !== "#/telephonie") clearInterval(sipTimer); }, 30_000);
@@ -728,6 +771,7 @@ function route() {
   if (h === "#/telephonie") return renderTelephonie();
   if (h === "#/surveillance") return renderWatch();
   if (h === "#/pays") return renderGeo();
+  if (h === "#/protection") return renderProtection();
   return renderList();
 }
 window.addEventListener("hashchange", route);

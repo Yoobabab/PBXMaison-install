@@ -46,6 +46,9 @@ for (const line of raw.split(/\r?\n/)) {
     const p = pbxOf(uriParts(m[3]).host);
     const text = `${meth(m[2])}${p ? ` vers ${p.name}` : ""} : l'aiguilleur n'a pas pu transmettre la demande${prev?.why ? ` (${prev.why})` : ""}. L'appareil reçoit une erreur.`;
     if (prev) Object.assign(prev, { ip: m[1], text, pbx: p?.slug || "" }); else events.push({ at, kind: "erreur", ip: m[1], pbx: p?.slug || "", text });
+  } else if ((m = /CALLIKOE-ACL (\S+) (\S+) (\S+)/.exec(line))) {
+    const p = pbxOf(m[3]);
+    events.push({ at, kind: "refus", ip: m[1], pbx: p?.slug || "", text: `${meth(m[2])} refusé : l'adresse n'est pas dans les réseaux autorisés de ${p ? p.name : m[3]} (console du PBX › Sécurité).` });
   } else if ((m = /CALLIKOE-FLOOD (\S+)/.exec(line))) {
     events.push({ at, kind: "flood", ip: m[1], text: "Trop de messages d'un coup : adresse ignorée 1 minute par l'aiguilleur." });
   } else if ((m = /ERROR: \{[^ ]* [^ ]* (\S+) ([^}]*)\}\s*(.*)$/.exec(line))) {

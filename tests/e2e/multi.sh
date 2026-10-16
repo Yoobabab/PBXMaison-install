@@ -357,6 +357,23 @@ sleep 8
 regd px && fail "poste pirate enregistré chez cli b avec les identifiants de cli a" || pass "Poste de cli a refusé par cli b (identifiants d'un autre PBX)"
 sudo journalctl -u kamailio --no-pager | grep -q "CALLIKOE-AUTHFAIL 127.0.0.13" && pass "Échec noté avec l'adresse réelle du poste pirate (fail2ban)" || { sudo journalctl -u kamailio -n 30 --no-pager | cut -c1-200 >> "$OUT"; fail "AUTHFAIL absent"; }
 labx px "module unload res_pjsip_outbound_registration.so" >/dev/null 2>&1 || true
+# Réseaux autorisés de cli b (console du PBX › Sécurité) : appliqués par l'aiguilleur, puis retirés
+curl -sS -b "$LAB/jar-b" -X PUT http://127.0.0.1:9002/api/security -H 'content-type: application/json' -d '{"sip_allow":["10.99.0.0/16"]}' >/dev/null
+for _ in $(seq 1 15); do sudo grep -q "^b.e2e.invalid:0:0:10.99.0.0/16" /var/lib/callikoe/kamailio/db/acl 2>/dev/null && break; sleep 1; done
+labx pb "pjsip send register reg" >/dev/null 2>&1 || true
+noacl() { sudo journalctl -u kamailio --since "-2min" --no-pager | grep -q "CALLIKOE-ACL 127.0.0.12"; }
+if sudo grep -q "^b.e2e.invalid:0:0:10.99.0.0/16" /var/lib/callikoe/kamailio/db/acl 2>/dev/null && waitfor 30 noacl; then pass "Réseaux autorisés de cli b : poste hors réseau refusé par l'aiguilleur"
+else sudo cat /var/lib/callikoe/kamailio/db/acl >> "$OUT" 2>&1; fail "réseaux autorisés (aiguilleur)"; fi
+curl -sS -b "$LAB/jar-b" -X PUT http://127.0.0.1:9002/api/security -H 'content-type: application/json' -d '{"sip_allow":[]}' >/dev/null
+for _ in $(seq 1 15); do sudo grep -q "^b.e2e.invalid" /var/lib/callikoe/kamailio/db/acl 2>/dev/null || break; sleep 1; done
+labx pb "module reload res_pjsip_outbound_registration.so" >/dev/null 2>&1 || true
+waitfor 60 regd pb && pass "Réseaux autorisés retirés : poste de cli b de nouveau enregistré" || fail "poste B après retrait des réseaux autorisés"
+# Protection anti-intrusion (console du serveur) : réglages appliqués à fail2ban, liste blanche
+R="$(hapi POST /api/protection '{"maxretry":6,"findtime":10,"bantime":45,"whitelist":["198.51.100.7"]}')"
+[[ "$R" == *'"maxretry":6'* ]] && sudo grep -q "^maxretry = 6$" /etc/fail2ban/jail.d/callikoe.conf && sudo grep -q "^bantime  = 45m$" /etc/fail2ban/jail.d/callikoe.conf \
+  && sudo grep -q "198.51.100.7" /etc/fail2ban/jail.d/callikoe.conf && pass "Protection anti-intrusion réglée depuis la console du serveur (6 échecs, 45 min, liste blanche)" || { echo "$R" | cut -c1-300 >> "$OUT"; fail "protection anti-intrusion"; }
+R="$(curl -sS -b "$LAB/jar-b" -X POST http://127.0.0.1:9002/api/security/ban -H 'content-type: application/json' -d '{"ip":"203.0.113.50"}')"
+[[ "$R" == *"console du serveur"* ]] && pass "Console d'un PBX : blocage d'adresse refusé (géré par la console du serveur)" || fail "blocage depuis un PBX accepté : $R"
 # Console du serveur › Téléphonie : l'échec y apparaît en clair, avec le PBX concerné
 R="$(hapi GET '/api/telephonie?minutes=60')"
 echo "$R" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit(d.events.some(e=>e.kind==="auth"&&e.ip==="127.0.0.13"&&/poste 201/.test(e.text))?0:1)' \

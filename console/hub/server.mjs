@@ -282,6 +282,24 @@ export async function buildApp({ db } = {}) {
     return { ok: true };
   });
 
+  // ---------------------------------------------------------------- Protection anti-intrusion (fail2ban, commune à tous les PBX)
+  app.get("/api/protection", { preHandler: requireUser }, async () => {
+    const r = await hostJson(["protection", "etat"], 20_000);
+    if (!r.ok) throw new UserError("Réglages de la protection illisibles.");
+    return r.data;
+  });
+  app.post("/api/protection", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const n = (k, min, max, label) => { const v = Number(req.body?.[k]); if (!Number.isInteger(v) || v < min || v > max) throw new UserError(`${label} : entre ${min} et ${max}.`, k); return v; };
+    const mx = n("maxretry", 2, 50, "Échecs autorisés"), fi = n("findtime", 1, 1440, "Fenêtre (min)"), ba = n("bantime", 1, 525600, "Blocage (min)");
+    const wl = [...new Set((Array.isArray(req.body?.whitelist) ? req.body.whitelist : []).map((x) => String(x).trim()).filter(Boolean))];
+    for (const a of wl) if (!/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(a)) throw new UserError(`Adresse invalide : ${a} (IPv4, éventuellement avec /masque).`, "whitelist");
+    if (wl.length > 100) throw new UserError("100 adresses au maximum dans la liste blanche.", "whitelist");
+    const r = await hostJson(["protection", "regler", String(mx), String(fi), String(ba), wl.join(",") || "-"], 60_000);
+    await audit(req, `Protection anti-intrusion : ${mx} échecs en ${fi} min → blocage ${ba} min`, r.ok, wl.length ? `liste blanche : ${wl.join(", ")}` : "");
+    if (!r.ok) throw new UserError(r.error?.replace(/^✖\s*/, "") || "Réglage impossible.");
+    return r.data;
+  });
+
   // ---------------------------------------------------------------- Pays autorisés pour la téléphonie
   app.get("/api/pays", { preHandler: requireUser }, async () => {
     const r = await hostJson(["pays", "etat"], 20_000);

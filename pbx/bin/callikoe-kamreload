@@ -15,7 +15,7 @@ chown -R kamailio:kamailio "$DB" 2>/dev/null || true
 loaded() { kamcmd -s "$SOCK" htable.dump "$1" 2>/dev/null | grep -c 'name:' || true; }
 want() { echo $(( $(grep -c . "$DB/$1" 2>/dev/null || echo 1) - 1 )); }
 ok=1
-for t in dom tru prx ops; do
+for t in dom tru prx ops acl; do
   r="$(kamcmd -s "$SOCK" htable.reload "$t" 2>&1)"
   if [[ "$r" != *"reloaded"* || "$(loaded "$t")" != "$(want "$t")" ]]; then
     sleep 0.3; r="$(kamcmd -s "$SOCK" htable.reload "$t" 2>&1)"
