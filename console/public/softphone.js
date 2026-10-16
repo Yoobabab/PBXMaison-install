@@ -228,7 +228,18 @@ async function refreshVoicemail() {
 }
 
 // ------------------------------------------------------------------ Coquille : menu, en-tête, panneaux
-const NAV = [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
+// Dans l'application mobile Callikoe (WebView) : onglets comme une appli de téléphone, menu et comptes gérés par l'appli
+const IN_APP = (() => {
+  try {
+    if (window.CALLIKOE_APP || new URLSearchParams(location.search).get("app") === "1") sessionStorage.setItem("callikoe_app", "1");
+    return sessionStorage.getItem("callikoe_app") === "1" || !!window.ReactNativeWebView;
+  } catch { return !!window.CALLIKOE_APP; }
+})();
+const toApp = (type) => { try { window.ReactNativeWebView?.postMessage(JSON.stringify({ type })); } catch { /* hors appli */ } };
+if (IN_APP) document.documentElement.classList.add("in-app");
+const NAV = IN_APP
+  ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
+  : [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
 const TITLES = { equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages" };
 
 function presenceOf(c) {
@@ -243,11 +254,12 @@ function renderShell() {
   root.innerHTML = `<div class="sp-app">
     <aside class="rail">
       <a class="rail-logo" href="#/equipe" title="Callikoe"><i></i></a>
-      <nav>${NAV.map(([k, l, ic]) => `<a href="#/${k}" data-r="${k}">${ic()}<span>${l}</span><b class="badge" id="b-${k}" hidden></b></a>`).join("")}</nav>
+      <nav>${NAV.map(([k, l, ic]) => k === "clavier" ? `<a href="#" data-dial>${ic()}<span>${l}</span></a>` : `<a href="#/${k}" data-r="${k}">${ic()}<span>${l}</span><b class="badge" id="b-${k}" hidden></b></a>`).join("")}</nav>
       <button class="rail-me" id="mebtn" title="Mon statut">${avatar(me.user.name, myPresence().cls, "sm", "me-av")}</button>
     </aside>
     <div class="sp-body">
       <header class="sp-top">
+        ${IN_APP ? '<button class="ghost-ic app-menu" id="appmenu" aria-label="Menu">☰</button>' : ""}
         <div class="sp-ttl"><h1 id="title">Équipe</h1><span class="s">${esc(me.pbx.name || "")}</span></div>
         <span class="reg ${regState}" id="reg" title="Connexion au PBX">${regLabel()}</span>
         <button class="btn sp-dialbtn" id="opendial" title="Ouvrir le clavier">${I.keypad()}<span>Appeler</span></button>
@@ -262,6 +274,8 @@ function renderShell() {
     <div id="menu"></div>
   </div>`;
   $("#opendial").onclick = () => openDrawer(true);
+  $$("[data-dial]").forEach((a) => a.onclick = (e) => { e.preventDefault(); openDrawer(true); });
+  $("#appmenu")?.addEventListener("click", () => toApp("menu"));
   $("#scrim").onclick = () => openDrawer(false);
   $("#mebtn").onclick = (e) => { e.stopPropagation(); toggleMenu(); };
   renderBanner();
@@ -302,12 +316,13 @@ function toggleMenu(force) {
     ${Object.entries(STATUS).map(([k, l]) => `<button class="pm-it ${me.user.status === k ? "on" : ""}" data-st="${k}"><i class="pres ${k}"></i>${l}${me.user.status === k ? '<span class="ck">✓</span>' : ""}</button>`).join("")}
     <hr>
     <a class="pm-it" href="#/reglages/transfert">Renvois par statut…</a>
-    <button class="pm-it" id="logout">${I.logout()}${me.impersonated_by ? "Quitter l'incarnation" : "Se déconnecter"}</button>
+    ${IN_APP ? `<button class="pm-it" id="appaccounts">${I.team()}Comptes…</button>` : `<button class="pm-it" id="logout">${I.logout()}${me.impersonated_by ? "Quitter l'incarnation" : "Se déconnecter"}</button>`}
   </div>`;
   m.querySelector(".pmenu").onclick = (e) => e.stopPropagation();
   $$("[data-st]", m).forEach((b) => b.onclick = () => setStatus(b.dataset.st));
   $("a.pm-it", m).onclick = () => toggleMenu(false);
-  $("#logout").onclick = async () => { try { ua?.stop(); } catch { /* */ } ua = null; await api("POST", "/api/u/logout"); me.impersonated_by ? window.close() : renderLogin(); };
+  $("#appaccounts")?.addEventListener("click", () => { toggleMenu(false); toApp("accounts"); });
+  if ($("#logout")) $("#logout").onclick = async () => { try { ua?.stop(); } catch { /* */ } ua = null; await api("POST", "/api/u/logout"); me.impersonated_by ? window.close() : renderLogin(); };
   setTimeout(() => document.addEventListener("click", () => toggleMenu(false), { once: true }));
 }
 async function setStatus(st) {

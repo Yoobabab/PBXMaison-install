@@ -344,3 +344,14 @@ label.ck input{width:auto}
 .room{display:flex;gap:10px;align-items:center;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:8px 14px;cursor:pointer;font:inherit;color:var(--accent);text-align:left}
 .room:hover{border-color:var(--accent);background:var(--accent-soft)}
 .room span{display:flex;flex-direction:column;color:var(--ink)}
+
+/* Application mobile Callikoe (WebView) : menu de l'appli à gauche, statut en haut à droite, clavier en onglet */
+.app-menu{display:none}
+.in-app .app-menu{display:inline-flex;font-size:22px;line-height:1;margin-right:4px}
+.in-app .sp-dialbtn{display:none}
+.in-app .sp-top{gap:8px}
+@media (max-width:640px){
+  .in-app .rail-me{position:fixed;top:calc(8px + env(safe-area-inset-top));right:12px;z-index:30}
+  .in-app .sp-top{padding-right:60px}
+  .in-app .pmenu{top:calc(60px + env(safe-area-inset-top));bottom:auto}
+}
