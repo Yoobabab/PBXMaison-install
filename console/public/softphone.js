@@ -945,8 +945,8 @@ function renderDialer(d, asPage = false) {
   num.oninput = () => { sugg(); syncBk(); };
   const go = () => {
     let v = num.value.trim();
-    // Rien de tapé : on rappelle le dernier numéro composé (comme sur un téléphone)
-    if (!v) { v = history().find((x) => x.direction === "out" && x.number)?.number || ""; if (!v) return; num.value = v; syncBk(); } if (isDialable(v)) call(v); else { const c = contacts.find((x) => `${x.id} ${x.name}`.toLowerCase().includes(v.toLowerCase())); if (c) call(c.id); } };
+    // Rien de tapé : affiche le dernier numéro composé (sans appeler) ; un 2e appui lance l'appel
+    if (!v) { v = history().find((x) => x.direction === "out" && x.number)?.number || ""; if (v) { num.value = v; sugg(); syncBk(); } return; } if (isDialable(v)) call(v); else { const c = contacts.find((x) => `${x.id} ${x.name}`.toLowerCase().includes(v.toLowerCase())); if (c) call(c.id); } };
   num.onkeydown = (e) => { if (e.key === "Enter") go(); };
   $("#dial").onclick = go;
   $("#drclose")?.addEventListener("click", () => openDrawer(false));
