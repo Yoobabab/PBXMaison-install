@@ -1369,7 +1369,9 @@ function wireKeys(u, users) {
       ${k.type === "speed" ? `<label>Numéro<input data-pv="value" value="${esc(k.value)}" inputmode="tel" placeholder="06 12 34 56 78 ou 201"></label>` : ""}
       ${k.type === "none" ? "" : `<label>Libellé à l'écran<input data-pv="label" value="${esc(k.label)}" maxlength="24" placeholder="${k.type === "line" ? "facultatif" : ""}"></label>`}
       <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
-      <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button></div>`;
+      <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button>
+        <button type="button" class="btn ghost sm" data-multi>+ Plusieurs BLF à partir d'ici</button></div>
+      <div id="blfmulti"></div>`;
     pnl.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { setKey(m, i, { type: b.dataset.t, value: "", label: b.dataset.t === "status" ? "Ne pas déranger" : "" }); drawAll(); });
     pnl.querySelectorAll("[data-pv]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
       const k2 = { ...K(m, i), [el.dataset.pv]: el.value };
@@ -1378,6 +1380,35 @@ function wireKeys(u, users) {
       if (el.tagName === "SELECT") drawAll(); else { drawVisual(); drawList(); keepKeys(); }
     }));
     pnl.querySelector("[data-clear]").onclick = () => { setKey(m, i, NONE()); trim(m); drawAll(); };
+    // Plusieurs BLF d'un coup : les utilisateurs cochés remplissent les touches à partir de celle-ci
+    pnl.querySelector("[data-multi]").onclick = () => {
+      const max = m < 0 ? L.n : EXP.perPage * EXP.pages;
+      const box = pnl.querySelector("#blfmulti");
+      box.innerHTML = `<div class="blfm"><div class="row" style="justify-content:space-between;align-items:center"><strong>Coche les utilisateurs</strong>
+          <span class="row" style="gap:6px"><button type="button" class="btn link sm" data-all>Tous</button><button type="button" class="btn link sm" data-none>Aucun</button></span></div>
+        <input type="search" placeholder="Rechercher…" data-q>
+        <div class="blfm-list">${others.map((x) => `<label class="check" data-n="${esc(`${x.id} ${x.name}`.toLowerCase())}"><input type="checkbox" value="${esc(x.id)}" ${keys.some((k) => k.type === "blf" && k.value === x.id) ? "" : "checked"}> ${esc(x.id)} · ${esc(x.name)}</label>`).join("")}</div>
+        <p class="hint" data-info style="margin:0"></p>
+        <div class="row"><button type="button" class="btn sm" data-go>Ajouter</button><button type="button" class="btn ghost sm" data-cancel>Annuler</button></div></div>`;
+      const boxes = () => [...box.querySelectorAll(".blfm-list input")];
+      const info = () => {
+        const n = boxes().filter((b) => b.checked).length, last = Math.min(i + n, max);
+        const replaced = Array.from({ length: Math.max(0, last - i) }, (_, j) => K(m, i + j)).filter((k) => k.type !== "none").length;
+        box.querySelector("[data-info]").textContent = n ? `Touches ${i + 1} à ${i + n}${i + n > max ? ` — seulement ${max - i} touche(s) libres jusqu'à la fin : les ${i + n - max} dernier(s) ne seront pas ajoutés` : ""}${replaced ? ` · ${replaced} touche(s) déjà réglée(s) seront remplacées` : ""}.` : "Coche au moins un utilisateur.";
+      };
+      box.querySelector("[data-q]").oninput = (e) => { const q = e.target.value.trim().toLowerCase(); box.querySelectorAll(".blfm-list label").forEach((l) => { l.hidden = !!q && !l.dataset.n.includes(q); }); };
+      box.querySelector("[data-all]").onclick = () => { boxes().forEach((b) => { if (!b.closest("label").hidden) b.checked = true; }); info(); };
+      box.querySelector("[data-none]").onclick = () => { boxes().forEach((b) => (b.checked = false)); info(); };
+      boxes().forEach((b) => (b.onchange = info));
+      box.querySelector("[data-cancel]").onclick = () => { box.innerHTML = ""; };
+      box.querySelector("[data-go]").onclick = () => {
+        const ids = boxes().filter((b) => b.checked).map((b) => b.value);
+        ids.slice(0, Math.max(0, max - i)).forEach((id, j) => setKey(m, i + j, { type: "blf", value: id, label: others.find((x) => x.id === id)?.name || id }));
+        cur = { m, i: Math.min(i + ids.length, max) - 1 };
+        drawAll();
+      };
+      info();
+    };
   };
   const drawAll = () => { drawVisual(); drawPanel(); drawList(); keepKeys(); };
   const draw = drawAll;

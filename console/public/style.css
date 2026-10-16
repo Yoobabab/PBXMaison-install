@@ -663,3 +663,8 @@ tr.sel td{background:var(--accent-soft, rgba(216,20,28,.06))}
 tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
 .capcall{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
 .capcall .grow{flex:1;min-width:220px}
+
+/* Touches : plusieurs BLF d'un coup */
+.blfm{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.blfm-list{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.blfm-list label[hidden]{display:none}
