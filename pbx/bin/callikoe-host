@@ -602,7 +602,7 @@ cmd_journal() {
 }
 # Protection anti-intrusion (console du serveur › Protection anti-intrusion) : réglages communs à tous les PBX
 PROT=/etc/callikoe/protection.conf
-prot_load() { MAXRETRY=5; FINDTIME=10; BANTIME=60; LISTE_BLANCHE=""; [[ -f "$PROT" ]] && . "$PROT"; }
+prot_load() { MAXRETRY=5; FINDTIME=10; BANTIME=60; LISTE_BLANCHE=""; if [[ -f "$PROT" ]]; then . "$PROT"; fi; }
 f2b_jails() { # écrit les règles fail2ban du serveur à partir des réglages
   prot_load
   local ignore="127.0.0.1/8 ::1 ${LISTE_BLANCHE}"
