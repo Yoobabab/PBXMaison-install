@@ -943,7 +943,10 @@ function renderDialer(d, asPage = false) {
     $("#kbd").classList.toggle("on", on);
   });
   num.oninput = () => { sugg(); syncBk(); };
-  const go = () => { const v = num.value.trim(); if (!v) return; if (isDialable(v)) call(v); else { const c = contacts.find((x) => `${x.id} ${x.name}`.toLowerCase().includes(v.toLowerCase())); if (c) call(c.id); } };
+  const go = () => {
+    let v = num.value.trim();
+    // Rien de tapé : on rappelle le dernier numéro composé (comme sur un téléphone)
+    if (!v) { v = history().find((x) => x.direction === "out" && x.number)?.number || ""; if (!v) return; num.value = v; syncBk(); } if (isDialable(v)) call(v); else { const c = contacts.find((x) => `${x.id} ${x.name}`.toLowerCase().includes(v.toLowerCase())); if (c) call(c.id); } };
   num.onkeydown = (e) => { if (e.key === "Enter") go(); };
   $("#dial").onclick = go;
   $("#drclose")?.addEventListener("click", () => openDrawer(false));
@@ -1148,6 +1151,8 @@ function finish(status, cause) {
   if (callInfo) addHistory({ direction: callInfo.direction, number: callInfo.number, name: callInfo.name, status, at: new Date().toISOString(), duration: startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0 });
   const msg = status === "failed" && cause && !["Canceled", "Terminated"].includes(cause) ? ({ Busy: "Occupé", Rejected: "Refusé", Unavailable: "Indisponible", "Not Found": "Numéro inconnu", "User Denied Media Access": "Accès au micro refusé" }[cause] || cause) : "";
   const wasIncomingMissed = status === "missed";
+  // Fin d'appel : le numéro tapé dans le clavier est effacé
+  const dn = $("#num"); if (dn) { dn.value = ""; const bk = $("#bk"); if (bk && TOUCH) bk.hidden = true; $("#sugg") && ($("#sugg").innerHTML = ""); }
   session = null; callInfo = null; startedAt = 0; remoteVideo.clear(); remoteAudio = null;
   $("#drawer")?.classList.remove("wide");
   renderDrawer(); renderCallbar();
