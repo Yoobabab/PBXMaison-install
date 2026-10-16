@@ -345,6 +345,7 @@ api POST /api/backups/run '{}' >/dev/null
 for _ in $(seq 1 30); do sleep 2; api GET /api/backups | grep -q '"running":false' && break; done
 BK="$(api GET /api/backups)"
 FILE="$(echo "$BK" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(j.last&&j.last.ok?j.last.file:"")})')"
+[[ -n "$FILE" ]] && sudo cp "/var/lib/pbxmaison/backups/$FILE" "$PWD/standalone-bk.tar.gz" && sudo chown "$(id -u)" "$PWD/standalone-bk.tar.gz"
 [[ -n "$FILE" ]] && sudo tar -xzOf "/var/lib/pbxmaison/backups/$FILE" ./database.sql | grep "pbxmaison_settings" >/dev/null && pass "Sauvegarde : archive créée avec la base de données ($FILE)" || { echo "$BK" | grep -o '"last":{[^}]*}' >> "$OUT"; sudo ls -la /var/lib/pbxmaison/backups >> "$OUT" 2>&1; fail "sauvegarde"; }
 R="$(api GET /api/system)"
 echo "$R" | grep -q '"services":\[' && echo "$R" | grep -q '"cdr":{' && pass "Tableau de bord : état du système (services, sauvegarde, stockage, journal)" || fail "système : $(echo "$R" | cut -c1-200)"
@@ -384,4 +385,6 @@ sudo env PBXM_REF="${PBXM_REF:-main}" PBXM_NO_FIREWALL=1 timeout 900 bash ../../
 for _ in $(seq 1 15); do curl -sS http://127.0.0.1/api/state 2>/dev/null | grep -q '"configured"' && break; sleep 2; done
 ST="$(curl -sS http://127.0.0.1/api/state || true)"
 echo "$ST" | grep -q '"configured":false' && [[ -f /usr/share/asterisk/VERSION ]] && /usr/sbin/asterisk -V | grep -q Asterisk && pass "Réinstallation sur serveur propre : assistant prêt" || { echo "état : $ST" >> "$OUT"; tail -n 8 reinstall2.out >> "$OUT"; fail "réinstallation après reset"; }
+# 7. Migration : la sauvegarde du PBX seul devient un PBX client d'un serveur multi-tenant installé sur le même VPS
+bash ./import-standalone.sh "$PWD/standalone-bk.tar.gz"
 echo "OK" >> "$OUT"

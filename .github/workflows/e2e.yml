@@ -18,7 +18,7 @@ jobs:
   e2e:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - name: Retirer les services du runner qui gêneraient (Postgres/Nginx préinstallés absents, ports 80/5432 libres)
@@ -30,7 +30,7 @@ jobs:
           python3 -m pip install --quiet --break-system-packages playwright==1.47.0
           python3 -m playwright install --with-deps chromium >/dev/null
       - name: Installation + assistant + console
-        timeout-minutes: 30
+        timeout-minutes: 45
         env:
           PBXM_REF: ${{ github.sha }}
         run: bash tests/e2e/run.sh
