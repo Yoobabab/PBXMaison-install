@@ -668,3 +668,8 @@ tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
 .blfm{display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .blfm-list{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:4px}
 .blfm-list label[hidden]{display:none}
+
+/* Utilisateur : téléphones supplémentaires */
+.xph{display:grid;grid-template-columns:1fr 1.2fr 1fr auto;gap:10px;align-items:end;padding:10px 0;border-bottom:1px solid var(--line)}
+.xph .full{grid-column:1/-1}
+@media (max-width:760px){.xph{grid-template-columns:1fr}}

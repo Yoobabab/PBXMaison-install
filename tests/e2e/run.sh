@@ -132,6 +132,13 @@ echo "$CFG" | grep -q "^account.1.user_name = 201$" && echo "$CFG" | grep -q "^l
 echo "$CFG" | grep -q "^phone_setting.backgrounds = Config:callikoe-v3-800x480.png$" && [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/phone/callikoe-v3-800x480.png)" == 200 ]] \
   && pass "Provisioning : fond d'écran Callikoe (800x480) poussé et servi" || fail "fond d'écran"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1${PPATH}000000000000.cfg")" == 404 ]] && pass "Provisioning : MAC inconnue refusée (404)" || fail "MAC inconnue servie"
+# Deuxième téléphone sur le même utilisateur : même compte, son propre modèle (T46U, 480x272)
+R="$(api PUT /api/extensions/201 '{"phone":{"extra":[{"model":"yealink-t46u","mac":"44:DB:D2:00:00:02","label":"Atelier"}]}}')"
+CFG2="$(curl -sS "http://127.0.0.1${PPATH}44dbd2000002.cfg")"
+echo "$R" | grep -q '"mac":"44dbd2000002"' && echo "$CFG2" | grep -q "^account.1.user_name = 201$" && echo "$CFG2" | grep -q "callikoe-v3-480x272.png" \
+  && pass "Deuxième téléphone sur le poste 201 : provisionné avec le même compte et son propre modèle" || { echo "$R" | cut -c1-300 >> "$OUT"; echo "$CFG2" | head -5 >> "$OUT"; fail "deuxième téléphone"; }
+R="$(api PUT /api/extensions/202 '{"phone":{"extra":[{"model":"yealink-t46u","mac":"44:DB:D2:00:00:02"}]}}')"
+[[ "$R" == *"poste 201"* ]] && pass "Deuxième téléphone : adresse MAC déjà prise par un autre poste refusée" || fail "MAC en double acceptée : $R"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1/prov/mauvaisjeton/44dbd229fa7b.cfg")" == 404 ]] && pass "Provisioning : mauvais jeton refusé" || fail "jeton non vérifié"
 sleep 2
 sudo /usr/sbin/asterisk -rx 'core show hints' | grep -q "201@users-hints" && pass "BLF : supervision des postes (hints) active" || { sudo /usr/sbin/asterisk -rx 'core show hints' | head >> "$OUT"; fail "hints"; }

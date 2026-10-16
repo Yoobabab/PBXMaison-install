@@ -89,3 +89,13 @@ test("Surveillance : numéros vers l'étranger ou surtaxés", async () => {
   assert.equal(numberRisk("15"), null);
   assert.equal(deviceCategory("phone"), "phone"); assert.equal(deviceCategory("mobile"), "app"); assert.equal(deviceCategory("web"), "softphone");
 });
+
+test("Téléphones supplémentaires d'un utilisateur : modèle, MAC unique", () => {
+  const cur = { ...defaultPhone(), model: "yealink-t46u", mac: "44dbd229fa7b" };
+  const p = validatePhone({ extra: [{ model: "yealink-t54w", mac: "44:DB:D2:00:00:01", label: "Atelier" }] }, cur, ctx);
+  assert.deepEqual(p.extra, [{ model: "yealink-t54w", mac: "44dbd2000001", label: "Atelier" }]);
+  assert.throws(() => validatePhone({ extra: [{ model: "yealink-t54w", mac: "44dbd229fa7b" }] }, cur, ctx), /déjà utilisée par ce poste/);
+  assert.throws(() => validatePhone({ extra: [{ model: "yealink-t54w", mac: "805ec0000001" }] }, cur, ctx), /poste 205/);
+  assert.throws(() => validatePhone({ extra: [{ model: "", mac: "44dbd2000001" }] }, cur, ctx), /modèle/);
+  assert.equal(validatePhone({ extra: [] }, { ...cur, extra: [{ model: "yealink-t54w", mac: "44dbd2000001" }] }, ctx).extra.length, 0);
+});

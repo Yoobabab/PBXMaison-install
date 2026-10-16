@@ -385,6 +385,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       if (tr.rowCount) await reload("res_pjsip.so").catch(() => {});
       try { await publishRoutes(); } catch { /* l'aiguilleur sera mis à jour au prochain changement */ }
     }
+    // Plusieurs téléphones par utilisateur (+ softphone, appli) : jusqu'à 6 appareils connectés au même poste
+    await db.query(`UPDATE ps_aors a SET max_contacts = 6 FROM ps_endpoints e WHERE e.aors = a.id AND e.context = 'from-internal' AND e.id !~ '-web$' AND a.max_contacts < 6`);
     // Vidéo (appels vidéo, réunions) : VP8 / H.264, jusqu'à 16 flux vidéo pour les réunions
     await db.query(`UPDATE ps_endpoints SET allow = '${WEB_CODECS}', max_video_streams = 16 WHERE id LIKE '%-web' AND (allow IS DISTINCT FROM '${WEB_CODECS}' OR max_video_streams IS DISTINCT FROM 16)`);
     // Trunks : G.729 retiré (le moteur ne sait pas le convertir, l'appel serait muet côté softphone), A-law en premier
@@ -437,7 +439,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         ...defaultUser(num),
         outbound_cid: src.outbound_cid, status: src.status, forwarding: structuredClone(src.forwarding), options: { ...src.options, disabled: false, ring_mobile: src.options.ring_mobile && !!String(input.mobile || "").trim() },
         voicemail: { ...src.voicemail, pin: "" },
-        phone: { ...structuredClone(src.phone), mac: "", admin_password: "", last_provisioned: undefined,
+        phone: { ...structuredClone(src.phone), mac: "", admin_password: "", last_provisioned: undefined, extra: [],
           keys: src.phone.keys.filter((k) => !(k.type === "blf" && k.value === num)) },
       };
       for (const r of ["no_answer", "busy", "away", "dnd"]) if (base.forwarding[r]?.type === "extension" && base.forwarding[r].target === num) base.forwarding[r] = { type: "voicemail", target: "" };
@@ -448,7 +450,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const authId = genAuthId();
     await db.tx(async (c) => {
       await c.query("INSERT INTO ps_auths (id, auth_type, username, password) VALUES ($1, 'userpass', $2, $3)", [num, authId, password]);
-      await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency, support_path) VALUES ($1, 3, 'yes', 60, $2)",
+      await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency, support_path) VALUES ($1, 6, 'yes', 60, $2)",
         [num, CX_MODE === "tenant" ? "yes" : "no"]);
       // Multi-tenant : le poste arrive par l'aiguilleur (Path) ; son Contact ne doit pas être remplacé par l'adresse de l'aiguilleur
       await c.query(
@@ -482,7 +484,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const u = validateUser(input, current, await validationContext(num));
     if (input.phone) {
       const users = await loadUsers();
-      const macOwners = new Map(users.filter((x) => x.phone.mac).map((x) => [x.phone.mac, x.id]));
+      const macOwners = new Map(users.flatMap((x) => [x.phone.mac, ...(x.phone.extra || []).map((e) => e.mac)].filter(Boolean).map((m) => [m, x.id])));
       try {
         u.phone = validatePhone(input.phone, current.phone, { selfId: num, macOwners, extensions: new Map(users.map((x) => [x.id, displayName(x)])) });
       } catch (e) { throw new UserError(e.message, e.field); }
@@ -744,6 +746,19 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         provisioned: u.phone.last_provisioned || null,
         extra_contacts: Math.max(0, contacts.length - 1),
       });
+      // Téléphones supplémentaires : reconnus par l'adresse MAC annoncée par le téléphone (Yealink)
+      for (const ex of u.phone.extra || []) {
+        const ce = contacts.find((x) => x.device?.mac === ex.mac);
+        const dv = ce ? identifyDevice(ce.user_agent) : { label: models.get(ex.model) };
+        out.push({
+          user: { id: u.id, name: displayName(u) }, extra: true, label: ex.label || "",
+          online: !!ce, since: null, last_seen: null,
+          model: models.get(ex.model) || dv.label, mac: ex.mac, device: dv, user_agent: ce?.user_agent || "", firmware: dv.firmware || "",
+          source_ip: ce?.source_ip || "", local_ip: ce?.local_ip || "",
+          connection: ce?.source_ip ? connectionType(ce.source_ip, ce.local_ip, []) : null,
+          provisioned: ex.last_provisioned || null, extra_contacts: 0,
+        });
+      }
     }
     return out;
   }
@@ -764,8 +779,11 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     ring_types: RING_TYPES, ringers: RINGERS,
   });
 
-  async function phoneConfig(num, server) {
-    const u = await getUser(num);
+  async function phoneConfig(num, server, extraMac = null) {
+    const u0 = await getUser(num);
+    // Téléphone supplémentaire : même poste, avec son propre modèle et sa propre adresse MAC
+    const ex = extraMac ? (u0.phone.extra || []).find((e) => e.mac === extraMac) : null;
+    const u = ex ? { ...u0, phone: { ...u0.phone, model: ex.model, mac: ex.mac, modules: [] } } : u0;
     if (!u.phone.model) throw new UserError("Choisis d'abord le modèle du téléphone.", "phone.model");
     const secret = await extensionSecret(num);
     const users = await loadUsers();
@@ -819,13 +837,15 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const req = provRequest(file);
     if (!req) return null;
     const stamp = JSON.stringify({ at: new Date().toISOString(), ip: from.ip, user_agent: String(from.user_agent || "").slice(0, 120) });
-    const r = await db.query("SELECT id FROM pbxmaison_extensions WHERE phone->>'mac' = $1", [req.mac]);
+    // Téléphone principal ou téléphone supplémentaire de l'utilisateur (même compte, même réglages et touches)
+    const r = await db.query(`SELECT id, phone->>'mac' = $1 AS main FROM pbxmaison_extensions WHERE phone->>'mac' = $1 OR phone->'extra' @> jsonb_build_array(jsonb_build_object('mac', $1::text))`, [req.mac]);
     if (r.rowCount) {
-      const id = r.rows[0].id;
-      const { text, format } = await phoneConfig(id, server);
+      const id = r.rows[0].id, main = r.rows[0].main;
+      const { text, format } = await phoneConfig(id, server, main ? null : req.mac);
       const want = { cfg: ["yealink", "fanvil"], gs: ["grandstream"], snom: ["snom"] }[req.kind];
       if (!want.includes(format)) return null;
-      await db.query(`UPDATE pbxmaison_extensions SET phone = jsonb_set(phone, '{last_provisioned}', $2::jsonb) WHERE id = $1`, [id, stamp]);
+      if (main) await db.query(`UPDATE pbxmaison_extensions SET phone = jsonb_set(phone, '{last_provisioned}', $2::jsonb) WHERE id = $1`, [id, stamp]);
+      else await db.query(`UPDATE pbxmaison_extensions SET phone = jsonb_set(phone, '{extra}', (SELECT jsonb_agg(CASE WHEN e->>'mac' = $3 THEN e || jsonb_build_object('last_provisioned', $2::jsonb) ELSE e END) FROM jsonb_array_elements(phone->'extra') e)) WHERE id = $1`, [id, stamp, req.mac]);
       return { text, id, type: format === "snom" || format === "grandstream" ? "application/xml" : undefined };
     }
     const gws = await loadGateways();

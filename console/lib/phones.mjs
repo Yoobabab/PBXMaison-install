@@ -82,6 +82,7 @@ export function defaultPhone(tz = "Europe/Paris") {
     },
     keys: [{ type: "line", value: "", label: "" }],
     modules: [], // modules d'extension : [{ keys: [...] }], 3 au plus
+    extra: [],   // téléphones supplémentaires du même utilisateur : [{ model, mac, label, last_provisioned? }], mêmes réglages et touches
   };
 }
 
@@ -93,6 +94,7 @@ export function phoneFromStored(stored, tz) {
     settings: { ...d.settings, ...p.settings },
     keys: Array.isArray(p.keys) && p.keys.length ? p.keys : d.keys,
     modules: Array.isArray(p.modules) ? p.modules : [],
+    extra: Array.isArray(p.extra) ? p.extra : [],
   };
 }
 
@@ -180,7 +182,24 @@ export function validatePhone(input, current, ctx) {
       return { keys: out };
     });
   }
-  if (p.mac && !p.admin_password) p.admin_password = randomPassword(12);
+  if (input.extra !== undefined) {
+    const list = Array.isArray(input.extra) ? input.extra : Object.values(input.extra || {});
+    if (list.length > 5) throw new PhoneError("5 téléphones supplémentaires au maximum par utilisateur.", "phone.extra");
+    const seen = new Set(p.mac ? [p.mac] : []);
+    p.extra = list.map((x, i) => {
+      const f = `phone.extra.${i}`;
+      if (!x?.model || !modelById(x.model)) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : choisis le modèle.`, `${f}.model`);
+      const mac = normalizeMac(x.mac);
+      if (!mac) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : adresse MAC invalide (12 caractères hexadécimaux).`, `${f}.mac`);
+      if (seen.has(mac)) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : cette adresse MAC est déjà utilisée par ce poste.`, `${f}.mac`);
+      const owner = ctx.macOwners?.get(mac);
+      if (owner && owner !== ctx.selfId) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : cette adresse MAC est déjà attribuée au poste ${owner}.`, `${f}.mac`);
+      seen.add(mac);
+      const old = (current.extra || []).find((e) => e.mac === mac);
+      return { model: x.model, mac, label: String(x.label || "").trim().slice(0, 40), ...(old?.last_provisioned ? { last_provisioned: old.last_provisioned } : {}) };
+    });
+  }
+  if ((p.mac || p.extra?.length) && !p.admin_password) p.admin_password = randomPassword(12);
   return p;
 }
 

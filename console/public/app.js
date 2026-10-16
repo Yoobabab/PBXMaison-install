@@ -973,7 +973,7 @@ function deepMerge(a, b) {
   return out;
 }
 const draftGet = (path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), userDraft?.data);
-const draftDirty = () => !!userDraft && (Object.keys(userDraft.data).length > 0 || !!userDraft.keys);
+const draftDirty = () => !!userDraft && (Object.keys(userDraft.data).length > 0 || !!userDraft.keys || !!userDraft.extra);
 window.addEventListener("beforeunload", (e) => { if (draftDirty()) { e.preventDefault(); e.returnValue = ""; } });
 // Onglet où se trouve un champ (pour y afficher une erreur renvoyée à l'enregistrement)
 function tabOfField(f = "") {
@@ -1063,6 +1063,8 @@ async function renderUser(id, tab = "general") {
             <span class="secret"><input type="password" readonly value="${esc(ph.admin_password)}" id="adminpw"></span> <button class="copy" type="button" data-copy="${esc(ph.admin_password)}">Copier</button>
             <button type="button" class="btn link" id="adminreset">Réinitialiser</button>
             <div class="hint">Appliqué au prochain provisioning.</div></div></div>` : ""}
+        <h3 class="full sec">Téléphones supplémentaires <span class="hint" style="font-weight:400">(même poste ${esc(u.id)} : ils sonnent ensemble, mêmes réglages et touches)</span></h3>
+        <div class="full" id="extraph"></div>
         <h3 class="full sec">Réglages du téléphone</h3>
         <label>Langue<select name="phone.settings.language">${optList(o.languages, st.language)}</select></label>
         <label>Fuseau horaire<select name="phone.settings.timezone">${optList(o.timezones, st.timezone)}</select></label>
@@ -1151,6 +1153,7 @@ async function renderUser(id, tab = "general") {
     const data = structuredClone(userDraft.data);
     if (typeof data.dids === "string") data.dids = data.dids.split("\n");
     if (userDraft.keys) data.phone = { ...(data.phone || {}), keys: userDraft.keys, modules: userDraft.mods.map((k) => ({ keys: k })) };
+    if (userDraft.extra) data.phone = { ...(data.phone || {}), extra: userDraft.extra };
     if (!Object.keys(data).length) { flash = { text: "Rien à enregistrer." }; return renderUser(u.id, tab); }
     try {
       const r = await api("PUT", `/api/extensions/${u.id}`, data);
@@ -1194,6 +1197,30 @@ async function renderUser(id, tab = "general") {
     }).catch(() => {});
   }
   if (tab === "telephone") {
+    // Téléphones supplémentaires (gardés dans le brouillon de la fiche, enregistrés avec le bouton du haut)
+    const extraBox = $("#extraph");
+    let extra = (userDraft.extra || u.phone.extra || []).map((x) => ({ ...x }));
+    const keepExtra = () => {
+      const strip = (l) => JSON.stringify(l.map(({ model, mac, label }) => ({ model: model || "", mac: (mac || "").toLowerCase().replace(/[^0-9a-f]/g, ""), label: label || "" })));
+      if (strip(extra) === strip(u.phone.extra || [])) delete userDraft.extra; else userDraft.extra = extra.map(({ model, mac, label }) => ({ model, mac, label }));
+      const on = draftDirty(); $("#udirty").hidden = !on; $("#ucancel").hidden = !on;
+    };
+    const drawExtra = () => {
+      extraBox.innerHTML = `${extra.map((x, i) => `<div class="xph" data-i="${i}">
+          <label>Nom (facultatif)<input data-f="label" value="${esc(x.label || "")}" maxlength="40" placeholder="Atelier, bureau du haut…"></label>
+          <label>Modèle<select data-f="model"><option value="">— Choisir —</option>${phoneOpts.models.filter((m) => m.screen || m.keys >= 0).map((m) => `<option value="${m.id}" ${x.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
+          <label>Adresse MAC<input data-f="mac" value="${esc(fmtMac((x.mac || "").replace(/[^0-9a-f]/gi, "")))}" placeholder="44:DB:D2:29:FA:7C" autocomplete="off"></label>
+          <button type="button" class="btn ghost sm" data-rm title="Retirer ce téléphone">Retirer</button>
+          <span class="hint full">${x.last_provisioned ? `Dernier provisioning : ${esc(fmtDateTime(x.last_provisioned.at))} depuis ${esc(x.last_provisioned.ip)}` : "Pas encore provisionné : même lien de provisioning que le téléphone principal."}</span></div>`).join("")}
+        <button type="button" class="btn ghost sm" id="addph" ${extra.length >= 5 ? "disabled" : ""}>+ Ajouter un téléphone</button>`;
+      extraBox.querySelectorAll(".xph").forEach((row) => {
+        const i = Number(row.dataset.i);
+        row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => { extra[i][el.dataset.f] = el.value; keepExtra(); }));
+        row.querySelector("[data-rm]").onclick = () => { extra.splice(i, 1); keepExtra(); drawExtra(); };
+      });
+      $("#addph").onclick = () => { extra.push({ model: u.phone.model || "", mac: "", label: "" }); keepExtra(); drawExtra(); extraBox.querySelector(".xph:last-of-type [data-f=mac]")?.focus(); };
+    };
+    drawExtra();
     app.querySelectorAll("[data-notify]").forEach((b) => b.onclick = async () => {
       if (b.dataset.notify === "reboot" && !confirm("Redémarrer le téléphone ? Un appel en cours serait coupé.")) return;
       try { await api("POST", `/api/extensions/${u.id}/phone/notify`, { action: b.dataset.notify }); b.textContent = "Envoyé ✓"; }
