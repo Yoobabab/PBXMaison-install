@@ -453,11 +453,11 @@ async function renderDashboard() {
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>${esc(d.pbx.name)}</h1>
     <p class="sub" style="margin:0">${esc(d.pbx.company)} · <span class="mono">${esc(d.pbx.fqdn)}</span></p></div></div>
     <div class="cards dash-cards">
-      <a class="card tone-${d.trunks.total === 0 ? "grey" : d.trunks.registered === d.trunks.total ? "green" : "red"}" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
+      <a class="card" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
         <div class="s">${d.trunks.total === 0 ? "Aucun trunk : ajoute ton opérateur" : d.trunks.registered === d.trunks.total ? "Tous opérationnels" : "Au moins un trunk en défaut"}</div></a>
-      <a class="card tone-blue" href="#/utilisateurs"><div class="k">Postes connectés</div><div class="v">${d.extensions.registered}<small> / ${d.extensions.total}</small></div>
+      <a class="card" href="#/utilisateurs"><div class="k">Postes connectés</div><div class="v">${d.extensions.registered}<small> / ${d.extensions.total}</small></div>
         <div class="s">${d.extensions.total === 0 ? "Aucun poste créé" : "téléphones enregistrés"}</div></a>
-      <a class="card tone-violet" href="#/appels"><div class="k">Appels en cours</div><div class="v">${d.calls.available ? d.calls.active : "—"}<small> / ${d.pbx.max_calls}</small></div>
+      <a class="card" href="#/appels"><div class="k">Appels en cours</div><div class="v">${d.calls.available ? d.calls.active : "—"}<small> / ${d.pbx.max_calls}</small></div>
         <div class="s">${d.calls.available ? "limite de la licence" : "moteur injoignable"}</div></a>
       <a class="card tone-brand" href="#/systeme"><div class="k">Licence</div><div class="v">Callikoe ${esc(({ basic: "Basic", start: "Start", pro: "Pro", enterprise: "Entreprise" })[d.pbx.edition] || d.pbx.edition)}</div>
         <div class="s">valable jusqu'au ${fmtDate(d.pbx.expires_at)}${left < 30 ? ` · <strong>${left} jours restants</strong>` : ""}</div></a>
@@ -1573,6 +1573,10 @@ async function renderCdr() {
   const sel = (name, opts) => `<select data-f="${name}">${opts.map(([v, l]) => `<option value="${v}" ${f[name] === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   app.innerHTML = `<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX : qui a appelé, qui a répondu, combien de temps.</p></div>
     <a class="btn ghost" href="/api/cdr.csv?${qs}">Exporter (CSV, Excel)</a></div>
+    <div class="kpis">${[["Appels sur la période", d.total, ({ 1: "aujourd'hui et hier", 7: "7 derniers jours", 30: "30 jours", 90: "90 jours", 366: "1 an" })[f.days] || ""],
+      ["Répondus", d.calls.filter((c) => c.status === "answered").length, ""], ["Manqués", d.calls.filter((c) => c.status === "missed").length, "à rappeler"],
+      ["Entrants / sortants", `${d.calls.filter((c) => c.direction === "in").length}<small> / ${d.calls.filter((c) => c.direction === "out").length}</small>`, ""]]
+      .map(([k, v, s2]) => `<div class="kpi"><div><div class="k">${k}</div><div class="v">${v}</div>${s2 ? `<div class="s">${s2}</div>` : ""}</div></div>`).join("")}</div>
     ${live.calls?.length ? `<div class="panel" style="margin-bottom:18px"><div class="ph"><h2>En cours (${live.calls.length})</h2><a href="#/appels" class="s">Suivre en direct</a></div>${callsTable(live)}</div>` : ""}
     <div class="panel"><div class="filters">
       <input type="search" data-f="q" placeholder="Numéro, nom, SDA, poste…" value="${esc(f.q)}">
@@ -1633,6 +1637,8 @@ async function renderContacts(editId) {
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Annuaire</h1><p class="sub" style="margin:0">Contacts de l'entreprise : visibles dans le softphone et sur les téléphones Yealink, et nom affiché quand ils appellent.</p></div>
     <a class="btn ghost" href="/api/contacts.csv">Exporter</a><button class="btn ghost" id="imp">Importer un CSV</button><a class="btn" href="#/annuaire/nouveau">+ Ajouter un contact</a></div>
     <input type="file" id="impf" accept=".csv,text/csv" hidden>
+    <div class="kpis">${[["Contacts", all.length, "dans l'annuaire"], ["Sociétés", new Set(all.map((x) => x.company).filter(Boolean)).size, ""], ["Numéros", all.reduce((n, x) => n + x.phones.length, 0, ), "nom affiché quand ils appellent"]]
+      .map(([k, v, s2]) => `<div class="kpi"><div><div class="k">${k}</div><div class="v">${v}</div>${s2 ? `<div class="s">${s2}</div>` : ""}</div></div>`).join("")}</div>
     <div id="impbox"></div>
     ${editing ? `<div class="panel" style="margin-bottom:18px"><div class="ph"><h2>${cur ? "Modifier le contact" : "Nouveau contact"}</h2></div>
       <form id="cf" class="grid" novalidate>

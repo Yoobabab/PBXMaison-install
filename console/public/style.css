@@ -812,15 +812,19 @@ tr.capcalls td{background:var(--bg);padding-top:8px;padding-bottom:10px}
 .sys-lic-side .kpis{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
 .sys-lic .cx-lic-card{min-height:170px}
 
-/* Tableau de bord : cartes en couleur (comme la carte de licence) */
-.dash-cards .card{border:0;color:#fff;position:relative;overflow:hidden;box-shadow:0 8px 22px rgba(20,20,40,.12);transition:transform .12s ease,box-shadow .12s ease}
-.dash-cards a.card:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(20,20,40,.18)}
-.dash-cards .card .k,.dash-cards .card .s,.dash-cards .card .v small{color:rgba(255,255,255,.85)}
-.dash-cards .card .v{color:#fff}
-.dash-cards .card::after{content:"";position:absolute;right:-30px;top:-30px;width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,.12)}
-.tone-green{background:linear-gradient(120deg,#16a34a,#0d9488)}
-.tone-red{background:linear-gradient(120deg,#f26b4f,#d8141c)}
-.tone-grey{background:linear-gradient(120deg,#64748b,#475569)}
-.tone-blue{background:linear-gradient(120deg,#3b82f6,#4f46e5)}
-.tone-violet{background:linear-gradient(120deg,#8b5cf6,#c026d3)}
-.tone-brand{background:var(--grad)}
+/* Tableau de bord : la carte Licence en rouge (comme la carte de licence) */
+.dash-cards .card.tone-brand{border:0;color:#fff;position:relative;overflow:hidden;background:var(--grad);box-shadow:0 8px 22px rgba(216,20,28,.22);transition:transform .12s ease}
+.dash-cards a.card.tone-brand:hover{transform:translateY(-2px)}
+.dash-cards .card.tone-brand .k,.dash-cards .card.tone-brand .s{color:rgba(255,255,255,.88)}
+.dash-cards .card.tone-brand .v{color:#fff}
+.dash-cards .card.tone-brand::after{content:"";position:absolute;right:-30px;top:-30px;width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,.12)}
+
+/* Rappel du rouge Callikoe sur toutes les pages */
+main h1::after,#app h1::after{content:"";display:block;width:44px;height:4px;border-radius:4px;background:var(--grad);margin-top:8px}
+.kpis>.kpi:first-child{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 8px 22px rgba(216,20,28,.22)}
+.kpis>.kpi:first-child .k,.kpis>.kpi:first-child .s,.kpis>.kpi:first-child .v small{color:rgba(255,255,255,.88)}
+.kpis>.kpi:first-child .v{color:#fff}
+.kpis>.kpi:first-child .kpi-ic{background:rgba(255,255,255,.2);color:#fff}
+.kpis>.kpi:first-child .cx-bar{background:rgba(255,255,255,.3)}.kpis>.kpi:first-child .cx-bar i{background:#fff}
+.kpi-ic{background:var(--accent-soft);color:var(--accent)}
+.ph h2::before{content:"";display:inline-block;width:4px;height:14px;border-radius:2px;background:var(--grad);margin-right:9px;vertical-align:-1px}
