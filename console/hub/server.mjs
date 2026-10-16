@@ -16,6 +16,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
   newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "../lib/auth.mjs";
 import { signTicket, emailKey, HUB_USERS, TENANTS } from "../lib/sso.mjs";
 import { canonicalJson, verifySignature } from "../../pbx/lib/verify-config.mjs";
+import { encodeToken } from "../../pbx/lib/license-token.mjs";
 
 const ETC = process.env.HUB_ETC || "/etc/callikoe/hub";
 const VAR = process.env.HUB_VAR || "/var/lib/callikoe/hub";
@@ -249,6 +250,7 @@ export async function buildApp({ db } = {}) {
   });
   app.post("/api/pbx/:slug/reactiver", { preHandler: requireRole("super", "admin") }, async (req) => {
     if (!SLUG_RE.test(req.params.slug)) throw new UserError("PBX inconnu.", null, 404);
+    if (await licenseRevoked(req.params.slug)) throw new UserError("La licence de ce PBX a été supprimée : attribue-lui d'abord une licence disponible (menu Licences), puis réactive-le.");
     etatCache.at = 0;
     return runHost(["reactiver", req.params.slug], `Réactivation du PBX ${req.params.slug}`, req);
   });
@@ -359,6 +361,135 @@ export async function buildApp({ db } = {}) {
     return signingInfo();
   });
 
+  // ---------------------------------------------------------------- Licences : liste, création, renouvellement, attribution, suppression
+  // Une licence = numéro + édition + appels simultanés + expiration. Attribuée à un PBX (slug) ou disponible.
+  // Supprimer une licence attribuée la révoque : le PBX est désactivé et ne peut plus être réactivé sans une autre licence.
+  await db.query(`CREATE TABLE IF NOT EXISTS hub_licenses (key text PRIMARY KEY, edition text NOT NULL, simultaneous_calls int NOT NULL,
+    expires_at timestamptz NOT NULL, slug text, pbx_id text, note text NOT NULL DEFAULT '', origin text NOT NULL DEFAULT 'hub',
+    created_at timestamptz NOT NULL DEFAULT now(), created_by text, renewed_at timestamptz, assigned_at timestamptz, revoked_at timestamptz, revoked_by text)`);
+  const LIC_RE = /^PBXM(-[A-Z0-9]{4}){4}$/;
+  const regTenants = () => readJson(TENANTS, {}).tenants || [];
+  // Rapproche la table des PBX réels : licences des PBX existants reprises, licences des PBX supprimés rendues disponibles
+  async function syncLicenses() {
+    const d = await etat();
+    const reg = regTenants(), slugs = new Set(reg.map((t) => t.slug));
+    for (const p of d?.pbx || []) {
+      if (!LIC_RE.test(p.license || "") || !p.expires_at || isNaN(Date.parse(p.expires_at))) continue;
+      const t = reg.find((x) => x.slug === p.slug) || {};
+      const cur = (await db.query("SELECT key, revoked_at FROM hub_licenses WHERE key = $1", [p.license])).rows[0];
+      if (!cur) await db.query(`INSERT INTO hub_licenses (key, edition, simultaneous_calls, expires_at, slug, pbx_id, origin, assigned_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'pbx', now())`, [p.license, p.edition || "pro", Number(p.max_calls) || 1, p.expires_at, p.slug, t.pbx_id || null]);
+      else if (!cur.revoked_at) await db.query(`UPDATE hub_licenses SET edition = $2, simultaneous_calls = $3, expires_at = $4, slug = $5, pbx_id = COALESCE($6, pbx_id)
+        WHERE key = $1`, [p.license, p.edition || "pro", Number(p.max_calls) || 1, p.expires_at, p.slug, t.pbx_id || null]);
+      // Le PBX utilise une autre licence (clé collée à la main) : l'ancienne redevient disponible
+      await db.query(`UPDATE hub_licenses SET slug = NULL, pbx_id = NULL, assigned_at = NULL WHERE slug = $1 AND key <> $2 AND revoked_at IS NULL
+        AND assigned_at < now() - interval '2 minutes'`, [p.slug, p.license]);
+    }
+    if (d) for (const r of (await db.query("SELECT key, slug FROM hub_licenses WHERE slug IS NOT NULL AND (assigned_at IS NULL OR assigned_at < now() - interval '15 minutes')")).rows)
+      if (!slugs.has(r.slug)) await db.query("UPDATE hub_licenses SET slug = NULL, pbx_id = NULL, assigned_at = NULL WHERE key = $1", [r.key]);
+  }
+  const licStatus = (l, now = Date.now()) => l.revoked_at ? "revoquee" : Date.parse(l.expires_at) <= now ? "expiree"
+    : Date.parse(l.expires_at) - now < 30 * 86400000 ? "bientot" : "valide";
+  const licRow = (l) => ({ key: l.key, edition: l.edition, simultaneous_calls: l.simultaneous_calls, expires_at: new Date(l.expires_at).toISOString(),
+    slug: l.slug, note: l.note, origin: l.origin, created_at: l.created_at, created_by: l.created_by, renewed_at: l.renewed_at, revoked_at: l.revoked_at,
+    status: licStatus(l), available: !l.slug && !l.revoked_at && Date.parse(l.expires_at) > Date.now() });
+  const getLic = async (key) => {
+    if (!LIC_RE.test(String(key || ""))) throw new UserError("Licence inconnue.", null, 404);
+    const l = (await db.query("SELECT * FROM hub_licenses WHERE key = $1", [key])).rows[0];
+    if (!l) throw new UserError("Licence inconnue.", null, 404);
+    return l;
+  };
+  const needSign = () => { if (!signKey) throw new UserError("Installe d'abord la clé de signature des licences (Super administrateur › Clé de signature)."); };
+  const licFields = (b, cur = null) => {
+    const edition = String(b.edition ?? cur?.edition ?? "");
+    if (!EDITIONS[edition]) throw new UserError("Édition invalide.", "edition");
+    const sc = Number(b.simultaneous_calls ?? cur?.simultaneous_calls);
+    if (!SC.includes(sc)) throw new UserError("Nombre d'appels simultanés invalide.", "simultaneous_calls");
+    const months = Number(b.duration_months ?? 0);
+    if (!(cur && months === 0) && !DURATIONS[months]) throw new UserError("Durée invalide.", "duration_months");
+    // Renouvellement : la durée s'ajoute à la date d'expiration (ou à aujourd'hui si elle est déjà passée)
+    const base = new Date(Math.max(Date.now(), cur ? Date.parse(cur.expires_at) : 0));
+    const expires = new Date(base); expires.setUTCMonth(expires.getUTCMonth() + months);
+    const note = String(b.note ?? cur?.note ?? "").trim().slice(0, 120);
+    return { edition, sc, months, expires, note };
+  };
+  // Envoie la licence au PBX (clé signée appliquée sans coupure) et met à jour sa copie de configuration signée
+  async function pushLicense(slug, pbxId, lic) {
+    const tok = encodeToken(sign({ pbx_id: pbxId, key: lic.key, edition: lic.edition, simultaneous_calls: lic.simultaneous_calls,
+      expires_at: new Date(lic.expires_at).toISOString(), issued_at: new Date().toISOString() }));
+    const r = await hostJson(["licence", slug, tok]);
+    if (!r.ok || !r.data?.ok) throw new UserError(`Le PBX ${slug} n'a pas accepté la licence : ${r.data?.error || r.error || "erreur inconnue"}`);
+    const f = path.join(VAR, "configs", `${slug}.json`), cfg = readJson(f, null);
+    if (cfg?.license) {
+      cfg.license = { ...cfg.license, key: lic.key, edition: lic.edition, simultaneous_calls: lic.simultaneous_calls, expires_at: new Date(lic.expires_at).toISOString() };
+      fs.writeFileSync(`${f}.new`, JSON.stringify(sign(cfg), null, 2), { mode: 0o600 }); fs.renameSync(`${f}.new`, f);
+    }
+    etatCache.at = 0;
+  }
+  const pbxIdOf = (slug) => regTenants().find((t) => t.slug === slug)?.pbx_id || "";
+
+  app.get("/api/licenses", { preHandler: requireUser }, async () => {
+    await syncLicenses().catch(() => {});
+    const rows = (await db.query("SELECT * FROM hub_licenses ORDER BY created_at DESC")).rows.map(licRow);
+    const d = await etat();
+    const pbx = (d?.pbx || regTenants()).map((p) => ({ slug: p.slug, name: p.name, fqdn: p.fqdn, company: p.company || "", suspended: !!p.suspended }));
+    return { licenses: rows, pbx, editions: EDITIONS, sc: SC, durations: DURATIONS, signing: signingInfo() };
+  });
+  app.post("/api/licenses", { preHandler: requireRole("super", "admin") }, async (req) => {
+    needSign();
+    const f = licFields(req.body || {});
+    const key = licenseKey();
+    await db.query("INSERT INTO hub_licenses (key, edition, simultaneous_calls, expires_at, note, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
+      [key, f.edition, f.sc, f.expires, f.note, req.email]);
+    await audit(req, `Licence créée : ${key} (${EDITIONS[f.edition]}, ${f.sc} appels, ${DURATIONS[f.months]})`, true, f.note || "disponible");
+    return licRow((await db.query("SELECT * FROM hub_licenses WHERE key = $1", [key])).rows[0]);
+  });
+  app.post("/api/licenses/:key/renew", { preHandler: requireRole("super", "admin") }, async (req) => {
+    needSign();
+    const l = await getLic(req.params.key);
+    if (l.revoked_at) throw new UserError("Licence supprimée : crée une nouvelle licence.");
+    const f = licFields(req.body || {}, l);
+    const next = { key: l.key, edition: f.edition, simultaneous_calls: f.sc, expires_at: f.expires };
+    if (l.slug && pbxIdOf(l.slug)) await pushLicense(l.slug, pbxIdOf(l.slug), next);
+    await db.query("UPDATE hub_licenses SET edition = $2, simultaneous_calls = $3, expires_at = $4, note = $5, renewed_at = now() WHERE key = $1",
+      [l.key, f.edition, f.sc, f.expires, f.note]);
+    await audit(req, `Licence renouvelée : ${l.key} (${EDITIONS[f.edition]}, ${f.sc} appels, jusqu'au ${f.expires.toISOString().slice(0, 10)})`, true, l.slug ? `appliquée au PBX ${l.slug}` : "disponible");
+    return licRow((await db.query("SELECT * FROM hub_licenses WHERE key = $1", [l.key])).rows[0]);
+  });
+  // Attribuer une licence disponible à un PBX existant (remplace sa licence actuelle, qui redevient disponible)
+  app.post("/api/licenses/:key/assign", { preHandler: requireRole("super", "admin") }, async (req) => {
+    needSign();
+    const l = await getLic(req.params.key);
+    if (!licRow(l).available) throw new UserError("Cette licence n'est pas disponible (déjà attribuée, expirée ou supprimée).");
+    const slug = String(req.body?.slug || "");
+    const id = SLUG_RE.test(slug) ? pbxIdOf(slug) : "";
+    if (!id) throw new UserError("PBX inconnu.", "slug");
+    await pushLicense(slug, id, l);
+    await db.query("UPDATE hub_licenses SET slug = NULL, pbx_id = NULL, assigned_at = NULL WHERE slug = $1 AND key <> $2", [slug, l.key]);
+    await db.query("UPDATE hub_licenses SET slug = $2, pbx_id = $3, assigned_at = now() WHERE key = $1", [l.key, slug, id]);
+    await audit(req, `Licence ${l.key} attribuée au PBX ${slug}`, true, `${EDITIONS[l.edition] || l.edition}, ${l.simultaneous_calls} appels`);
+    return licRow((await db.query("SELECT * FROM hub_licenses WHERE key = $1", [l.key])).rows[0]);
+  });
+  app.delete("/api/licenses/:key", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const l = await getLic(req.params.key);
+    if (String(req.body?.confirm || "").trim().toUpperCase() !== l.key.slice(-4)) throw new UserError(`Tape les 4 derniers caractères de la licence (${l.key.slice(-4)}) pour confirmer.`, "confirm");
+    await checkCode(req);
+    const live = l.slug && regTenants().some((t) => t.slug === l.slug);
+    if (!live) {
+      await db.query("DELETE FROM hub_licenses WHERE key = $1", [l.key]);
+      await audit(req, `Licence supprimée : ${l.key}`, true, "aucun PBX associé");
+      return { ok: true, deleted: true };
+    }
+    await db.query("UPDATE hub_licenses SET revoked_at = now(), revoked_by = $2 WHERE key = $1", [l.key, req.email]);
+    await audit(req, `Licence supprimée : ${l.key}`, true, `PBX ${l.slug} désactivé`);
+    etatCache.at = 0;
+    return runHost(["suspendre", l.slug], `Licence ${l.key} supprimée : désactivation du PBX ${l.slug}`, req);
+  });
+  const licenseRevoked = async (slug) => {
+    const r = (await db.query("SELECT count(*) FILTER (WHERE revoked_at IS NULL) AS ok, count(*) AS n FROM hub_licenses WHERE slug = $1", [slug])).rows[0];
+    return Number(r.n) > 0 && Number(r.ok) === 0;
+  };
+
   // ---------------------------------------------------------------- Création d'un PBX (licence signée ici)
   app.get("/api/pbx/options", { preHandler: requireUser }, async () => ({ editions: EDITIONS, sc: SC, countries: COUNTRIES, timezones: TIMEZONES,
     languages: LANGUAGES, durations: DURATIONS, domains: MANAGED, signing: signingInfo() }));
@@ -390,9 +521,19 @@ export async function buildApp({ db } = {}) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new UserError("Adresse e-mail invalide.", "admin_email");
     if (!TIMEZONES.includes(v("timezone"))) throw new UserError("Fuseau horaire non pris en charge.", "timezone");
     if (!LANGUAGES[v("language")]) throw new UserError("Langue non prise en charge.", "language");
-    if (!EDITIONS[v("edition")]) throw new UserError("Édition invalide.", "edition");
-    const sc = Number(v("simultaneous_calls")); if (!SC.includes(sc)) throw new UserError("Nombre d'appels simultanés invalide.", "simultaneous_calls");
-    const months = Number(v("duration_months")); if (!DURATIONS[months]) throw new UserError("Durée invalide.", "duration_months");
+    // Licence : nouvelle (créée ici) ou licence disponible déjà créée (menu Licences)
+    let lic = null;
+    if (v("license_mode") === "existing") {
+      const l = await getLic(v("license_key")).catch(() => { throw new UserError("Choisis une licence disponible.", "license_key"); });
+      if (!licRow(l).available) throw new UserError("Cette licence n'est plus disponible (attribuée, expirée ou supprimée).", "license_key");
+      lic = { key: l.key, edition: l.edition, simultaneous_calls: l.simultaneous_calls, expires_at: new Date(l.expires_at).toISOString(), existing: true };
+    } else {
+      if (!EDITIONS[v("edition")]) throw new UserError("Édition invalide.", "edition");
+      const sc = Number(v("simultaneous_calls")); if (!SC.includes(sc)) throw new UserError("Nombre d'appels simultanés invalide.", "simultaneous_calls");
+      const months = Number(v("duration_months")); if (!DURATIONS[months]) throw new UserError("Durée invalide.", "duration_months");
+      const exp = new Date(); exp.setUTCMonth(exp.getUTCMonth() + months);
+      lic = { key: licenseKey(), edition: v("edition"), simultaneous_calls: sc, expires_at: exp.toISOString(), months };
+    }
     const id = crypto.randomUUID(), now = new Date();
     if (isManaged(fqdn)) {
       const resv = sign({ action: "reserve", fqdn, pbx_id: id, ts: now.toISOString() });
@@ -401,18 +542,29 @@ export async function buildApp({ db } = {}) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new UserError(d.error || "Adresse refusée par le service d'adresses.", "label");
     }
-    const expires = new Date(now); expires.setUTCMonth(expires.getUTCMonth() + months);
     const cfg = sign({ version: 1,
       pbx: { id, name: v("name"), company: v("company"), fqdn, phone, country: country.code, country_code: country.dial, timezone: v("timezone"), language: v("language") },
       admin: { email, password: "set_on_first_login" },
-      license: { key: licenseKey(), edition: v("edition"), simultaneous_calls: sc, expires_at: expires.toISOString() },
+      license: { key: lic.key, edition: lic.edition, simultaneous_calls: lic.simultaneous_calls, expires_at: lic.expires_at },
       issued_at: now.toISOString() });
     // Copie du fichier de configuration signé (réinstallation, portail) : téléchargeable depuis la console du serveur
     fs.mkdirSync(path.join(VAR, "configs"), { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(VAR, "configs", `${slug}.json`), JSON.stringify(cfg, null, 2), { mode: 0o600 });
     etatCache.at = 0;
-    await audit(req, `Licence créée : ${cfg.license.key} (${EDITIONS[cfg.license.edition]}, ${sc} appels, ${DURATIONS[months]})`, true, `${slug} · ${fqdn}`);
-    return runHost(["creer", slug, Buffer.from(JSON.stringify(cfg)).toString("base64")], `Création du PBX ${slug} (${fqdn})`, req);
+    if (lic.existing) {
+      await db.query("UPDATE hub_licenses SET slug = $2, pbx_id = $3, assigned_at = now() WHERE key = $1", [lic.key, slug, id]);
+      await audit(req, `Licence ${lic.key} attribuée au nouveau PBX ${slug}`, true, `${EDITIONS[lic.edition] || lic.edition}, ${lic.simultaneous_calls} appels`);
+    } else {
+      await db.query(`INSERT INTO hub_licenses (key, edition, simultaneous_calls, expires_at, slug, pbx_id, note, created_by, assigned_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`, [lic.key, lic.edition, lic.simultaneous_calls, lic.expires_at, slug, id, v("company").slice(0, 120), req.email]);
+      await audit(req, `Licence créée : ${lic.key} (${EDITIONS[lic.edition]}, ${lic.simultaneous_calls} appels, ${DURATIONS[lic.months]})`, true, `${slug} · ${fqdn}`);
+    }
+    // Création ratée avant l'inscription du PBX : licence neuve effacée, licence existante rendue disponible
+    return runHost(["creer", slug, Buffer.from(JSON.stringify(cfg)).toString("base64")], `Création du PBX ${slug} (${fqdn})`, req, async (ok) => {
+      if (ok || regTenants().some((t) => t.slug === slug)) return;
+      if (lic.existing) await db.query("UPDATE hub_licenses SET slug = NULL, pbx_id = NULL, assigned_at = NULL WHERE key = $1 AND slug = $2", [lic.key, slug]);
+      else await db.query("DELETE FROM hub_licenses WHERE key = $1 AND slug = $2", [lic.key, slug]);
+    });
   });
   // Import d'une sauvegarde de PBX (PBX installé seul, ou PBX supprimé de ce serveur) comme nouveau PBX client
   app.register(async (scope) => {
@@ -438,14 +590,15 @@ export async function buildApp({ db } = {}) {
 
   // Tâches longues (création, suppression) : sortie de callikoe-host suivie par la page
   const jobs = new Map();
-  function runHost(args, label, req) {
+  function runHost(args, label, req, onDone = null) {
     const id = crypto.randomBytes(8).toString("hex");
     const job = { id, label, lines: [], running: true, ok: null, started_at: new Date().toISOString() };
     jobs.set(id, job);
     const p = spawn(HOST_CMD[0], [...HOST_CMD.slice(1), ...args], { env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LANG: "C.UTF-8" } });
     const take = (b) => { for (const l of String(b).split("\n")) { const s = l.replace(/\x1b\[[0-9;]*m/g, "").trimEnd(); if (s) job.lines.push(s.slice(0, 300)); } };
     p.stdout.on("data", take); p.stderr.on("data", take);
-    p.on("close", async (code) => { job.running = false; job.ok = code === 0; await audit(req, label, job.ok, job.lines.filter((l) => /✖/.test(l)).join(" ").slice(0, 300)); });
+    p.on("close", async (code) => { job.running = false; job.ok = code === 0; await audit(req, label, job.ok, job.lines.filter((l) => /✖/.test(l)).join(" ").slice(0, 300));
+      if (onDone) await onDone(job.ok).catch(() => {}); });
     for (const [k, j] of jobs) if (!j.running && Date.parse(j.started_at) < Date.now() - 3600_000) jobs.delete(k);
     return job;
   }

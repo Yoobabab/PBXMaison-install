@@ -46,7 +46,7 @@ function setNav(active, label = "") {
   const on = !!state.user;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : [])];
+  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []), ["#/licences", "Licences", "lic"]];
   // Paramètres : regroupés dans un menu repliable (ouvert quand on est sur une de ses pages)
   const settings = [...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"],
     ["#/protection", "Protection anti-intrusion", "shield"], ["#/pays", "IP Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
@@ -219,7 +219,7 @@ async function renderList() {
       ${kpi("call", "Appels en cours", `${t.calls ?? 0} <small>/ ${t.max_calls ?? 0}</small>`, "appels simultanés autorisés (total des licences)")}
       ${kpi("phone", "Postes connectés", `${t.phones_online ?? 0} <small>/ ${t.phones ?? 0}</small>`, "téléphones et softphones enregistrés")}
       ${kpi("trunk", "Trunks", `${t.trunks_ok ?? 0} <small>/ ${t.trunks ?? 0}</small>`, "enregistrés chez l'opérateur", t.trunks && t.trunks_ok < t.trunks ? "warn" : "good")}
-      ${kpi("lic", "Licences", `${t.expiring || 0}`, "expirent dans moins de 30 jours", t.expiring ? "warn" : "good")}
+      <a href="#/licences" class="kpi-link">${kpi("lic", "Licences", `${t.expiring || 0}`, "expirent dans moins de 30 jours", t.expiring ? "warn" : "good")}</a>
     </div>`;
   // Liste en tableau (prévue pour beaucoup de PBX) : « Ouvrir » + menu « ⋯ » pour le reste
   const SORTS = { name: (p) => p.name.toLowerCase(), state: (p) => ["ok", "wait", "bad", "off"].indexOf(pbxState(p)[0]), calls: (p) => -(p.calls || 0),
@@ -351,8 +351,10 @@ async function renderNew() {
     return;
   }
   const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
+  let free = []; try { free = (await api("GET", "/api/licenses")).licenses.filter((l) => l.available); } catch { free = []; }
+  const wanted = new URLSearchParams(location.hash.split("?")[1] || "").get("licence");
   app.innerHTML = `<h1>Nouveau PBX</h1>
-    <p class="sub">La licence est créée et signée ici ; le PBX est prêt en environ une minute.</p>
+    <p class="sub">La licence est créée et signée ici (ou prise parmi les licences disponibles) ; le PBX est prêt en environ une minute.</p>
     <div class="panel"><form id="nf" class="grid" novalidate><div class="form-msg full"></div>
       <fieldset><legend>Client</legend>
         <label>Nom du PBX<input name="name" maxlength="80" placeholder="Standard Boulangerie Dupont" autofocus></label>
@@ -369,9 +371,17 @@ async function renderNew() {
         <label>Langue<select name="language">${opt(Object.entries(o.languages), "fr")}</select></label>
       </fieldset>
       <fieldset><legend>Licence</legend>
-        <label>Édition<select name="edition">${opt(Object.entries(o.editions), "pro")}</select></label>
-        <label>Appels simultanés<select name="simultaneous_calls">${opt(o.sc.map((n) => [n, `${n} appels`]), 8)}</select></label>
-        <label>Durée<select name="duration_months">${opt(Object.entries(o.durations), 12)}</select></label>
+        <div class="seg lic-mode"><label class="on"><input type="radio" name="license_mode" value="new" checked>Nouvelle licence</label><label class="${free.length ? "" : "dim"}"><input type="radio" name="license_mode" value="existing" ${free.length ? "" : "disabled"}>Licence existante${free.length ? ` <span class="cnt">${free.length}</span>` : ""}</label></div>
+        <div class="stack lic-new">
+          <label>Édition<select name="edition">${opt(Object.entries(o.editions), "pro")}</select></label>
+          <label>Appels simultanés<select name="simultaneous_calls">${opt(o.sc.map((n) => [n, `${n} appels`]), 8)}</select></label>
+          <label>Durée<select name="duration_months">${opt(Object.entries(o.durations), 12)}</select></label>
+        </div>
+        <div class="stack lic-old" hidden>
+          <label>Licence disponible<select name="license_key">${free.map((l) => `<option value="${esc(l.key)}">${esc(l.key)} · ${esc(o.editions[l.edition] || l.edition)} · ${l.simultaneous_calls} appels · jusqu'au ${fmtDay(l.expires_at)}${l.note ? " · " + esc(l.note) : ""}</option>`).join("")}</select>
+          <span class="hint">Licences créées dans le menu Licences et attribuées à aucun PBX. Édition, appels et date d'expiration sont ceux de la licence.</span></label>
+        </div>
+        ${free.length ? "" : `<span class="hint">Aucune licence disponible pour l'instant (menu <a href="#/licences">Licences</a>).</span>`}
       </fieldset>
       <fieldset><legend>Contact du client</legend>
         <label>E-mail du client<input name="admin_email" type="email" placeholder="contact@entreprise.fr" autocapitalize="off"><span class="hint">Pour les alertes du PBX. Les comptes de connexion se créent ensuite dans la console du PBX.</span></label>
@@ -382,6 +392,13 @@ async function renderNew() {
     <div id="job"></div>`;
 
   const form = $("#nf");
+  const licMode = () => {
+    const ex = form.querySelector('[name="license_mode"]:checked').value === "existing";
+    form.querySelectorAll(".lic-mode label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
+    form.querySelector(".lic-new").hidden = ex; form.querySelector(".lic-old").hidden = !ex;
+  };
+  form.querySelectorAll('[name="license_mode"]').forEach((r) => r.addEventListener("change", licMode));
+  if (wanted && free.some((l) => l.key === wanted)) { form.license_key.value = wanted; form.querySelector('[value="existing"]').checked = true; licMode(); }
   for (const k of ["label", "slug"]) form[k].addEventListener("keydown", () => { form[k].dataset.touched = "1"; });
   const auto = () => {
     const base = toSlug(form.company.value || form.name.value);
@@ -422,6 +439,134 @@ async function renderNew() {
       : `<div class="actions"><a class="btn ghost" href="#/nouveau" onclick="setTimeout(()=>location.reload(),50)">Réessayer</a></div>`);
   });
 }
+// ---------------------------------------------------------------- Licences : liste, tri, filtres, création, renouvellement, attribution, suppression
+const LIC_STATUS = { valide: ["ok", "À jour"], bientot: ["wait", "Expire bientôt"], expiree: ["bad", "Expirée"], revoquee: ["off", "Supprimée"] };
+let licFilter = "", licQuery = "", licSort = { k: "exp", dir: 1 };
+async function renderLicenses() {
+  setNav("lic", "Licences");
+  clearInterval(listTimer);
+  let d;
+  try { d = await api("GET", "/api/licenses"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+  const edit = can("super", "admin");
+  const L = d.licenses, P = Object.fromEntries(d.pbx.map((p) => [p.slug, p]));
+  const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const days = (l) => Math.ceil((Date.parse(l.expires_at) - Date.now()) / 86400000);
+  const FILTERS = [["", "Toutes", () => true], ["valide", "À jour", (l) => l.status === "valide"], ["bientot", "Expirent bientôt", (l) => l.status === "bientot"],
+    ["expiree", "Expirées", (l) => l.status === "expiree"], ["dispo", "Disponibles", (l) => l.available], ["attribuee", "Attribuées", (l) => l.slug && !l.revoked_at],
+    ["revoquee", "Supprimées", (l) => l.status === "revoquee"]];
+  const SORTS = { key: (l) => l.key, pbx: (l) => (P[l.slug]?.name || l.slug || "~").toLowerCase(), ed: (l) => l.edition, sc: (l) => l.simultaneous_calls,
+    exp: (l) => Date.parse(l.expires_at), st: (l) => ["bientot", "expiree", "valide", "revoquee"].indexOf(l.status) };
+  const n = (f) => L.filter(FILTERS.find((x) => x[0] === f)[2]).length;
+  const th = (k, l) => `<th><button type="button" class="sorth ${licSort.k === k ? "on" : ""}" data-sort="${k}">${l}${licSort.k === k ? (licSort.dir > 0 ? " ▲" : " ▼") : ""}</button></th>`;
+  const row = (l) => {
+    const [cls, label] = LIC_STATUS[l.status] || ["off", l.status];
+    const p = l.slug ? P[l.slug] : null;
+    const dl = days(l);
+    const menu = edit ? [
+      !l.revoked_at ? `<button type="button" data-renew="${esc(l.key)}">Renouveler / modifier…</button>` : "",
+      l.available ? `<button type="button" data-assign="${esc(l.key)}">Attribuer à un PBX existant…</button><a href="#/nouveau?licence=${encodeURIComponent(l.key)}">Créer un PBX avec cette licence</a>` : "",
+      `<button type="button" data-copy="${esc(l.key)}">Copier le numéro</button>`,
+      `<hr><button type="button" class="danger" data-ldel="${esc(l.key)}">${l.slug && !l.revoked_at ? "Supprimer (désactive le PBX)…" : "Supprimer…"}</button>`,
+    ].join("") : "";
+    return `<tr class="${l.revoked_at ? "off" : ""}">
+      <td class="lk"><strong class="mono">${esc(l.key)}</strong>${l.note ? `<span class="s">${esc(l.note)}</span>` : ""}</td>
+      <td data-l="PBX">${p ? `<strong>${esc(p.name)}</strong><span class="s">${esc(p.fqdn || l.slug)}${p.suspended ? " · désactivé" : ""}</span>` : l.slug ? esc(l.slug) : `<span class="pill ok" style="background:var(--accent-soft);color:var(--accent)">Disponible</span>`}</td>
+      <td data-l="Édition">${esc(d.editions[l.edition] || l.edition)}</td>
+      <td data-l="Appels">${l.simultaneous_calls}</td>
+      <td data-l="Expire" class="${l.status === "bientot" || l.status === "expiree" ? "warnc" : ""}">${fmtDay(l.expires_at)}<span class="s">${l.revoked_at ? `supprimée le ${fmtDay(l.revoked_at)}` : dl > 0 ? `dans ${dl} jour${dl > 1 ? "s" : ""}` : `depuis ${-dl} jour${dl < -1 ? "s" : ""}`}</span></td>
+      <td data-l="État"><span class="pill ${cls}">${label}</span></td>
+      <td class="pa">${menu ? `<span class="more"><button type="button" class="btn ghost sm" data-more aria-label="Actions" title="Actions">⋯</button><span class="more-menu" hidden>${menu}</span></span>` : ""}</td></tr>`;
+  };
+  const draw = () => {
+    const q = licQuery.trim().toLowerCase();
+    const fil = FILTERS.find((x) => x[0] === licFilter) || FILTERS[0];
+    const list = L.filter((l) => fil[2](l) && (!q || [l.key, l.note, l.slug, P[l.slug]?.name, P[l.slug]?.company, P[l.slug]?.fqdn].join(" ").toLowerCase().includes(q)));
+    const f = SORTS[licSort.k] || SORTS.exp;
+    list.sort((a, b) => { const x = f(a), y = f(b); return (x < y ? -1 : x > y ? 1 : 0) * licSort.dir || a.key.localeCompare(b.key); });
+    $("#lfil").innerHTML = FILTERS.map(([k, lab]) => `<label class="${k === licFilter ? "on" : ""}"><input type="radio" name="lf" value="${k}" ${k === licFilter ? "checked" : ""}>${lab}<span class="cnt">${n(k)}</span></label>`).join("");
+    $("#lrows").innerHTML = list.length ? `<div class="table-wrap"><table class="pbxt lict"><thead><tr>${th("key", "Licence")}${th("pbx", "PBX")}${th("ed", "Édition")}${th("sc", "Appels")}${th("exp", "Expire")}${th("st", "État")}<th></th></tr></thead>
+      <tbody>${list.map(row).join("")}</tbody></table></div>` : `<div class="empty">${L.length ? "Aucune licence ne correspond." : "Aucune licence pour l'instant."}</div>`;
+  };
+  const form = (title, body, btn) => `<div class="panel" id="lform"><div class="ph"><h2>${title}</h2><button type="button" class="btn ghost sm" data-close>Fermer</button></div>
+    <form class="stack pad" novalidate><div class="form-msg"></div>${body}<div class="form-near"></div><div class="actions"><button type="button" class="btn ghost" data-close>Annuler</button><button class="btn">${btn}</button></div></form></div>`;
+  const licInputs = (cur = null) => `<div class="grid" style="padding:0">
+      <label>Édition<select name="edition">${opt(Object.entries(d.editions), cur?.edition || "pro")}</select></label>
+      <label>Appels simultanés<select name="simultaneous_calls">${opt(d.sc.map((x) => [x, `${x} appels`]), cur?.simultaneous_calls || 8)}</select></label>
+      <label>${cur ? "Prolonger de" : "Durée"}<select name="duration_months">${opt([...(cur ? [[0, "Ne pas prolonger"]] : []), ...Object.entries(d.durations)], 12)}</select>
+        ${cur ? `<span class="hint">Ajouté à la date d'expiration actuelle (${fmtDay(cur.expires_at)}), ou à aujourd'hui si elle est passée.</span>` : ""}</label>
+      <label>Note<input name="note" maxlength="120" value="${esc(cur?.note || "")}" placeholder="Client, devis, commande…"></label></div>`;
+  const openForm = (html, submit) => {
+    $("#lslot").innerHTML = html; const f = $("#lslot form");
+    $("#lslot").querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => ($("#lslot").innerHTML = "")));
+    bindForm(f, async (vals) => { const msg = await submit(vals); flash = { cls: "", text: msg }; renderLicenses(); });
+    $("#lslot").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const t = { all: L.length, ok: n("valide"), soon: n("bientot"), exp: n("expiree"), free: n("dispo") };
+  app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Licences</h1>
+      <p class="sub" style="margin:0">Toutes les licences des PBX du serveur. Une licence disponible peut servir pour un nouveau PBX ou remplacer celle d'un PBX existant.</p></div>
+      ${edit ? `<button type="button" class="btn" id="lnew">+ Nouvelle licence</button>` : ""}</div>
+    ${!d.signing?.configured ? `<div class="flash warn">Clé de signature des licences non installée : création et renouvellement impossibles. ${can("super") ? `<a href="#/cle">Clé de signature</a>` : ""}</div>` : ""}
+    <div class="kpis kpis5">
+      ${kpi("lic", "Licences", `${t.all}`, `${n("attribuee")} attribuée${n("attribuee") > 1 ? "s" : ""} à un PBX`)}
+      ${kpi("shield", "À jour", `${t.ok}`, "plus de 30 jours restants", "good")}
+      ${kpi("watch", "Expirent bientôt", `${t.soon}`, "dans moins de 30 jours", t.soon ? "warn" : "good")}
+      ${kpi("log", "Expirées", `${t.exp}`, "à renouveler", t.exp ? "warn" : "good")}
+      ${kpi("add", "Disponibles", `${t.free}`, "attribuées à aucun PBX")}
+    </div>
+    <div id="lslot"></div>
+    <div class="panel pad stack">
+      <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <label style="flex:1;min-width:220px">Rechercher<input id="lq" type="search" placeholder="Numéro, PBX, client, note…" value="${esc(licQuery)}" autocomplete="off"></label>
+      </div>
+      <div class="seg" id="lfil"></div></div>
+    <div class="panel" id="lrows"></div><div id="job"></div>`;
+  $("#lq").oninput = (e) => { licQuery = e.target.value; draw(); };
+  $("#lfil").onchange = (e) => { licFilter = e.target.value; draw(); };
+  $("#lnew")?.addEventListener("click", () => openForm(form("Nouvelle licence", `${licInputs()}<p class="hint" style="margin:0">La licence est créée disponible : attribue-la ensuite à un PBX existant ou choisis-la en créant un PBX.</p>`, "Créer la licence"),
+    async (v) => { const r = await api("POST", "/api/licenses", v); return `Licence ${r.key} créée (disponible).`; }));
+  app.onclick = async (e) => {
+    const srt = e.target.closest("[data-sort]");
+    if (srt) { const k = srt.dataset.sort; licSort = { k, dir: licSort.k === k ? -licSort.dir : 1 }; draw(); return; }
+    const mb = e.target.closest("[data-more]");
+    const open = app.querySelector(".more-menu:not([hidden])");
+    if (open && (!mb || open.previousElementSibling !== mb)) open.hidden = true;
+    if (mb) { const m = mb.nextElementSibling; m.hidden = !m.hidden; m.classList.toggle("up", mb.getBoundingClientRect().bottom + 220 > innerHeight); return; }
+    const get = (k) => L.find((l) => l.key === k);
+    const rn = e.target.closest("[data-renew]");
+    if (rn) {
+      const l = get(rn.dataset.renew), p = l.slug ? P[l.slug] : null;
+      openForm(form(`Renouveler ${esc(l.key)}`, `${p ? `<div class="flash" style="margin:0">Attribuée au PBX <strong>${esc(p.name)}</strong> : la nouvelle licence lui est envoyée tout de suite, sans coupure.</div>` : ""}${licInputs(l)}`, "Renouveler"),
+        async (v) => { const r = await api("POST", `/api/licenses/${encodeURIComponent(l.key)}/renew`, v); return `Licence ${r.key} : jusqu'au ${fmtDay(r.expires_at)}${p ? `, appliquée au PBX ${p.name}` : ""}.`; });
+      return;
+    }
+    const as = e.target.closest("[data-assign]");
+    if (as) {
+      const l = get(as.dataset.assign);
+      const cur = (slug) => L.find((x) => x.slug === slug && !x.revoked_at);
+      const choices = d.pbx.map((p) => [p.slug, `${p.name} (${p.fqdn || p.slug})${cur(p.slug) ? ` · remplace ${cur(p.slug).key}` : " · sans licence valide"}`]);
+      if (!choices.length) { flash = { cls: "warn", text: "Aucun PBX sur ce serveur : crée un PBX avec cette licence." }; renderLicenses(); return; }
+      openForm(form(`Attribuer ${esc(l.key)}`, `<label>PBX<select name="slug">${opt(choices, "")}</select>
+        <span class="hint">La licence actuelle du PBX redevient disponible. Un PBX désactivé parce que sa licence a été supprimée pourra ensuite être réactivé.</span></label>`, "Attribuer"),
+        async (v) => { const r = await api("POST", `/api/licenses/${encodeURIComponent(l.key)}/assign`, v); return `Licence ${r.key} attribuée au PBX ${P[r.slug]?.name || r.slug}.`; });
+      return;
+    }
+    const del = e.target.closest("[data-ldel]");
+    if (del) {
+      const l = get(del.dataset.ldel), p = l.slug && !l.revoked_at ? P[l.slug] : null;
+      const conf = prompt(`${p ? `ATTENTION : le PBX « ${p.name} » sera désactivé (plus de téléphones ni d'appels). Ses données sont gardées ; il pourra revivre avec une autre licence.\n\n` : ""}Supprimer la licence ${l.key} ?\nPour confirmer, tape ses 4 derniers caractères : ${l.key.slice(-4)}`);
+      if (conf === null) return;
+      const code = prompt("Code de double authentification (Psono) :");
+      if (code === null) return;
+      try {
+        const r = await api("DELETE", `/api/licenses/${encodeURIComponent(l.key)}`, { confirm: conf.trim(), code: code.trim() });
+        if (r.deleted) { flash = { cls: "", text: `Licence ${l.key} supprimée.` }; renderLicenses(); return; }
+        $("#lrows").innerHTML = ""; followJob(r.id, () => `<div class="actions"><a class="btn" href="#/licences" onclick="setTimeout(()=>location.reload(),50)">Retour aux licences</a></div>`);
+      } catch (err) { flash = { cls: "bad", text: err.message }; renderLicenses(); }
+    }
+  };
+  draw();
+}
+
 async function followJob(id, after) {
   const box = $("#job");
   for (;;) {
@@ -763,11 +908,12 @@ function route() {
   if ((m = h.match(/^#\/invitation\/([0-9a-f]{48})$/))) return renderInvite(m[1]);
   if (state.setup_needed) return renderSetup();
   if (!state.user) return renderLogin();
-  if (h === "#/nouveau" && can("super", "admin")) return renderNew();
+  if (h.split("?")[0] === "#/nouveau" && can("super", "admin")) return renderNew();
   if (h === "#/restaurer" && can("super", "admin")) return renderRestore();
   if (h === "#/comptes" && can("super")) return renderAccounts();
   if (h === "#/cle" && can("super")) return renderSigning();
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
+  if (h === "#/licences") return renderLicenses();
   if (h === "#/telephonie") return renderTelephonie();
   if (h === "#/surveillance") return renderWatch();
   if (h === "#/pays") return renderGeo();

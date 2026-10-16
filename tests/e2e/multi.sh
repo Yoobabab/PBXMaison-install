@@ -437,6 +437,31 @@ reset; labx op "channel originate PJSIP/acctb extension s@wait" >/dev/null 2>&1 
 JID="$(hapi POST /api/pbx/clib/reactiver | jget id)"; [[ -n "$JID" ]] && hjob "$JID" || fail "réactivation clib"
 waitfor 30 sudo systemctl is-active --quiet callikoe-asterisk@clib && waitfor 60 regd pb && pass "cli b réactivé : moteur actif, poste de nouveau enregistré" || fail "réactivation clib"
 
+# 6c. Licences depuis la console du serveur : liste, création, renouvellement envoyé au PBX, suppression (PBX désactivé), autre licence attribuée
+licof() { hapi GET /api/licenses | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const l=(JSON.parse(s).licenses||[]).find(x=>x.slug===process.argv[1]&&!x.revoked_at);console.log(l?.key||"")})' "$1"; }
+envof() { sudo grep -oP "^$2='?\K[^']*" "/etc/callikoe/t/$1/pbx.env"; }
+KA="$(licof clia)"; KB="$(licof clib)"
+[[ "$KA" =~ ^PBXM- && "$KB" =~ ^PBXM- && "$KA" == "$(envof clia PBX_LICENSE_KEY)" ]] && pass "Licences : celles de cli a et cli b listées, chacune attribuée à son PBX" || fail "liste des licences : $(hapi GET /api/licenses | head -c 300)"
+R="$(hapi POST /api/licenses '{"edition":"pro","simultaneous_calls":"16","duration_months":"12","note":"Stock e2e"}')"; KN="$(echo "$R" | jget key)"
+[[ "$KN" =~ ^PBXM- && "$(echo "$R" | jget available)" == true ]] && pass "Nouvelle licence créée, disponible (attribuée à aucun PBX)" || fail "création de licence : $R"
+EXPA="$(envof clia PBX_LICENSE_EXPIRES)"
+R="$(hapi POST "/api/licenses/$KA/renew" '{"edition":"enterprise","simultaneous_calls":"16","duration_months":"12"}')"
+[[ "$(envof clia PBX_MAX_CALLS)" == 16 && "$(envof clia PBX_EDITION)" == enterprise && "$(envof clia PBX_LICENSE_EXPIRES)" > "$EXPA" ]] \
+  && pass "Licence de cli a renouvelée (+1 an, Enterprise, 16 appels) : appliquée tout de suite au PBX" || fail "renouvellement : $R · $(envof clia PBX_MAX_CALLS) $(envof clia PBX_LICENSE_EXPIRES)"
+R="$(hapi DELETE "/api/licenses/$KB" '{"confirm":"XXXX","code":"000000"}')"
+[[ "$R" == *"4 derniers caractères"* ]] && pass "Suppression de licence : confirmation exigée" || fail "suppression sans confirmation : $R"
+R="$(hapi DELETE "/api/licenses/$KB" "{\"confirm\":\"${KB: -4}\",\"code\":\"$(otp "$HTOTP")\"}")"; JID="$(echo "$R" | jget id)"
+[[ -n "$JID" ]] && hjob "$JID" && ! sudo systemctl is-active --quiet callikoe-asterisk@clib && pass "Licence de cli b supprimée : PBX cli b désactivé" || fail "suppression de licence : $R"
+R="$(hapi POST /api/pbx/clib/reactiver)"
+[[ "$R" == *"licence de ce PBX a été supprimée"* ]] && pass "PBX sans licence valide : réactivation refusée" || fail "réactivation sans licence : $R"
+R="$(hapi POST "/api/licenses/$KN/assign" '{"slug":"clib"}')"
+[[ "$(echo "$R" | jget slug)" == clib && "$(envof clib PBX_LICENSE_KEY)" == "$KN" ]] && pass "Licence disponible attribuée à cli b (envoyée au PBX)" || fail "attribution : $R"
+JID="$(hapi POST /api/pbx/clib/reactiver | jget id)"; [[ -n "$JID" ]] && hjob "$JID" || fail "réactivation clib (nouvelle licence)"
+waitfor 30 sudo systemctl is-active --quiet callikoe-asterisk@clib && waitfor 60 regd pb && pass "cli b réactivé avec sa nouvelle licence : poste de nouveau enregistré" || fail "clib après nouvelle licence"
+R="$(hapi GET /api/licenses)"
+[[ "$(echo "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const l=JSON.parse(s).licenses.find(x=>x.key===process.argv[1]);console.log(l.status, l.available)})' "$KB")" == "revoquee false" ]] \
+  && pass "Licence supprimée gardée dans la liste (état « Supprimée »), jamais proposée à nouveau" || fail "licence supprimée : $(echo "$R" | head -c 300)"
+
 # 7. Sauvegarde du serveur entier → suppression de cli b → restauration (commande PuTTY)
 sudo /opt/pbxmaison/pbx/bin/callikoe-host sauvegarder > bk.out 2>&1 || { tail -n 20 bk.out >> "$OUT"; fail "sauvegarder"; }
 BK="$(sudo cat /var/lib/callikoe/last-backup)"

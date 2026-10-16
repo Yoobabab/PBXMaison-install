@@ -248,7 +248,7 @@ SQL
   runuser -u postgres -- psql -q -c "REVOKE ALL ON DATABASE callikoe_hub FROM PUBLIC" >/dev/null
   # La console du serveur ne peut lancer que la création et la suppression de PBX
   cat > /etc/sudoers.d/callikoe-hub <<EOF
-callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host journal *, ${APP}/pbx/bin/callikoe-host surveillance *, ${APP}/pbx/bin/callikoe-host pays *, ${APP}/pbx/bin/callikoe-host protection *, ${APP}/pbx/bin/callikoe-host debloquer *, ${APP}/pbx/bin/callikoe-host bloquer *, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *
+callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host journal *, ${APP}/pbx/bin/callikoe-host surveillance *, ${APP}/pbx/bin/callikoe-host pays *, ${APP}/pbx/bin/callikoe-host protection *, ${APP}/pbx/bin/callikoe-host debloquer *, ${APP}/pbx/bin/callikoe-host bloquer *, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *, ${APP}/pbx/bin/callikoe-host licence *
 EOF
   chmod 440 /etc/sudoers.d/callikoe-hub
   visudo -cq -f /etc/sudoers.d/callikoe-hub || { rm -f /etc/sudoers.d/callikoe-hub; die "Règle sudo invalide (console du serveur)."; }
@@ -756,6 +756,18 @@ cmd_reactiver() {
   ok "PBX « ${slug} » réactivé"
 }
 
+# Nouvelle licence signée par la console du serveur (renouvellement, changement d'édition) : appliquée sans coupure
+cmd_licence() {
+  local slug="${1:-}" tok="${2:-}"
+  valid_slug "$slug" && reg_get "$slug" slug >/dev/null 2>&1 || die "PBX « ${slug} » inconnu."
+  [[ "$tok" =~ ^CLK1\.[A-Za-z0-9_-]{40,4000}$ ]] || die "Clé de licence illisible."
+  local dir="$TVAR/$slug/staging" f
+  [[ -d "$dir" ]] || install -d -o "cx-$slug" -g "cx-$slug" -m 0750 "$dir"
+  f="$dir/license-hub-$(date +%s)-$RANDOM.txt"
+  printf '%s' "$tok" > "$f"; chown "cx-$slug:cx-$slug" "$f"; chmod 0640 "$f"
+  "$CONF" --tenant "$slug" license "$f"
+}
+
 cmd_liste() {
   [[ -f "$REG" ]] || die "Serveur multi-tenant non initialisé."
   local count; count="$(node -e 'console.log((JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).tenants||[]).length)' "$REG")"
@@ -909,6 +921,7 @@ case "${1:-}" in
   bloquer) shift; cmd_bloquer "$@" ;;
   suspendre) shift; cmd_suspendre "$@" ;;
   reactiver) shift; cmd_reactiver "$@" ;;
+  licence|license) shift; cmd_licence "$@" ;;
   creer|create) shift; cmd_creer "$@" ;;
   importer|import) shift; cmd_importer "$@" ;;
   supprimer|delete) shift; cmd_supprimer "$@" ;;

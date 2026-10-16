@@ -77,6 +77,12 @@ legend{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.0
 .geo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px 14px}
 .geo-c{margin:0}
 .geo-c[hidden]{display:none}
+.kpi-link{display:block;text-decoration:none;color:inherit}.kpi-link>.kpi{height:100%}.kpi-link:hover>.kpi{border-color:var(--accent)}
+.seg label.dim{opacity:.5;cursor:not-allowed}
+.lict td .s{display:block}
+.lict td.lk .mono{font-size:13px;color:var(--text);white-space:nowrap}
+.kpis5{grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr))}
+@media (max-width:760px){.lict td.lk{grid-column:1/-1}}
 </style>
 </head>
 <body class="console no-side">
