@@ -33,6 +33,7 @@ const ICONS = {
   lic: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
   sip: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9z"/>',
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
 };
@@ -44,7 +45,7 @@ function setNav(active, label = "") {
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
   const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []),
-    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
+    ...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"], ["#/pays", "Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   $("#nav").innerHTML = on ? `<div class="ng">${items.map(([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`).join("")}</div>` : "";
   $("#user").innerHTML = on ? `<div class="sf-user"><span class="sf-av">${esc(state.user.email.charAt(0).toUpperCase())}</span>
     <span class="sf-mail" title="${esc(state.user.email)} · ${esc(state.user.role_label)}">${esc(state.user.email)}</span>
@@ -564,6 +565,57 @@ async function renderWatch() {
   await load();
 }
 
+// ---------------------------------------------------------------- Pays autorisés (téléphonie bloquée ailleurs)
+const GEO_COUNTRIES = [["FR", "France"], ["BE", "Belgique"], ["CH", "Suisse"], ["LU", "Luxembourg"], ["MC", "Monaco"], ["AD", "Andorre"],
+  ["DE", "Allemagne"], ["ES", "Espagne"], ["IT", "Italie"], ["PT", "Portugal"], ["GB", "Royaume-Uni"], ["IE", "Irlande"], ["NL", "Pays-Bas"],
+  ["AT", "Autriche"], ["DK", "Danemark"], ["SE", "Suède"], ["NO", "Norvège"], ["FI", "Finlande"], ["IS", "Islande"], ["PL", "Pologne"],
+  ["CZ", "Tchéquie"], ["SK", "Slovaquie"], ["HU", "Hongrie"], ["RO", "Roumanie"], ["BG", "Bulgarie"], ["GR", "Grèce"], ["HR", "Croatie"],
+  ["SI", "Slovénie"], ["EE", "Estonie"], ["LV", "Lettonie"], ["LT", "Lituanie"], ["MT", "Malte"], ["CY", "Chypre"],
+  ["GP", "Guadeloupe"], ["MQ", "Martinique"], ["GF", "Guyane"], ["RE", "La Réunion"], ["YT", "Mayotte"], ["PM", "Saint-Pierre-et-Miquelon"],
+  ["NC", "Nouvelle-Calédonie"], ["PF", "Polynésie française"],
+  ["MA", "Maroc"], ["DZ", "Algérie"], ["TN", "Tunisie"], ["SN", "Sénégal"], ["CI", "Côte d'Ivoire"], ["CM", "Cameroun"], ["MG", "Madagascar"], ["MU", "Maurice"],
+  ["US", "États-Unis"], ["CA", "Canada"], ["BR", "Brésil"], ["MX", "Mexique"], ["TR", "Turquie"], ["IL", "Israël"], ["AE", "Émirats arabes unis"],
+  ["IN", "Inde"], ["CN", "Chine"], ["JP", "Japon"], ["AU", "Australie"], ["UA", "Ukraine"], ["RU", "Russie"]];
+async function renderGeo() {
+  setNav("globe", "Pays autorisés");
+  let d;
+  try { d = await api("GET", "/api/pays"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+  const sel = new Set(d.countries || []);
+  const edit = can("super", "admin");
+  app.innerHTML = `${takeFlash()}<h1>Pays autorisés</h1>
+    <p class="sub">Les téléphones, softphones, applis et opérateurs ne peuvent joindre les PBX du serveur (SIP 5060 / 5061) que depuis les pays cochés. Tout le reste est bloqué avant même d'arriver au PBX. Les opérateurs de tes trunks et les adresses de la liste ci-dessous sont toujours acceptés.</p>
+    <div class="kpis">
+      ${kpi("globe", "Filtre", d.active ? "Actif" : "Inactif", d.active ? `${sel.size} pays autorisé${sel.size > 1 ? "s" : ""}` : "téléphonie acceptée de partout", d.active ? "good" : "warn")}
+      ${kpi("sip", "Tentatives bloquées", d.blocked_packets || 0, "messages venus d'autres pays depuis le dernier redémarrage")}
+      ${kpi("lic", "Listes d'adresses", d.ranges4 || 0, d.updated_at ? `mises à jour le ${fmtDate(d.updated_at)} (chaque jour)` : "pas encore téléchargées")}
+    </div>
+    ${d.message ? `<div class="flash ${d.active ? "" : "warn"}">${esc(d.message)}</div>` : ""}
+    <form id="geof" class="panel" novalidate><div class="ph"><h2>Pays</h2><span class="s" id="gcount"></span></div><div class="pad stack">
+      <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <label style="flex:1;min-width:200px">Rechercher un pays<input id="gq" type="search" placeholder="Belgique, Maroc…" autocomplete="off"></label>
+        ${edit ? `<button type="button" class="btn ghost sm" id="gnone">Tout décocher</button>` : ""}</div>
+      <div class="geo-grid" id="ggrid">${GEO_COUNTRIES.map(([c, n]) => `<label class="check geo-c" data-n="${esc(n.toLowerCase())}"><input type="checkbox" name="c" value="${c}" ${sel.has(c) ? "checked" : ""} ${edit ? "" : "disabled"}> ${esc(n)}</label>`).join("")}</div>
+      <label>Adresses toujours acceptées<textarea name="always" rows="3" placeholder="203.0.113.7&#10;198.51.100.0/24" ${edit ? "" : "disabled"}>${esc((d.always || []).join("\n"))}</textarea>
+        <span class="hint">Une par ligne (IPv4, avec /masque possible) : un client ou un technicien à l'étranger, un opérateur hors des pays cochés…</span></label>
+      <div class="form-near"></div>
+      ${edit ? `<div class="actions"><button class="btn">Enregistrer et appliquer</button></div>` : ""}
+      <p class="hint" style="margin:0">Sans aucun pays coché, la téléphonie est acceptée depuis tous les pays. Les listes d'adresses par pays viennent d'ipdeny.com (gratuit) et sont mises à jour chaque jour. Les consoles web ne sont pas concernées.</p>
+    </div></form>`;
+  const count = () => { $("#gcount").textContent = `${app.querySelectorAll("[name=c]:checked").length} coché(s)`; };
+  count();
+  app.querySelectorAll("[name=c]").forEach((cb) => cb.onchange = count);
+  $("#gq").oninput = (e) => { const q = e.target.value.trim().toLowerCase(); app.querySelectorAll(".geo-c").forEach((l) => { l.hidden = !!q && !l.dataset.n.includes(q); }); };
+  $("#gnone")?.addEventListener("click", () => { app.querySelectorAll("[name=c]").forEach((cb) => (cb.checked = false)); count(); });
+  if (edit) bindForm($("#geof"), async (f, form) => {
+    const countries = [...form.querySelectorAll("[name=c]:checked")].map((x) => x.value);
+    if (!countries.length && !confirm("Aucun pays coché : la téléphonie sera acceptée depuis tous les pays. Continuer ?")) return;
+    if (countries.length && !countries.includes("FR") && !confirm("La France n'est pas cochée : les téléphones et opérateurs en France seront bloqués. Continuer ?")) return;
+    const r = await api("POST", "/api/pays", { countries, always: String(f.always || "").split(/\s+/).filter(Boolean) });
+    flash = { cls: r.active || !countries.length ? "" : "warn", text: r.message || "Enregistré." };
+    renderGeo();
+  });
+}
+
 // ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP)
 const SIP_KINDS = { erreur: ["bad", "Erreur"], auth: ["wait", "Mot de passe refusé"], refus: ["off", "Adresse inconnue"], robot: ["off", "Robot / fraude"], flood: ["wait", "Trop de messages"] };
 let sipMin = 60, sipFilter = "", sipKind = "", sipTimer = null, sipShow = 200;
@@ -667,6 +719,7 @@ function route() {
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
   if (h === "#/telephonie") return renderTelephonie();
   if (h === "#/surveillance") return renderWatch();
+  if (h === "#/pays") return renderGeo();
   return renderList();
 }
 window.addEventListener("hashchange", route);

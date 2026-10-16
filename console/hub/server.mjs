@@ -282,6 +282,23 @@ export async function buildApp({ db } = {}) {
     return { ok: true };
   });
 
+  // ---------------------------------------------------------------- Pays autorisés pour la téléphonie
+  app.get("/api/pays", { preHandler: requireUser }, async () => {
+    const r = await hostJson(["pays", "etat"], 20_000);
+    if (!r.ok) throw new UserError("État du filtre des pays illisible.");
+    return r.data;
+  });
+  app.post("/api/pays", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const countries = [...new Set((Array.isArray(req.body?.countries) ? req.body.countries : []).map((c) => String(c).toUpperCase()))].filter((c) => /^[A-Z]{2}$/.test(c));
+    const always = [...new Set((Array.isArray(req.body?.always) ? req.body.always : String(req.body?.always || "").split(/[\s,;]+/)).map((x) => String(x).trim()).filter(Boolean))];
+    for (const a of always) if (!/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(a)) throw new UserError(`Adresse invalide : ${a} (IPv4, éventuellement avec /masque).`, "always");
+    if (countries.length > 80 || always.length > 100) throw new UserError("Trop de pays ou d'adresses.");
+    const r = await hostJson(["pays", "regler", countries.join(",") || "-", always.join(",") || "-"], 180_000);
+    await audit(req, `Pays autorisés pour la téléphonie : ${countries.join(", ") || "tous"}`, r.ok, always.length ? `toujours : ${always.join(", ")}` : "");
+    if (!r.ok) throw new UserError(r.error?.replace(/^✖\s*/, "") || "Réglage impossible.");
+    return r.data;
+  });
+
   // ---------------------------------------------------------------- Journal de la téléphonie (aiguilleur SIP, adresses bloquées)
   const IP_RE = /^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$/;
   app.get("/api/telephonie", { preHandler: requireUser }, async (req) => {

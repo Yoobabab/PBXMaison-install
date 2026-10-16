@@ -37,6 +37,7 @@ if [[ -d /etc/callikoe ]]; then
   for u in $(systemctl list-unit-files --plain --no-legend 'callikoe-*' 2>/dev/null | awk '{print $1}'); do systemctl disable "$u" >/dev/null 2>&1 || true; done
   systemctl disable --now kamailio >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/callikoe-*.service /etc/systemd/system/callikoe-*.timer
+  nft delete table inet callikoe_geo >/dev/null 2>&1 || true
   if command -v psql >/dev/null && systemctl is-active --quiet postgresql; then
     for db in $(cd /tmp && sudo -u postgres psql -tAc "SELECT datname FROM pg_database WHERE datname LIKE 'cx\_%' OR datname = 'callikoe_hub'" 2>/dev/null); do
       (cd /tmp && sudo -u postgres psql -q -c "DROP DATABASE IF EXISTS \"$db\"" -c "DROP ROLE IF EXISTS \"$db\"") >/dev/null 2>&1 || true

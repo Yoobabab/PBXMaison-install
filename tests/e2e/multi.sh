@@ -39,6 +39,8 @@ grep -q "Première connexion" install.out && pass "Lien de première connexion �
 sudo systemctl is-active --quiet kamailio && pass "Aiguilleur SIP (Kamailio) actif sur ${IP}:5060" || fail "kamailio arrêté"
 sudo fail2ban-client status callikoe-sip >/dev/null 2>&1 && sudo fail2ban-client status callikoe-sip-unknown >/dev/null 2>&1 \
   && pass "Anti-intrusion SIP actif (bannit seulement le SIP : SSH et web restent joignables)" || { sudo journalctl -u fail2ban -n 15 --no-pager | cut -c1-200 >> "$OUT"; fail "jails fail2ban"; }
+if sudo nft list table inet callikoe_geo >/dev/null 2>&1; then pass "Pays autorisés : téléphonie acceptée seulement depuis la France (par défaut), opérateurs et réseau local toujours acceptés"
+else echo "   (filtre des pays non appliqué : $(sudo cat /var/lib/callikoe/geo/etat.json 2>/dev/null | cut -c1-200))" >> "$OUT"; fi
 sudo systemctl is-active --quiet callikoe-hub && pass "Console du serveur active" || { sudo journalctl -u callikoe-hub -n 20 --no-pager | cut -c1-200 >> "$OUT"; fail "console du serveur arrêtée"; }
 sudo systemctl is-active --quiet asterisk 2>/dev/null && fail "un Asterisk « mono-PBX » tourne aussi" || pass "Pas d'Asterisk global : un moteur par client"
 
@@ -59,6 +61,8 @@ T="$(hapi POST /api/login '{"email":"irt-admin@test.invalid","password":"MotDePa
 [[ -n "$T" ]] || fail "login console du serveur"
 R="$(hapi POST /api/login/totp "{\"ticket\":\"$T\",\"code\":\"$(otp "$HTOTP")\"}")"
 [[ "$R" == *'"ok":true'* ]] && pass "Connexion à la console du serveur (mot de passe + code)" || fail "login totp : $R"
+R="$(hapi POST /api/pays '{"countries":["FR","BE"],"always":["203.0.113.9"]}')"
+[[ "$R" == *'"countries":["FR","BE"]'* && "$R" == *'"always":["203.0.113.9"]'* ]] && pass "Pays autorisés : France + Belgique et une adresse toujours acceptée, réglés depuis la console du serveur" || { echo "$R" | cut -c1-300 >> "$OUT"; fail "pays autorisés"; }
 
 # 3. Création des deux PBX depuis la console du serveur
 hjob() { # hjob <id> [silencieux] : attend la fin d'une tâche ; sortie dans le résultat en cas d'échec
