@@ -1060,7 +1060,7 @@ function connect() {
     s.on("icecandidate", (e) => { if (e.candidate.type === "srflx" || e.candidate.type === "relay") e.ready(); });
     s.on("progress", () => { if (callInfo.direction === "out") { callInfo.ringing = true; stopTone?.(); stopTone = tone(RINGBACK, "tones"); renderDrawer(); renderCallbar(); } });
     s.on("accepted", () => { appAudio(true); stopTone?.(); stopTone = null; startedAt = Date.now(); hideIncoming(); openDrawer(true); renderDrawer(); tick(); });
-    s.on("confirmed", () => { renderDrawer(); renderCallbar(); });
+    s.on("confirmed", () => { appAudio(true); renderDrawer(); renderCallbar(); });
     s.on("hold", () => renderDrawer()); s.on("unhold", () => renderDrawer());
     s.on("ended", () => finish("answered"));
     s.on("failed", (e) => finish(callInfo.direction === "in" && !startedAt ? "missed" : "failed", e.cause));
@@ -1089,7 +1089,7 @@ function hookAudio(pc) {
     if (ev.track.kind === "audio") {
       remoteAudio ||= new MediaStream();
       if (!remoteAudio.getTracks().includes(ev.track)) remoteAudio.addTrack(ev.track);
-      const a = $("#remote"); a.srcObject = remoteAudio; a.play().catch(() => {});
+      const a = $("#remote"); a.srcObject = remoteAudio; a.play().then(() => { if (session) appAudio(true); }).catch(() => {});
       return;
     }
     const st = ev.streams[0] || new MediaStream([ev.track]);
