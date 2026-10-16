@@ -5,6 +5,13 @@
 - Console du serveur (comme Omada) : comptes IRT avec rôles et double authentification, liste et recherche des PBX, création d'un PBX, ouverture d'un PBX sans se reconnecter et passage de l'un à l'autre
 - Sauvegarde et restauration du serveur entier en une commande ; réinitialisation compatible
 - Trunks avec proxy (Unyc…) : adresse du proxy correctement transmise au moteur
+- Console du serveur › Téléphonie : refus, erreurs de l'aiguilleur et adresses bloquées en clair, bloquer / débloquer une adresse depuis le web
+- Console du PBX : adresse réelle des postes aussi sur le serveur multi-tenant
+- Fiche utilisateur : un seul bouton « Enregistrer » pour tous les onglets ; le téléphone est mis à jour sans redémarrer
+- Trunks : codecs au choix, par ordre de priorité
+- Corrigé : postes qui ne s'enregistraient pas sur certains VPS (OVH), « Reprovisionner » qui redémarrait le téléphone, anti-flood trop sensible
+- Fond d'écran des téléphones : logo sous l'heure et la date
+- Testé : migration d'un PBX installé seul vers un serveur multi-tenant (sauvegarde → Restaurer un PBX)
 
 ## 1.4.0
 - Console d'administration sur son propre port HTTPS 8822 (réservable aux adresses de l'installateur) ; le 443 ne sert plus qu'au softphone, à l'appli et aux téléphones
