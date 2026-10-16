@@ -563,6 +563,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       await c.query("DELETE FROM pbxmaison_extensions WHERE id = $1", [num]);
       await c.query("DELETE FROM pbxmaison_app_devices WHERE extension = $1", [num]);
       await c.query("DELETE FROM pbxmaison_app_tokens WHERE extension = $1", [num]);
+      await c.query("DELETE FROM pbxmaison_web_invites WHERE extension = $1", [num]);
       // Gestion d'appels : retrait des membres, destinations vers ce poste → raccrocher
       for (const o of await loadObjects(c)) {
         const d = structuredClone(o.data);
@@ -617,6 +618,30 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       host: server.host, fqdn: server.fqdn, ports: { udp: 5060, tcp: 5060, tls: server.tls ? 5061 : null }, voicemail: "*97",
       device_token: device, app_login_url: `${base}/app/login`, softphone_url: `${base}/softphone`, logout_url: `${base}/app/logout` };
   }
+  /** Mail de bienvenue : lien (7 jours) pour choisir son mot de passe du softphone web. */
+  async function createWelcome(num, by) {
+    const u = await getUser(num);
+    const token = crypto.randomBytes(24).toString("base64url");
+    const expires = new Date(Date.now() + 7 * 86400_000);
+    await db.query("DELETE FROM pbxmaison_web_invites WHERE expires_at < now() OR extension = $1", [num]);
+    await db.query("INSERT INTO pbxmaison_web_invites (token_hash, extension, expires_at, created_by) VALUES ($1, $2, $3, $4)", [hashToken(token), num, expires, by || ""]);
+    return { token, expires_at: expires.toISOString(), user: u };
+  }
+  async function welcomeInfo(token) {
+    if (!token || token.length < 20) return null;
+    const r = await db.query("SELECT extension FROM pbxmaison_web_invites WHERE token_hash = $1 AND expires_at > now()", [hashToken(token)]);
+    if (!r.rowCount) return null;
+    const u = await getUser(r.rows[0].extension);
+    return { extension: u.id, name: displayName(u), first_name: u.first_name, email: u.email, pbx: env().PBX_NAME || "" };
+  }
+  async function useWelcome(token, hash) {
+    const info = await welcomeInfo(token);
+    if (!info) return null;
+    await setWebPassword(info.extension, hash);
+    await db.query("DELETE FROM pbxmaison_web_invites WHERE extension = $1", [info.extension]);
+    return info;
+  }
+
   /** Poste d'un appareil de l'appli mobile (jeton valide), noté comme utilisé. */
   async function appDevice(token) {
     if (!token || token.length < 30) return null;
@@ -1198,7 +1223,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, deleteImpact,
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
-    createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
+    createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus,
     loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,

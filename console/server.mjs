@@ -446,6 +446,63 @@ export async function buildApp({ db, ami } = {}) {
     return reply.header("cache-control", "no-store").send(out);
   });
 
+  // Actions groupées sur les utilisateurs : mail de bienvenue (lien pour choisir son mot de passe du softphone), QR code de l'appli
+  const bulkIds = (req) => {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String))].filter((x) => /^[1-9]\d{2}$/.test(x));
+    if (!ids.length) throw new UserError("Sélectionne au moins un utilisateur.");
+    if (ids.length > 300) throw new UserError("300 utilisateurs au plus à la fois.");
+    return ids;
+  };
+  const baseUrl = () => { const sv = sipServer(); return `${sv.tls ? "https" : "http"}://${sv.host}`; };
+  const firstName = (u) => u.first_name || u.name || "";
+  app.post("/api/extensions/bulk/welcome", { preHandler: requireUser }, async (req) => {
+    const out = [];
+    const pbxName = pbxEnv().PBX_NAME || "";
+    for (const id of bulkIds(req)) {
+      try {
+        const w = await pbx.createWelcome(id, currentUser(req).email);
+        const u = w.user, name = u.first_name || u.last_name ? `${u.first_name} ${u.last_name}`.trim() : `Poste ${u.id}`;
+        const link = `${baseUrl()}/softphone?bienvenue=${w.token}`;
+        const login = u.email || u.id;
+        out.push({ id, name, email: u.email, link, expires_at: w.expires_at,
+          subject: `Bienvenue sur ton poste téléphonique${pbxName ? ` ${pbxName}` : ""}`,
+          body: `Bonjour ${firstName(u) || name},\n\nTon poste téléphonique ${u.id} est prêt. Tu peux appeler et recevoir tes appels depuis ton ordinateur (softphone web).\n\n`
+            + `1. Ouvre ce lien et choisis ton mot de passe (lien personnel, valable 7 jours) :\n${link}\n\n`
+            + `2. Ensuite, connecte-toi à tout moment sur ${baseUrl()}/softphone avec ton identifiant : ${login}\n\n`
+            + `Ta messagerie vocale : *97 depuis ton poste.\n\nBonne journée !` });
+      } catch (e) { out.push({ id, error: e.message }); }
+    }
+    return { results: out, smtp: false };
+  });
+  app.post("/api/extensions/bulk/app-tokens", { preHandler: requireUser }, async (req) => {
+    const out = [];
+    for (const id of bulkIds(req)) {
+      try {
+        const u = await pbx.getUser(id);
+        const t = await pbx.createAppToken(id, currentUser(req).email);
+        const url = appUrl(t.token), name = u.first_name || u.last_name ? `${u.first_name} ${u.last_name}`.trim() : `Poste ${u.id}`;
+        out.push({ id, name, email: u.email, url, qr_svg: qrSvg(url), expires_at: t.expires_at,
+          subject: "Configure l'application Callikoe sur ton mobile",
+          body: `Bonjour ${firstName(u) || name},\n\nPour avoir ton poste ${u.id} sur ton téléphone mobile :\n\n1. Installe l'application Callikoe.\n2. Ouvre ce lien depuis ton mobile et touche « Ouvrir dans l'application » (ou scanne le QR code depuis l'application) :\n${url}\n\nLe lien est personnel et valable 48 h : ne le transfère à personne.\n\nBonne journée !` });
+      } catch (e) { out.push({ id, error: e.message }); }
+    }
+    return { results: out, smtp: false };
+  });
+  app.get("/api/u/welcome/:token", async (req, reply) => {
+    const info = await pbx.welcomeInfo(String(req.params.token));
+    if (!info) return reply.code(404).send({ error: "Lien expiré ou déjà utilisé : demande un nouveau mail de bienvenue à ton administrateur." });
+    return info;
+  });
+  app.post("/api/u/welcome/:token", async (req, reply) => {
+    const pw = req.body?.password;
+    const problem = passwordProblem(pw);
+    if (problem) throw new UserError(problem, "password");
+    const info = await pbx.useWelcome(String(req.params.token), hashPassword(pw));
+    if (!info) return reply.code(404).send({ error: "Lien expiré ou déjà utilisé : demande un nouveau mail de bienvenue à ton administrateur." });
+    reply.setCookie(UCOOKIE, createToken({ ext: info.extension }, settings.sessionSecret, 12), cookieOpts(req));
+    return { ok: true, login: info.email || info.extension };
+  });
+
   // Appli mobile : ouverture du softphone avec le jeton de l'appareil (gardé par l'appli), déconnexion de l'appareil
   app.get("/app/login", async (req, reply) => {
     const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0].trim();

@@ -787,9 +787,14 @@ function showFormError(form, err) {
   else { const top = form.querySelector(".form-msg") || form; top.prepend(box); box.scrollIntoView({ block: "center" }); }
 }
 
+// Liste des utilisateurs : sélection multiple (supprimer, QR code de l'appli, mail de bienvenue)
+const usel = new Set();
+let ubulk = null;   // résultat de la dernière action groupée (affiché sous la barre)
+const mailto = (r) => `mailto:${encodeURIComponent(r.email || "")}?subject=${encodeURIComponent(r.subject)}&body=${encodeURIComponent(r.body)}`;
 async function renderUsers() {
   setNav("ext");
   const d = await api("GET", "/api/extensions");
+  for (const id of [...usel]) if (!d.extensions.some((x) => x.id === id)) usel.delete(id);
   const q = sessionStorage.getItem("pbxm_users_q") || "";
   const onlyFw = sessionStorage.getItem("pbxm_users_fw") === "1";
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Utilisateurs</h1><p class="sub" style="margin:0">Un utilisateur = un poste (téléphone, softphone, DECT), ses renvois et sa messagerie.</p></div>
@@ -797,8 +802,14 @@ async function renderUsers() {
     <div class="panel">
       <div class="filters"><input id="uq" type="search" placeholder="Rechercher : nom, poste, SDA, numéro de renvoi…" value="${esc(q)}">
         <label class="check"><input type="checkbox" id="ufw" ${onlyFw ? "checked" : ""}> Seulement ceux avec un renvoi actif</label></div>
+      <div class="ubulk" id="ubar" hidden><strong id="ucount"></strong>
+        <button type="button" class="btn sm" id="bwelcome">Envoyer le mail de bienvenue</button>
+        <button type="button" class="btn ghost sm" id="bqr">Envoyer le QR code de l'appli</button>
+        <button type="button" class="btn danger sm" id="bdel">Supprimer</button>
+        <button type="button" class="btn link" id="bnone">Tout désélectionner</button></div>
+      <div id="ubres"></div>
       ${d.extensions.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>Poste</th><th>Nom</th><th>Statut</th><th class="hide-sm">Téléphone</th><th>Renvois</th><th></th></tr></thead>
+      <thead><tr><th class="ck"><input type="checkbox" id="uall" aria-label="Tout sélectionner"></th><th>Poste</th><th>Nom</th><th>Statut</th><th class="hide-sm">Téléphone</th><th>Renvois</th><th></th></tr></thead>
       <tbody id="urows"></tbody></table></div><div id="unone" class="empty" hidden>Aucun utilisateur ne correspond.</div>`
       : `<div class="empty"><p>Aucun utilisateur pour l'instant.</p><a class="btn" href="#/utilisateurs/nouveau">Créer le premier utilisateur</a></div>`}</div>`;
   const rows = $("#urows");
@@ -814,7 +825,8 @@ async function renderUsers() {
       const hay = [x.id, x.name, x.email, x.mobile, ...x.dids, ...x.forwards.map((f) => f.text)].join(" ").toLowerCase();
       return hay.includes(words) || (digits.length >= 3 && hay.replace(/[^\d]/g, " ").replace(/(\d) (?=\d)/g, "$1").includes(digits));
     });
-    rows.innerHTML = list.map((x) => `<tr class="click" data-href="#/utilisateurs/${esc(x.id)}">
+    rows.innerHTML = list.map((x) => `<tr class="click ${usel.has(x.id) ? "sel" : ""}" data-href="#/utilisateurs/${esc(x.id)}">
+      <td class="ck"><input type="checkbox" data-sel="${esc(x.id)}" ${usel.has(x.id) ? "checked" : ""} aria-label="Sélectionner ${esc(x.id)}"></td>
       <td><strong>${esc(x.id)}</strong></td>
       <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.hidden ? ' <span class="pill off">Masqué</span>' : ""}${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
       <td>${statusPill(x)}</td>
@@ -835,14 +847,67 @@ async function renderUsers() {
     wireImpersonate(rows);
     wireResync(rows);
     $("#unone").hidden = list.length > 0;
-    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; });
+    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a, .ck")) location.hash = tr.dataset.href; });
+    rows.querySelectorAll("[data-sel]").forEach((cb) => cb.onchange = () => { cb.checked ? usel.add(cb.dataset.sel) : usel.delete(cb.dataset.sel); cb.closest("tr").classList.toggle("sel", cb.checked); bar(list); });
+    $("#uall").onchange = (e) => { for (const x of list) e.target.checked ? usel.add(x.id) : usel.delete(x.id); draw(); };
+    bar(list);
+  };
+  const bar = (list) => {
+    $("#ubar").hidden = usel.size === 0;
+    $("#ucount").textContent = `${usel.size} sélectionné${usel.size > 1 ? "s" : ""}`;
+    const all = $("#uall"); all.checked = list.length > 0 && list.every((x) => usel.has(x.id)); all.indeterminate = !all.checked && list.some((x) => usel.has(x.id));
+  };
+  const drawBulk = () => {
+    const box = $("#ubres");
+    if (!ubulk) { box.innerHTML = ""; return; }
+    const r = ubulk.results, isQr = ubulk.kind === "qr";
+    const ok = r.filter((x) => !x.error);
+    box.innerHTML = `<div class="ubulk-res"><div class="ph"><h2>${isQr ? "QR codes de l'application mobile" : "Mails de bienvenue"}</h2>
+        <button type="button" class="btn link" id="bclose">Fermer</button></div>
+      <p class="hint" style="margin:0 0 10px">${isQr ? "Chaque lien configure l'application Callikoe sur le poste de l'utilisateur (valable 48 h)." : "Chaque lien permet à l'utilisateur de choisir son mot de passe puis ouvre son softphone (valable 7 jours)."}
+        L'envoi automatique depuis le PBX arrivera avec la configuration du serveur d'e-mails : en attendant, « Ouvrir dans ma messagerie » prépare le message, tu n'as plus qu'à l'envoyer.</p>
+      ${r.map((x) => x.error ? `<div class="ubulk-row"><span><strong>${esc(x.id)}</strong></span><span class="pill bad">${esc(x.error)}</span></div>`
+        : `<div class="ubulk-row">${isQr ? `<span class="ubulk-qr">${x.qr_svg}</span>` : ""}<span class="grow"><strong>${esc(x.id)} · ${esc(x.name)}</strong>
+            <span class="s">${x.email ? esc(x.email) : '<span style="color:var(--warn)">Pas d\'e-mail dans la fiche : copie le lien et transmets-le autrement.</span>'}</span></span>
+          ${x.email ? `<a class="btn sm" href="${esc(mailto(x))}">Ouvrir dans ma messagerie</a>` : ""}
+          <button type="button" class="btn ghost sm" data-copy="${esc(isQr ? x.url : x.link)}">Copier le lien</button></div>`).join("")}
+      ${isQr && ok.length ? `<div class="row" style="margin-top:10px"><button type="button" class="btn ghost sm" id="bprint">Imprimer les QR codes</button></div>` : ""}</div>`;
+    copyButtons(box);
+    $("#bclose").onclick = () => { ubulk = null; drawBulk(); };
+    $("#bprint")?.addEventListener("click", () => {
+      const w = window.open("", "_blank");
+      w.document.write(`<title>QR codes Callikoe</title><body style="font:15px system-ui;margin:24px"><style>.q{display:inline-block;width:46%;margin:1%;text-align:center;page-break-inside:avoid;border:1px solid #ddd;border-radius:10px;padding:14px;box-sizing:border-box}.q svg{width:220px;height:220px}</style>
+        ${ok.map((x) => `<div class="q"><h3 style="margin:0 0 6px">${esc(x.id)} · ${esc(x.name)}</h3><div>${x.qr_svg}</div><p style="margin:6px 0 0">À scanner dans l'application Callikoe<br>Valable jusqu'au ${esc(fmtDateTime(x.expires_at))}</p></div>`).join("")}</body>`);
+      w.document.close(); w.print();
+    });
+  };
+  const bulk = async (kind) => {
+    const ids = [...usel];
+    if (kind === "qr" && !confirm(`Générer un QR code de l'application pour ${ids.length} utilisateur(s) ?\nUn nouveau QR code annule le précédent de chaque poste.`)) return;
+    try {
+      const r = await api("POST", kind === "qr" ? "/api/extensions/bulk/app-tokens" : "/api/extensions/bulk/welcome", { ids });
+      ubulk = { kind, results: r.results }; drawBulk(); $("#ubres").scrollIntoView({ block: "start", behavior: "smooth" });
+    } catch (err) { flash = { cls: "bad", text: err.message }; renderUsers(); }
+  };
+  $("#bwelcome").onclick = () => bulk("welcome");
+  $("#bqr").onclick = () => bulk("qr");
+  $("#bnone").onclick = () => { usel.clear(); draw(); };
+  $("#bdel").onclick = async () => {
+    const ids = [...usel];
+    if (!confirm(`Supprimer ${ids.length} utilisateur(s) : ${ids.join(", ")} ?\n\nLeurs identifiants, messageries et renvois seront supprimés, et ils seront retirés des groupes et des routes.`)) return;
+    if (ids.length > 3 && prompt(`Pour confirmer, tape le nombre d'utilisateurs à supprimer (${ids.length}) :`) !== String(ids.length)) return;
+    const errs = [];
+    for (const id of ids) { try { await api("DELETE", `/api/extensions/${id}?force=1`); usel.delete(id); } catch (err) { errs.push(`${id} : ${err.message}`); } }
+    flash = errs.length ? { cls: "bad", text: `Non supprimés : ${errs.join(" · ")}` } : { text: `${ids.length} utilisateur(s) supprimé(s).` };
+    renderUsers();
   };
   $("#uq").addEventListener("input", draw);
   $("#ufw").addEventListener("change", draw);
   draw();
+  drawBulk();
   clearInterval(timer);
   timer = setInterval(async () => {
-    if (location.hash !== "#/utilisateurs" || document.activeElement === $("#uq")) return;
+    if (location.hash !== "#/utilisateurs" || document.activeElement === $("#uq") || usel.size || ubulk) return;
     renderUsers();
   }, 15000);
 }

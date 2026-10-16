@@ -645,3 +645,16 @@ body.no-side .shell{margin-left:0}
 /* Fiche utilisateur : un seul « Enregistrer » pour tous les onglets */
 .usave{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .usave .pill[hidden],.usave .btn[hidden]{display:none}
+
+/* Utilisateurs : sélection multiple */
+th.ck,td.ck{width:34px;padding-right:0}
+td.ck input,th.ck input{width:18px;height:18px;margin:0;cursor:pointer}
+tr.sel td{background:var(--accent-soft, rgba(216,20,28,.06))}
+.ubulk{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid var(--line);background:var(--bg)}
+.ubulk[hidden]{display:none}
+.ubulk strong{margin-right:6px}
+.ubulk-res{border-top:1px solid var(--line);padding:14px 16px}
+.ubulk-res .ph{display:flex;align-items:center;justify-content:space-between;padding:0;margin-bottom:6px;border:0}
+.ubulk-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.ubulk-row .grow{flex:1;min-width:200px;display:flex;flex-direction:column}
+.ubulk-qr svg{width:84px;height:84px;display:block;background:#fff;border-radius:6px}

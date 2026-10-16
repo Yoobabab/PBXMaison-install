@@ -166,6 +166,36 @@ function renderLogin(msg) {
   };
 }
 
+// Mail de bienvenue : l'utilisateur choisit son mot de passe puis arrive sur son softphone
+async function renderWelcome(token) {
+  stopPolling();
+  let info;
+  try { info = await api("GET", `/api/u/welcome/${encodeURIComponent(token)}`); }
+  catch (e) { history.replaceState(null, "", "/softphone"); return renderLogin(e.message); }
+  root.innerHTML = `<div class="sp-login-wrap"><div class="sp-login panel">
+    <div class="sp-brand"><i></i><span>Callikoe</span></div>
+    <h1>Bienvenue${info.first_name ? ` ${esc(info.first_name)}` : ""}</h1>
+    <p class="sub">Ton poste <strong>${esc(info.extension)}</strong>${info.pbx ? ` · ${esc(info.pbx)}` : ""} est prêt. Choisis ton mot de passe pour te connecter à ton softphone.</p>
+    <div class="flash" style="margin-bottom:12px">Ton identifiant de connexion : <strong>${esc(info.email || info.extension)}</strong></div>
+    <form id="wf" class="stack" method="post" novalidate>
+      <input type="hidden" name="username" autocomplete="username" value="${esc(info.email || info.extension)}">
+      <label>Mot de passe<input name="password" type="password" autocomplete="new-password" required><span class="hint">10 caractères minimum, lettres et chiffres.</span></label>
+      <label>Confirmation<input name="confirm" type="password" autocomplete="new-password" required></label>
+      <div id="wmsg"></div>
+      <button class="btn" type="submit">Enregistrer et ouvrir mon softphone</button>
+    </form></div></div>`;
+  addEyes();
+  $("#wf").onsubmit = async (e) => {
+    e.preventDefault();
+    audioReady();
+    const fd = Object.fromEntries(new FormData(e.target));
+    const msg = (t) => { $("#wmsg").innerHTML = `<div class="flash bad">${esc(t)}</div>`; };
+    if (fd.password !== fd.confirm) return msg("Les deux mots de passe sont différents.");
+    try { await api("POST", `/api/u/welcome/${encodeURIComponent(token)}`, { password: fd.password }); history.replaceState(null, "", "/softphone"); start(); }
+    catch (err) { msg(err.message); }
+  };
+}
+
 async function start() {
   try { me = await api("GET", "/api/u/me"); } catch (e) { if (e.status === 401) return renderLogin(); root.innerHTML = `<div class="flash bad" style="margin:40px">${esc(e.message)}</div>`; return; }
   contacts = me.contacts;
@@ -1091,4 +1121,5 @@ document.addEventListener("visibilitychange", () => {
   refreshTeam();
   if (page === "chat" && chatSel) { const c = chats.find((x) => x.id === chatSel); const last = chatMsgs.at(-1); if (c?.unread && last) { c.unread = 0; badges(); drawChatList(); api("POST", `/api/u/chats/${chatSel}/read`, { last: last.id }).catch(() => {}); } }
 });
-start();
+const welcomeToken = new URLSearchParams(location.search).get("bienvenue");
+if (welcomeToken) renderWelcome(welcomeToken); else start();

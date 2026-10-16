@@ -151,6 +151,14 @@ AJ="$(mktemp)"
 curl -sS -X POST http://127.0.0.1/app/logout -H 'content-type: application/json' -d "{\"device_token\":\"$DEV\"}" >/dev/null
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1/app/login?d=$DEV")" == 401 ]] && pass "Appli mobile : téléphone déconnecté → jeton refusé" || fail "app logout"
 curl -sS "http://127.0.0.1/app/provision?t=${TOK}" | grep -q "callikoe://provision" && pass "Lien du QR code ouvert sans l'appli : page « Ouvrir dans l'application »" || fail "page appli"
+# Mail de bienvenue (sélection multiple) : lien pour choisir son mot de passe du softphone
+WL="$(api POST /api/extensions/bulk/welcome '{"ids":["201","202"]}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s).results;console.log(r.length===2&&r[0].body.includes("201")?r[0].link:"")})')"
+WT="${WL##*bienvenue=}"
+[[ -n "$WL" ]] && curl -sS "http://127.0.0.1/api/u/welcome/$WT" | grep -q '"extension":"201"' && pass "Mail de bienvenue préparé pour 2 utilisateurs sélectionnés (lien personnel)" || fail "bienvenue : $WL"
+WJ="$(mktemp)"
+curl -sS -c "$WJ" -X POST "http://127.0.0.1/api/u/welcome/$WT" -H 'content-type: application/json' -d '{"password":"Bienvenue2026"}' | grep -q '"ok":true' \
+  && curl -sS -b "$WJ" http://127.0.0.1/api/u/me | grep -q '"201"' && [[ "$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1/api/u/welcome/$WT")" == 404 ]] \
+  && pass "Bienvenue : mot de passe choisi par l'utilisateur, softphone ouvert, lien utilisable une seule fois" || fail "bienvenue mot de passe"
 api GET /api/phones | grep -q '"phones":\[' && pass "Menu Téléphones : liste disponible" || fail "api phones"
 
 systemctl is-enabled --quiet pbxmaison-dns.timer && pass "Mise à jour automatique de l'adresse (timer) active" || fail "timer DNS"
