@@ -996,7 +996,7 @@ function wireDest(root) {
 }
 
 /**
- * Choix du rôle. Installateur (compte de la console) : les 5 rôles, avec le bouton « i ».
+ * Choix du rôle. Installateur (compte de la console) : les 5 rôles. Bouton « i » : installateur et rôle Administrateur.
  * Utilisateur du PBX connecté à la console (Gestionnaire, Administrateur) : seulement Utilisateur, Pilote, Superviseur ;
  * il ne peut pas changer le rôle d'un Gestionnaire ou d'un Administrateur.
  */
@@ -1007,7 +1007,7 @@ function roleField(u) {
   const locked = !installer && !allowed.some((r) => r.id === cur);
   const list = locked ? ROLES.filter((r) => r.id === cur) : allowed;
   return `<label>Rôle<span class="rolerow"><select name="options.role" ${locked ? "disabled" : ""}>${list.map((r) => `<option value="${r.id}" ${cur === r.id ? "selected" : ""}>${r.name} — ${r.short}</option>`).join("")}</select>
-      ${installer ? `<button type="button" class="info-i" data-rolesinfo title="Que peut faire chaque rôle ?">i</button>` : ""}</span>
+      ${installer || state?.role === "tech" ? `<button type="button" class="info-i" data-rolesinfo title="Que peut faire chaque rôle ?">i</button>` : ""}</span>
     <span class="hint">${locked ? "Ce rôle donne accès à la console : seul l'installateur peut le changer." : installer ? "Chaque rôle a tous les droits du précédent. Gestionnaire et Administrateur se connectent à la console de ce PBX avec l'e-mail de la fiche et le mot de passe du softphone." : "Pilote : ouvre et ferme tout le PBX, renvoie un collègue, enregistre les annonces. Superviseur : en plus, plannings et suivi de l'équipe."}</span></label>`;
 }
 
