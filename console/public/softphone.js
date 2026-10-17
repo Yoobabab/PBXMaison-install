@@ -42,6 +42,8 @@ const I = {
   calls: () => svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
   vm: () => svg('<circle cx="6.5" cy="12" r="3.5"/><circle cx="17.5" cy="12" r="3.5"/><path d="M6.5 15.5h11"/>'),
   gear: () => svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  mega: (z) => svg('<path d="M3 10v4a1 1 0 0 0 1 1h3l5 4V5L7 9H4a1 1 0 0 0-1 1z"/><path d="M16 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>', z),
+  eye: (z) => svg('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', z),
   fwd: (z) => svg('<path d="M15 4l5 5-5 5"/><path d="M20 9H10a6 6 0 0 0-6 6v4"/>', z),
   building: () => svg('<path d="M4 21V5.5A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5V21M15 10h3.5a1.5 1.5 0 0 1 1.5 1.5V21M2.5 21h19M8 8h3M8 12h3M8 16h3"/>'),
   cal: () => svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h3M13 14h3M8 17.5h3"/>'),
@@ -102,7 +104,9 @@ function tone(pattern, el = "tones") { // pattern : [[fréquences], durée ms, s
 }
 const RINGBACK = [[440], 1500, 3500];          // tonalité de retour d'appel (France : 440 Hz)
 const RINGTONE = [[523, 659], 900, 1400];      // sonnerie d'appel entrant
-document.addEventListener("pointerdown", () => { audioReady(); $("#sp-unlock")?.remove(); }, { capture: true });
+// Le bandeau « clique pour activer la sonnerie » disparaît après le clic (pas avant : sinon la page remonte et le clic tombe à côté du bouton visé)
+document.addEventListener("pointerdown", () => audioReady(), { capture: true });
+document.addEventListener("click", () => setTimeout(() => $("#sp-unlock")?.remove()), { capture: true });
 
 const audioPrefs = () => store.get("callikoe_audio", { mic: "", spk: "", ring: "" });
 async function applySinks() {
@@ -248,12 +252,16 @@ if (IN_APP) document.documentElement.classList.add("in-app");
 const NAV = IN_APP
   ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
   : [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { renvoi: "Renvoi", clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
+const TITLES = { renvoi: "Renvoi", annonces: "Annonces", supervision: "Supervision", clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
 // Responsable : onglet Plannings (dans le menu de l'appli, où la barre du bas est déjà pleine)
 // Renvoi : menu à part (barre de gauche ; dans l'appli : menu du profil, en haut à droite)
+// Pilote : Annonces ; Superviseur : Supervision et Plannings (dans l'appli : menu du profil, la barre du bas est déjà pleine)
 const navItems = () => {
-  const base = IN_APP ? NAV : [...NAV.slice(0, -1), ["renvoi", "Renvoi", I.fwd], NAV.at(-1)];
-  return !me?.user?.manager || IN_APP ? base : [...base.slice(0, -1), ["planning", "Plannings", I.cal], base.at(-1)];
+  if (IN_APP) return NAV;
+  const extra = [["renvoi", "Renvoi", I.fwd],
+    ...(me?.user?.standardist ? [["annonces", "Annonces", I.mega]] : []),
+    ...(me?.user?.manager ? [["supervision", "Supervision", I.eye], ["planning", "Plannings", I.cal]] : [])];
+  return [...NAV.slice(0, -1), ...extra, NAV.at(-1)];
 };
 
 function presenceOf(c) {
@@ -334,7 +342,8 @@ function toggleMenu(force) {
     <hr>
     <a class="pm-it" href="#/renvoi">${I.fwd(18)}Renvoi de mes appels${fwdOn() ? '<span class="pm-on">activé</span>' : ""}</a>
     <a class="pm-it" href="#/reglages/transfert">Renvois par statut…</a>
-    ${me.user.manager ? `<a class="pm-it" href="#/planning">${I.cal()}Plannings d'appels…</a>` : ""}
+    ${me.user.standardist ? `<a class="pm-it" href="#/annonces">${I.mega(18)}Annonces…</a>` : ""}
+    ${me.user.manager ? `<a class="pm-it" href="#/supervision">${I.eye(18)}Supervision…</a><a class="pm-it" href="#/planning">${I.cal()}Plannings d'appels…</a>` : ""}
     ${IN_APP ? `<button class="pm-it" id="appaccounts">${I.team()}Comptes…</button>` : `<button class="pm-it" id="logout">${I.logout()}${me.impersonated_by ? "Quitter l'incarnation" : "Se déconnecter"}</button>`}
   </div>`;
   m.querySelector(".pmenu").onclick = (e) => e.stopPropagation();
@@ -411,12 +420,16 @@ function openSheet(html, cls = "") {
   const sh = m.querySelector(".ksheet");
   sh.onclick = (e) => e.stopPropagation();
   m.querySelector(".ks-scrim").onclick = closeSheet;
-  const key = $("#kstd");
-  if (key && innerWidth > 760) { const r = key.getBoundingClientRect(); Object.assign(sh.style, { top: `${r.bottom + 8}px`, left: `${r.left}px` }); }
+  // Sur ordinateur : sous le bouton Ouvert / Fermé pour celui-ci, au centre pour les autres ; sur téléphone : en bas (softphone.css)
+  const key = cls === "oc" ? $("#kstd") : null;
+  if (innerWidth > 760) {
+    if (key) { const r = key.getBoundingClientRect(); Object.assign(sh.style, { top: `${r.bottom + 8}px`, left: `${r.left}px` }); }
+    else Object.assign(sh.style, { top: "110px", left: `calc(50% - ${sh.offsetWidth / 2}px)` });
+  }
   return sh;
 }
 // Fermer : où vont les appels ? (messagerie, collègue, groupe, file, SVI, numéro) — la dernière destination est proposée d'office
-const OC_KINDS = [["user_vm", "📮", "Une messagerie"], ["user", "👤", "Un collègue"], ["group", "👥", "Un groupe d'appel"], ["queue", "⏳", "Une file d'attente"], ["ivr", "🔢", "Le SVI"], ["external", "📱", "Un numéro (portable…)"]];
+const OC_KINDS = [["prompt", "📢", "Une annonce (puis raccroche)"], ["user_vm", "📮", "Une messagerie"], ["user", "👤", "Un collègue"], ["group", "👥", "Un groupe d'appel"], ["queue", "⏳", "Une file d'attente"], ["ivr", "🔢", "Le SVI"], ["external", "📱", "Un numéro (portable…)"]];
 function ocSheet() {
   const st = me.standard, c = keyInfo.codes || {};
   if (st.state !== "open") {
@@ -432,14 +445,16 @@ function ocSheet() {
   const vms = [...(t.user || []).filter((u) => u.vm).map((u) => ({ type: "user_vm", id: u.id, name: `Messagerie de ${u.name.replace(/^\d+ · /, "")}` })), ...(t.groupvm || []).map((o) => ({ type: "groupvm", id: o.id, name: o.name }))];
   const list = (k) => k === "user_vm" ? vms : (t[k] || []).map((o) => ({ type: k, id: o.id, name: o.name }));
   const cur = st.dest || {};
-  const curKind = cur.type === "groupvm" ? "user_vm" : cur.type;
-  let pick = cur.type && cur.type !== "hangup" ? { type: cur.type, target: cur.target } : null;
-  const kinds = OC_KINDS.filter(([k]) => k === "external" || list(k).length);
+  const curKind = cur.type === "groupvm" ? "user_vm" : cur.type === "hangup" && cur.prompt ? "prompt" : cur.type;
+  const isCur = (o) => o.type === "prompt" ? cur.type === "hangup" && cur.prompt === o.id : cur.type === o.type && cur.target === o.id;
+  const asDest = (type, id) => type === "prompt" ? { type: "hangup", target: "", prompt: id } : { type, target: id };
+  let pick = cur.type === "hangup" ? (cur.prompt ? asDest("prompt", cur.prompt) : null) : cur.type ? { type: cur.type, target: cur.target } : null;
+  const kinds = OC_KINDS.filter(([k]) => k === "external" || k === "prompt" || list(k).length);
   const sh = openSheet(`<div class="ks-head"><span class="oc-big open"></span><div><h3>Fermer</h3><p>Où envoyer les appels pendant la fermeture ?</p></div></div>
     <div class="oc-kinds">${kinds.map(([k, ic, l]) => `<div class="oc-k ${k === curKind ? "on" : ""}" data-k="${k}">
       <button type="button" class="oc-kh"><span class="ks-ic">${ic}</span><span class="grow">${l}</span><span class="oc-sel">${k === curKind && st.closed ? esc(st.closed) : ""}</span><span class="chev">›</span></button>
       <div class="oc-kb">${k === "external" ? `<input inputmode="tel" class="oc-num" placeholder="06 12 34 56 78" value="${cur.type === "external" ? esc(fmtNum(cur.target)) : ""}">`
-        : list(k).map((o) => `<button type="button" class="oc-o ${cur.type === o.type && cur.target === o.id ? "on" : ""}" data-t="${o.type}" data-id="${esc(o.id)}">${esc(o.name)}</button>`).join("")}</div></div>`).join("")}</div>
+        : list(k).map((o) => `<button type="button" class="oc-o ${isCur(o) ? "on" : ""}" data-t="${o.type}" data-id="${esc(o.id)}">${esc(o.name)}</button>`).join("") + (k === "prompt" ? `<a class="oc-new" href="#/annonces">＋ Enregistrer une nouvelle annonce</a>` : "")}</div></div>`).join("")}</div>
     <button class="ks-main closed" id="ocgo" ${pick ? "" : "disabled"}>Fermer${pick && st.closed ? ` · vers ${esc(st.closed)}` : ""}</button>
     ${keyOffer("standard")}
     <p class="ks-code">Sur un téléphone : <b>${esc(c.std_close || "*80")}</b> fermer (vers la dernière destination)</p>`, "oc");
@@ -455,7 +470,7 @@ function ocSheet() {
     $$(".oc-o", sh).forEach((x) => x.classList.remove("on")); $$(".oc-k", sh).forEach((x) => x.classList.remove("on"));
     b.classList.add("on"); b.closest(".oc-k").classList.add("on");
     b.closest(".oc-k").querySelector(".oc-sel").textContent = b.textContent;
-    setPick({ type: b.dataset.t, target: b.dataset.id }, b.textContent);
+    setPick(asDest(b.dataset.t, b.dataset.id), b.textContent);
   });
   const num = $(".oc-num", sh);
   num?.addEventListener("input", () => {
@@ -464,6 +479,7 @@ function ocSheet() {
     setPick(n ? { type: "external", target: n } : null, fmtNum(n) || n);
   });
   go.onclick = () => setOc("closed", pick);
+  $(".oc-new", sh)?.addEventListener("click", closeSheet);
   wireKeyOffer(sh);
 }
 async function setOc(state, dest = null) {
@@ -473,6 +489,144 @@ async function setOc(state, dest = null) {
     toast(state === "open" ? "C'est ouvert : les appels arrivent normalement" : "C'est fermé");
     me.standard = { ...me.standard, ...r }; closeSheet(); renderKeys(); refreshKeys();
   } catch (err) { toast(err.message, "bad"); sh?.classList.remove("busy"); }
+}
+
+// ------------------------------------------------------------------ Annonces (Pilote) : écouter, réenregistrer au micro, en créer une
+/** N'importe quel audio lisible par le navigateur → WAV PCM 16 bits mono 8 kHz (format téléphone) */
+async function toPhoneWav(buf) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  let decoded;
+  try { decoded = await ctx.decodeAudioData(buf.slice(0)); } finally { ctx.close(); }
+  const secs = Math.min(decoded.duration, 600);
+  const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(secs * 8000)), 8000);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  const out = (await off.startRendering()).getChannelData(0);
+  let peak = 0; for (const v of out) peak = Math.max(peak, Math.abs(v));
+  const gain = peak > 0 && peak < 0.5 ? 0.9 / peak : 1;
+  const view = new DataView(new ArrayBuffer(44 + out.length * 2));
+  const str = (o, x) => [...x].forEach((c, i) => view.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); view.setUint32(4, 36 + out.length * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, 8000, true);
+  view.setUint32(28, 16000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); str(36, "data"); view.setUint32(40, out.length * 2, true);
+  out.forEach((v, i) => view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v * gain)) * 0x7fff, true));
+  return { wav: new Uint8Array(view.buffer), secs };
+}
+const b64 = (u8) => { let x = ""; for (let i = 0; i < u8.length; i += 0x8000) x += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(x); };
+let promptList = null;
+async function pageAnnonces(el) {
+  el.innerHTML = `<div class="sp-loading">Chargement…</div>`;
+  try { promptList = (await api("GET", "/api/u/prompts")).prompts; } catch (e) { el.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
+  el.innerHTML = `<section class="panel annpage">
+    <div class="ann-head"><div><h2>Annonces</h2><p>Les messages que les appelants entendent (accueil, fermeture, attente…). Réenregistre-les au micro quand tu veux.</p></div>
+      <button class="btn" id="annnew">＋ Nouvelle annonce</button></div>
+    <div class="ann-list">${promptList.map((p) => `<div class="ann-it" data-p="${esc(p.id)}">
+      <button class="ann-play" data-play="${esc(p.id)}" title="Écouter">▶</button>
+      <div class="grow"><b>${esc(p.name)}</b><small>${p.duration ? `${Math.round(p.duration)} s` : ""}${p.updated_at ? ` · modifiée le ${esc(new Date(p.updated_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }))}` : ""}</small></div>
+      <button class="btn ghost sm" data-rec="${esc(p.id)}">🎙 Réenregistrer</button></div>`).join("") || '<p class="s">Aucune annonce pour l\'instant : crée la première.</p>'}</div>
+    <p class="s ann-tip">Astuce : pour une fermeture exceptionnelle, enregistre « Nous sommes fermés exceptionnellement… », puis ferme avec le bouton Ouvert / Fermé en choisissant cette annonce.</p>
+  </section>`;
+  let audio = null;
+  $$("[data-play]", el).forEach((b) => b.onclick = () => {
+    if (audio && !audio.paused && audio.dataset.id === b.dataset.play) { audio.pause(); b.textContent = "▶"; return; }
+    audio?.pause(); $$("[data-play]", el).forEach((x) => (x.textContent = "▶"));
+    audio = new Audio(`/api/u/prompts/${encodeURIComponent(b.dataset.play)}/audio?t=${Date.now()}`); audio.dataset.id = b.dataset.play;
+    audio.onended = () => (b.textContent = "▶"); audio.play().catch((e) => toast(e.message, "bad")); b.textContent = "❚❚";
+  });
+  $$("[data-rec]", el).forEach((b) => b.onclick = () => recordSheet(promptList.find((p) => p.id === b.dataset.rec)));
+  $("#annnew", el).onclick = () => recordSheet(null);
+}
+function recordSheet(p) {
+  const sh = openSheet(`<div class="ks-head"><span class="fwp-ic sm">🎙</span><div><h3>${p ? `Réenregistrer « ${esc(p.name)} »` : "Nouvelle annonce"}</h3><p>Parle près du micro, dans un endroit calme.</p></div></div>
+    ${p ? "" : `<input id="rname" class="rec-name" placeholder="Nom de l'annonce (ex. Fermeture exceptionnelle)" maxlength="50">`}
+    <div class="rec-box"><button class="rec-btn" id="recgo"><span></span></button><div class="rec-t" id="rect">Appuie pour enregistrer</div></div>
+    <div class="rec-after" hidden><audio id="recaudio" controls></audio>
+      <div class="rec-acts"><button class="btn ghost" id="recagain">Recommencer</button><button class="ks-main open" id="recsave">Enregistrer l'annonce</button></div></div>
+    <label class="rec-file">ou envoyer un fichier audio<input type="file" accept="audio/*" id="recfile" hidden></label>`);
+  let rec = null, chunks = [], wav = null, t0 = 0, timer = null, stream = null;
+  const st = $("#rect", sh), btn = $("#recgo", sh);
+  const ready = async (buf) => {
+    try {
+      const r = await toPhoneWav(buf); wav = r.wav;
+      $("#recaudio", sh).src = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+      $(".rec-after", sh).hidden = false; $(".rec-box", sh).hidden = true; $(".rec-file", sh).hidden = true;
+    } catch { toast("Audio illisible : réessaie.", "bad"); }
+  };
+  btn.onclick = async () => {
+    if (rec) { rec.stop(); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast("Micro refusé : autorise-le pour enregistrer.", "bad"); return; }
+    chunks = []; rec = new MediaRecorder(stream);
+    rec.ondataavailable = (e) => chunks.push(e.data);
+    rec.onstop = async () => { clearInterval(timer); stream.getTracks().forEach((x) => x.stop()); btn.classList.remove("on"); rec = null; await ready(await new Blob(chunks).arrayBuffer()); };
+    rec.start(); t0 = Date.now(); btn.classList.add("on");
+    timer = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); st.textContent = `● ${fmtDur(s)} · appuie pour arrêter`; if (s >= 300) rec?.stop(); }, 250);
+  };
+  $("#recfile", sh).onchange = async (e) => { const f = e.target.files[0]; if (f) await ready(await f.arrayBuffer()); };
+  $("#recagain", sh).onclick = () => { wav = null; $(".rec-after", sh).hidden = true; $(".rec-box", sh).hidden = false; $(".rec-file", sh).hidden = false; st.textContent = "Appuie pour enregistrer"; };
+  $("#recsave", sh).onclick = async () => {
+    const name = p ? p.name : $("#rname", sh).value.trim();
+    if (!name) { toast("Donne un nom à l'annonce.", "bad"); $("#rname", sh).focus(); return; }
+    sh.classList.add("busy");
+    try {
+      await api(p ? "PUT" : "POST", p ? `/api/u/prompts/${encodeURIComponent(p.id)}` : "/api/u/prompts", { name, wav: b64(wav) });
+      toast(p ? "Annonce remplacée" : "Annonce créée"); closeSheet(); if (page === "annonces") renderPage(); refreshKeys();
+    } catch (err) { toast(err.message, "bad"); sh.classList.remove("busy"); }
+  };
+}
+
+// ------------------------------------------------------------------ Supervision (Superviseur) : en cours, journal de l'équipe, files d'attente
+let supTab = "live", supDays = 1, supTimer = null;
+const ST_TXT = { answered: ["ok", "Répondu"], missed: ["bad", "Manqué"], voicemail: ["wait", "Messagerie"], busy: ["wait", "Occupé"], failed: ["bad", "Échec"] };
+async function pageSupervision(el) {
+  clearInterval(supTimer);
+  el.innerHTML = `<section class="panel suppage"><div class="ltabs suptabs">${[["live", "En ce moment"], ["log", "Journal"], ["queues", "Files d'attente"]].map(([k, l]) => `<button class="${supTab === k ? "on" : ""}" data-st="${k}">${l}</button>`).join("")}</div><div id="supbody" class="pad"><div class="s">Chargement…</div></div></section>`;
+  $$("[data-st]", el).forEach((b) => b.onclick = () => { supTab = b.dataset.st; pageSupervision(el); });
+  const body = $("#supbody", el);
+  const draw = async () => {
+    if (page !== "supervision") return clearInterval(supTimer);
+    try {
+      if (supTab === "log") return drawLog(body);
+      const d = await api("GET", "/api/u/supervision");
+      if (supTab === "live") body.innerHTML = d.calls.length ? `<div class="sup-live">${d.calls.map((c) => `<div class="sup-call"><span class="sup-dir ${c.direction}">${c.direction === "entrant" ? "↙" : c.direction === "sortant" ? "↗" : "↔"}</span>
+          <div class="grow"><span><b>${esc(nameOf(c.from) || fmtNum(c.from) || c.from)}</b> → <b>${esc(nameOf(c.to) || fmtNum(c.to) || c.to)}</b></span><small>${esc(c.state)}</small></div><span class="sup-dur">${fmtDur(c.duration)}</span></div>`).join("")}</div>`
+        : `<div class="empty-st">${d.available ? "Aucun appel en ce moment." : "Moteur téléphonique injoignable."}</div>`;
+      if (supTab === "queues") body.innerHTML = d.queues.length ? d.queues.map((q) => `<div class="sup-q">
+          <div class="sup-qh"><b>${esc(q.name)}</b><span class="s">${esc(q.number)}</span></div>
+          <div class="sup-kpis"><div class="${q.waiting ? "hot" : ""}"><b>${q.waiting}</b><small>en attente</small></div><div><b>${q.longest ? fmtDur(q.longest) : "—"}</b><small>plus longue attente</small></div>
+            <div><b>${q.answered}</b><small>répondus</small></div><div class="${q.lost_pct >= 20 ? "hot" : ""}"><b>${q.lost}</b><small>perdus (${q.lost_pct} %)</small></div><div><b>${fmtDur(q.holdtime)}</b><small>attente moyenne</small></div></div>
+          <div class="sup-agents">${q.agents.map((a) => `<span class="sup-ag ${a.state}"><i></i>${esc(a.name)} <small>${a.taken} appel${a.taken > 1 ? "s" : ""}</small></span>`).join("")}</div></div>`).join("") + '<p class="s">Chiffres depuis le dernier redémarrage du moteur téléphonique (en général la nuit).</p>'
+        : `<div class="empty-st">Aucune file d'attente sur ce PBX.</div>`;
+    } catch (e) { body.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; }
+  };
+  await draw();
+  if (supTab !== "log") supTimer = setInterval(() => { if (!document.hidden) draw(); }, 5000);
+}
+async function drawLog(body) {
+  body.innerHTML = `<div class="sup-logbar"><div class="chips-f">${[[1, "Aujourd'hui"], [7, "7 jours"], [30, "30 jours"]].map(([d, l]) => `<button class="chipf ${supDays === d ? "on" : ""}" data-days="${d}">${l}</button>`).join("")}</div>
+    <input id="supq" type="search" placeholder="Numéro ou nom"></div><div id="suplog"><div class="s">Chargement…</div></div>`;
+  $$("[data-days]", body).forEach((b) => b.onclick = () => { supDays = Number(b.dataset.days); drawLog(body); });
+  let audio = null;
+  const load = async () => {
+    const q = $("#supq", body).value.trim();
+    const r = await api("GET", `/api/u/supervision/log?days=${supDays}&q=${encodeURIComponent(q)}`);
+    const box = $("#suplog", body);
+    box.innerHTML = r.calls.length ? r.calls.map((c) => {
+      const [cls, txt] = ST_TXT[c.status] || ["", c.status];
+      const who = c.direction === "out" ? `${esc(nameOf(c.from.number) || c.from.number)} → ${esc(fmtNum(c.to.number) || c.to.number)}` : `${esc(c.from.name || fmtNum(c.from.number) || c.from.number)} → ${esc(c.answered_by ? (nameOf(c.answered_by) || c.answered_by) : (c.rang.map((x) => nameOf(x) || x).join(", ") || fmtNum(c.did) || "—"))}`;
+      return `<div class="sup-row"><span class="sup-dir ${c.direction}">${c.direction === "in" ? "↙" : c.direction === "out" ? "↗" : "↔"}</span>
+        <div class="grow"><span>${who}</span><small>${esc(new Date(c.start).toLocaleString("fr-FR", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }))}${c.talk ? ` · ${fmtDur(c.talk)}` : ""}</small></div>
+        <span class="pill ${cls}">${txt}</span>${c.recording ? `<button class="ann-play sm" data-recf="${esc(c.recording)}" title="Écouter l'enregistrement">▶</button>` : '<span class="ann-sp"></span>'}</div>`;
+    }).join("") : '<div class="empty-st">Aucun appel sur cette période.</div>';
+    $$("[data-recf]", box).forEach((b) => b.onclick = () => {
+      if (audio && !audio.paused && audio.dataset.f === b.dataset.recf) { audio.pause(); b.textContent = "▶"; return; }
+      audio?.pause(); $$("[data-recf]", box).forEach((x) => (x.textContent = "▶"));
+      audio = new Audio(`/api/u/recordings/file?f=${encodeURIComponent(b.dataset.recf)}`); audio.dataset.f = b.dataset.recf;
+      audio.onended = () => (b.textContent = "▶"); audio.play().catch(() => toast("Enregistrement introuvable (supprimé ou purgé).", "bad")); b.textContent = "❚❚";
+    });
+  };
+  let t = null;
+  $("#supq", body).oninput = () => { clearTimeout(t); t = setTimeout(load, 350); };
+  try { await load(); } catch (e) { $("#suplog", body).innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; }
 }
 
 // Page « Renvoi » : renvoyer tous mes appels (menu à part, pour tout le monde)
@@ -526,7 +680,7 @@ function refreshPresence() {
 // ------------------------------------------------------------------ Navigation
 function route() {
   const [p, s] = location.hash.replace(/^#\/?/, "").split("/");
-  page = TITLES[p] && (p !== "planning" || me.user.manager) && (p !== "clavier" || IN_APP) ? p : "equipe"; sub = s || "";
+  page = TITLES[p] && (!["planning", "supervision"].includes(p) || me.user.manager) && (p !== "annonces" || me.user.standardist) && (p !== "clavier" || IN_APP) ? p : "equipe"; sub = s || "";
   $$(".rail [data-r]").forEach((a) => a.classList.toggle("on", a.dataset.r === page));
   $("#title").textContent = TITLES[page];
   if (page === "appels") store.set(`callikoe_seen_${me.user.id}`, new Date().toISOString());
@@ -537,7 +691,7 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, renvoi: pageRenvoi, clavier: (x) => renderDialer(x, true) })[page](el);
+  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, renvoi: pageRenvoi, annonces: pageAnnonces, supervision: pageSupervision, clavier: (x) => renderDialer(x, true) })[page](el);
 }
 
 // ------------------------------------------------------------------ Plannings d'appels (responsables)
@@ -561,10 +715,10 @@ async function pagePlanning(el) {
   }
   const fmtN = (n) => /^0\d{9}$/.test(n) ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : n;
   el.innerHTML = `<div class="sp-plans">
-    <p class="s" style="margin:0 0 12px">Tu es responsable : choisis qui reçoit les appels selon le jour et l'heure. Les modifications s'appliquent dès que tu valides.</p>
+    <p class="s" style="margin:0 0 12px">Tu es superviseur : choisis qui reçoit les appels selon le jour et l'heure. Les modifications s'appliquent dès que tu valides.</p>
     ${cf.plannings.length ? cf.plannings.map((p) => `<a class="panel sp-plan" href="#/planning/${esc(p.id)}"><strong>${esc(p.name)}</strong>
       <span class="s">${esc(p.data.dids.map(fmtN).join(", ") || "Numéros sans règle")} · ${esc(planningSummary(p.data, cf))}</span></a>`).join("")
-    : '<div class="sp-banner info">Aucun planning ne t\'est confié pour l\'instant. L\'administrateur les crée dans la console (Gestion d\'appels › Routages) en cochant « Modifiable par les responsables ».</div>'}</div>`;
+    : '<div class="sp-banner info">Aucun planning ne t\'est confié pour l\'instant. L\'administrateur les crée dans la console (Gestion d\'appels › Routages) en cochant « Modifiable par les superviseurs ».</div>'}</div>`;
 }
 
 // ------------------------------------------------------------------ Équipe
@@ -609,13 +763,50 @@ function drawTeam() {
       <div class="tname" title="${esc(c.name)}">${esc(c.name)}</div>
       <div class="text">${esc(c.id)}${c.devices?.length ? ` · <span class="devs-i">${c.devices.map((d) => I.device(d)).join("")}</span>` : ""}</div>
       <div class="tstat ${p.cls}">${p.label}</div>
-      <div class="tact"><button class="cbtn" data-call="${esc(c.id)}" title="Appeler ${esc(c.name)}">${I.phone()}</button><button class="cbtn vidb" data-vcall="${esc(c.id)}" title="Appel vidéo">${I.video(18)}</button><button class="cbtn chatb" data-chat="${esc(c.id)}" title="Écrire à ${esc(c.name)}">${I.chat()}</button></div>
+      ${c.fwd ? `<button class="tfwd" data-tfwd="${esc(c.id)}" title="Changer ou annuler son renvoi">${I.fwd(14)}<span>${esc(teamDestText(c.fwd, c))}</span></button>` : ""}
+      <div class="tact"><button class="cbtn" data-call="${esc(c.id)}" title="Appeler ${esc(c.name)}">${I.phone()}</button><button class="cbtn vidb" data-vcall="${esc(c.id)}" title="Appel vidéo">${I.video(18)}</button><button class="cbtn chatb" data-chat="${esc(c.id)}" title="Écrire à ${esc(c.name)}">${I.chat()}</button>${c.vm !== undefined ? `<button class="cbtn fwdb ${c.fwd ? "on" : ""}" data-tfwd="${esc(c.id)}" title="Renvoyer les appels de ${esc(c.name)}">${I.fwd(18)}</button>` : ""}</div>
     </div>`;
   }).join("") || (dialCard ? "" : `<div class="empty-st">${teamFilter === "fav" ? "Aucun favori : clique sur l'étoile d'un collègue pour l'ajouter." : "Aucun collègue trouvé."}</div>`));
   wireCalls(g);
   $$("[data-chat]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); openChatWith([b.dataset.chat]); });
   $$("[data-vcall]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); call(b.dataset.vcall, { video: true }); });
   $$("[data-fav]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); drawTeam(); });
+  $$("[data-tfwd]", g).forEach((b) => b.onclick = (e) => { e.stopPropagation(); teamFwdSheet(contacts.find((x) => x.id === b.dataset.tfwd)); });
+}
+// Pilote : renvoyer les appels d'un collègue absent
+function teamDestText(d, c) {
+  if (d.type === "voicemail") return "sa messagerie";
+  if (d.type === "external") return fmtNum(d.target);
+  if (d.type === "extension") return d.target === me.user.id ? "moi" : (nameOf(d.target) || d.target);
+  return "";
+}
+function teamFwdSheet(c) {
+  if (!c) return;
+  const d = c.fwd;
+  const isOther = d?.type === "extension" && d.target !== me.user.id;
+  const sh = openSheet(`<div class="ks-head"><span class="fwp-ic sm">${I.fwd(20)}</span><div><h3>Renvoyer les appels de ${esc(c.name)}</h3>
+      <p>${d ? `En ce moment : vers <b>${esc(teamDestText(d, c))}</b>` : "Son poste sonne normalement."}</p></div></div>
+    <div class="ks-list">
+      ${c.vm ? `<button class="ks-it ${d?.type === "voicemail" ? "on" : ""}" data-d="voicemail"><span class="ks-ic">📮</span><span class="grow">Sa messagerie</span><i class="ks-ck"></i></button>` : ""}
+      <button class="ks-it ${d?.type === "extension" && d.target === me.user.id ? "on" : ""}" data-d="me"><span class="ks-ic">🙋</span><span class="grow">Moi (${esc(me.user.id)})</span><i class="ks-ck"></i></button>
+      <div class="ks-it ${isOther ? "on" : ""}"><span class="ks-ic">👤</span><select class="grow tfx"><option value="">Un autre collègue…</option>${contacts.filter((x) => x.id !== c.id).map((x) => `<option value="${esc(x.id)}" ${isOther && d.target === x.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.id)}</option>`).join("")}</select><i class="ks-ck"></i></div>
+      <div class="ks-it ks-other ${d?.type === "external" ? "on" : ""}"><span class="ks-ic">☎</span><input id="tfn" inputmode="tel" placeholder="Un numéro" value="${d?.type === "external" ? esc(fmtNum(d.target)) : ""}"><button class="btn sm" id="tfok">OK</button></div>
+    </div>
+    ${d ? `<button class="ks-main ghostbtn" id="tfoff">Annuler son renvoi</button>` : ""}`);
+  const save = async (dest) => {
+    sh.classList.add("busy");
+    try {
+      const r = await api("PUT", `/api/u/team/${encodeURIComponent(c.id)}/forward`, { dest });
+      c.fwd = r.fwd; toast(r.fwd ? `Appels de ${c.name} renvoyés vers ${teamDestText(r.fwd, c)}` : `Renvoi de ${c.name} annulé`);
+      closeSheet(); drawTeam();
+    } catch (err) { toast(err.message, "bad"); sh.classList.remove("busy"); }
+  };
+  $$("[data-d]", sh).forEach((b) => b.onclick = () => save(b.dataset.d === "me" ? { type: "extension", target: me.user.id } : { type: "voicemail", target: "" }));
+  $(".tfx", sh).onchange = (e) => { if (e.target.value) save({ type: "extension", target: e.target.value }); };
+  const n = $("#tfn", sh), ok = () => { const v = clean(n.value); if (v) save({ type: "external", target: v }); else n.focus(); };
+  $("#tfok", sh).onclick = ok; n.onkeydown = (e) => { if (e.key === "Enter") ok(); };
+  $("#tfoff", sh)?.addEventListener("click", () => save(null));
+  setTimeout(() => document.addEventListener("click", closeSheet, { once: true }));
 }
 function wireCalls(r) { $$("[data-call]", r).forEach((b) => b.onclick = (e) => { e.stopPropagation(); call(b.dataset.call); }); }
 

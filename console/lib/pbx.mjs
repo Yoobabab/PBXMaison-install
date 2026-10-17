@@ -315,7 +315,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         id: u.id, name: displayName(u), first_name: u.first_name, last_name: u.last_name, email: u.email,
         status: u.status, status_label: STATUSES[u.status], disabled: u.options.disabled, hidden: !!u.options.hidden, team: u.options.team || "",
         registered: contacts.length > 0, contacts, dids: u.dids, mobile: u.mobile, phone_model: u.phone.model,
-        forwards: forwardSummary(u),
+        forwards: forwardSummary(u), always: u.forwarding.always, vm: !!u.voicemail.enabled, role: u.options.role || "user",
       };
     });
   }
@@ -419,13 +419,14 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   async function findConsoleUser(email) {
     const l = String(email || "").trim().toLowerCase();
     if (!l || !l.includes("@")) return null;
-    const r = await db.query(`SELECT id, email, first_name, last_name, web_password_hash FROM pbxmaison_extensions
-      WHERE email <> '' AND lower(email) = $1 AND options->>'role' = 'console' AND COALESCE((options->>'disabled')::boolean, false) = false`, [l]);
+    const r = await db.query(`SELECT id, email, first_name, last_name, web_password_hash, options->>'role' AS role FROM pbxmaison_extensions
+      WHERE email <> '' AND lower(email) = $1 AND options->>'role' IN ('console', 'admin') AND COALESCE((options->>'disabled')::boolean, false) = false`, [l]);
     return r.rows.length === 1 ? r.rows[0] : null;
   }
+  /** Rôle console (« console » = Gestionnaire, « admin » = Administrateur) d'un utilisateur actif, sinon null */
   async function consoleUserActive(ext) {
-    const r = await db.query("SELECT 1 FROM pbxmaison_extensions WHERE id = $1 AND options->>'role' = 'console' AND COALESCE((options->>'disabled')::boolean, false) = false", [String(ext)]);
-    return r.rowCount > 0;
+    const r = await db.query("SELECT options->>'role' AS role FROM pbxmaison_extensions WHERE id = $1 AND options->>'role' IN ('console', 'admin') AND COALESCE((options->>'disabled')::boolean, false) = false", [String(ext)]);
+    return r.rows[0]?.role || null;
   }
   async function setWebPassword(num, hash) {
     checkExtNumber(num);
@@ -455,7 +456,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const src = await getUser(String(input.copy_from));
       base = {
         ...defaultUser(num),
-        outbound_cid: src.outbound_cid, status: src.status, forwarding: structuredClone(src.forwarding), options: { ...src.options, disabled: false, ring_mobile: src.options.ring_mobile && !!String(input.mobile || "").trim() },
+        outbound_cid: src.outbound_cid, status: src.status, forwarding: structuredClone(src.forwarding), options: { ...src.options, disabled: false, ring_mobile: src.options.ring_mobile && !!String(input.mobile || "").trim(),
+          // Accès à la console jamais copié (Gestionnaire, Administrateur) : à donner exprès
+          role: ["console", "admin"].includes(src.options.role) ? "user" : src.options.role },
         voicemail: { ...src.voicemail, pin: "" },
         phone: { ...structuredClone(src.phone), mac: "", admin_password: "", last_provisioned: undefined, extra: [],
           keys: src.phone.keys.filter((k) => !(k.type === "blf" && k.value === num)) },

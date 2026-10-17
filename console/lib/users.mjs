@@ -15,12 +15,22 @@ export class UserError extends Error {
   constructor(message, field) { super(message); this.field = field; this.status = 400; }
 }
 
-/** Rôle d'un utilisateur du PBX : un responsable gère les plannings depuis son softphone et l'appli. */
-export const USER_ROLES = { user: "Utilisateur", standard: "Pilote (ouvre et ferme tout le PBX)", manager: "Responsable (Pilote + plannings)", console: "Accès console (restreint)" };
-/** Responsable : modifie les plannings depuis son softphone ; « accès console » : en plus, se connecte à la console du PBX (accès restreint). */
-export const isManager = (u) => ["manager", "console"].includes(u?.options?.role) && !u.options.disabled;
-/** Pilote : ouvre, ferme ou renvoie tout le PBX (tout le PBX) depuis son téléphone, le softphone ou l'appli */
-export const isStandardist = (u) => ["standard", "manager", "console"].includes(u?.options?.role) && !u.options.disabled;
+/**
+ * Rôle d'un utilisateur du PBX, en escalier (chaque rôle a tous les droits du précédent) :
+ * Utilisateur → Pilote (ouvre / ferme tout le PBX, renvoie un collègue, enregistre les annonces)
+ * → Superviseur (plannings, appels en cours, journal et enregistrements de l'équipe, files d'attente)
+ * → Gestionnaire (console du PBX, accès limité) → Administrateur (console du PBX, tout sauf les comptes de connexion).
+ * Les identifiants internes (standard, manager, console) restent ceux des versions précédentes.
+ */
+export const USER_ROLES = { user: "Utilisateur", standard: "Pilote", manager: "Superviseur", console: "Gestionnaire", admin: "Administrateur" };
+export const ROLE_RANK = { user: 0, standard: 1, manager: 2, console: 3, admin: 4 };
+const rank = (u) => (!u || u.options?.disabled ? -1 : ROLE_RANK[u.options?.role] ?? 0);
+/** Superviseur (et au-dessus) : plannings, supervision de l'équipe */
+export const isManager = (u) => rank(u) >= 2;
+/** Pilote (et au-dessus) : ouvre / ferme tout le PBX, renvoie les appels d'un collègue, enregistre les annonces */
+export const isStandardist = (u) => rank(u) >= 1;
+/** Rôle de la session dans la console du PBX : Gestionnaire → accès limité (client), Administrateur → tout sauf les comptes (tech) */
+export const consoleRoleOf = (role) => ({ console: "client", admin: "tech" })[role] || null;
 /** Renvoi immédiat (tous les appels) : réglable par code, touche, softphone, appli ou console */
 export const ALWAYS_TYPES = { none: "Aucun", voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe" };
 
@@ -259,7 +269,7 @@ export function buildUsersDialplan(users) {
   for (const u of users) L.push(`exten => status${u.id},hint,Custom:dnd${u.id}`);
   // Touche « Renvoi » : voyant allumé si un renvoi immédiat est actif
   for (const u of users) L.push(`exten => fwd${u.id},hint,Custom:fwd${u.id}`);
-  L.push("", "; Postes autorisés à ouvrir / fermer le standard (rôle Pilote, Responsable ou Accès console)", "[std-allow]");
+  L.push("", "; Postes autorisés à ouvrir / fermer le standard (rôles Pilote et au-dessus)", "[std-allow]");
   for (const u of users) if (isStandardist(u)) L.push(`exten => ${u.id},1,Return()`);
   L.push("", "; SDA attribuées directement à un utilisateur", "[did-map]");
   for (const u of users) for (const d of u.dids) L.push(`exten => ${d},1,Goto(users,${u.id},1)`);

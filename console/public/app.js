@@ -1,5 +1,6 @@
 // Console web Callikoe — application monopage sans dépendance.
 import { renderCallflow, standardBox, offerKey, codesLine } from "./callflow-ui.js";
+import { ROLES, openRolesInfo } from "./roles.js";
 import { renderAdmin } from "./admin-ui.js";
 const $ = (s, r = document) => r.querySelector(s);
 const app = $("#app");
@@ -1040,8 +1041,9 @@ async function renderUser(id, tab = "general") {
   if (tab === "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label>Numéro de poste<input value="${esc(u.id)}" readonly></label>
-      <label>Rôle<select name="options.role">${[["user", "Utilisateur"], ["standard", "Pilote"], ["manager", "Responsable"], ["console", "Accès console (client)"]].map(([k, l]) => `<option value="${k}" ${(u.options.role || "user") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-        <span class="hint">Pilote : ouvre et ferme tout le PBX d'un coup (bouton Ouvert / Fermé ; réglages dans Renvois d'appels). Responsable : en plus, modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
+      <label>Rôle<span class="rolerow"><select name="options.role">${ROLES.map((r) => `<option value="${r.id}" ${(u.options.role || "user") === r.id ? "selected" : ""}>${r.name} — ${r.short}</option>`).join("")}</select>
+        <button type="button" class="info-i" data-rolesinfo title="Que peut faire chaque rôle ?">i</button></span>
+        <span class="hint">Chaque rôle a tous les droits du précédent. Gestionnaire et Administrateur se connectent à la console de ce PBX avec l'e-mail de la fiche et le mot de passe du softphone.</span></label>
       <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
@@ -1806,6 +1808,12 @@ async function renderSystem() {
   };
 }
 
+// Bouton « i » : ce que peut faire chaque rôle
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.("[data-rolesinfo]"); if (!b) return;
+  e.preventDefault();
+  openRolesInfo(b.closest("form")?.querySelector("[name='options.role']")?.value || b.dataset.rolesinfo || "");
+});
 // Tableau de bord : bouton Ouvrir / Fermer maintenant
 document.addEventListener("click", async (e) => {
   const b = e.target.closest?.("[data-oc]"); if (!b) return;

@@ -83,7 +83,7 @@ function draw() {
     ${admin ? `<div class="fx-entry">
       <div class="fx-box"><span class="fx-bi">☎</span><div class="fx-bc"><span class="fx-bl">Numéros appelés (SDA)</span><div class="fx-chips" id="pldids"></div></div></div>
       <label class="check fx-def"><input type="checkbox" id="pldef" ${p.is_default ? "checked" : ""}> Routage par défaut (SDA sans règle)</label>
-      <label class="check fx-def"><input type="checkbox" id="plman" ${p.managers ? "checked" : ""}> Modifiable par les responsables (softphone et appli)</label>
+      <label class="check fx-def"><input type="checkbox" id="plman" ${p.managers ? "checked" : ""}> Modifiable par les superviseurs (softphone et appli)</label>
     </div>` : `<p class="hint pad" style="margin:0">Numéros : ${p.dids.map(fmtP).map(esc).join(", ") || (p.is_default ? "toutes les SDA sans règle" : "—")}</p>`}
 
     <div class="pl-now">

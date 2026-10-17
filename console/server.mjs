@@ -15,13 +15,14 @@ import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken,
   newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
-import { isManager, isStandardist } from "./lib/users.mjs";
+import { isManager, isStandardist, consoleRoleOf, USER_ROLES } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
 import { migrateChat, createChat } from "./lib/chat.mjs";
 import { scheduleState, KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { createAdminService } from "./lib/admin.mjs";
+import { parseQueueShow, queueStats } from "./lib/supervision.mjs";
 import { CX_MODE, CX_TENANT } from "./lib/config.mjs";
 import { registerThemeRoutes } from "./lib/theme.mjs";
 import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
@@ -78,7 +79,7 @@ export async function buildApp({ db, ami } = {}) {
     // Compte supprimé ou rôle modifié : pris en compte immédiatement (compte du serveur multi-tenant : rôle publié par la console du serveur)
     const hr = u.hub ? hubRole(u.email) : null;
     if (u.hub && (CX_MODE !== "tenant" || !hr)) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'a plus accès au serveur." }); }
-    const row = u.hub ? { role: HUB_TO_PBX_ROLE[hr] } : u.ext ? ((await pbx.consoleUserActive(u.ext)) ? { role: "client" } : null)
+    const row = u.hub ? { role: HUB_TO_PBX_ROLE[hr] } : u.ext ? await pbx.consoleUserActive(u.ext).then((r) => (consoleRoleOf(r) ? { role: consoleRoleOf(r) } : null))
       : (await db.query("SELECT role FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     if (!row) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'existe plus." }); }
     req.role = row.role;
@@ -224,7 +225,7 @@ export async function buildApp({ db, ami } = {}) {
       const x = await pbx.findConsoleUser(email);
       if (x?.web_password_hash && verifyPassword(req.body?.password, x.web_password_hash)) {
         failures.delete(req.ip);
-        await audit(req, `Connexion à la console (utilisateur ${x.id}, accès restreint)`, true, "", email);
+        await audit(req, `Connexion à la console (utilisateur ${x.id}, rôle ${USER_ROLES[x.role] || x.role})`, true, "", email);
         reply.setCookie(COOKIE, createSession(email, settings.sessionSecret, { mfa: true, mfa_at: Date.now(), ext: x.id }), cookieOpts(req));
         return { ok: true, email };
       }
@@ -374,7 +375,7 @@ export async function buildApp({ db, ami } = {}) {
       return { email: u.email, totp: true, mfa: true, recovery_left: 8, role: HUB_TO_PBX_ROLE[hr] || "lecture", name: "", hub: true,
         hub_url: hubInfo().url || "", current: CX_TENANT, pbx_list: tenantList() };
     }
-    if (u.ext) return { email: u.email, totp: true, mfa: true, recovery_left: 0, role: "client", name: "", ext: u.ext };
+    if (u.ext) return { email: u.email, totp: true, mfa: true, recovery_left: 0, role: consoleRoleOf(await pbx.consoleUserActive(u.ext)) || "client", name: "", ext: u.ext };
     const row = (await db.query("SELECT totp_secret IS NOT NULL AS totp, jsonb_array_length(recovery) AS recovery_left FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     const role = (await db.query("SELECT role, name FROM pbxmaison_users WHERE email = $1", [u.email])).rows[0];
     return { email: u.email, totp: !!row?.totp, mfa: u.mfa, recovery_left: row?.recovery_left ?? 0, role: role?.role || "admin", name: role?.name || "" };
@@ -421,12 +422,21 @@ export async function buildApp({ db, ami } = {}) {
     extensions: await pbx.listExtensions(), next: await pbx.nextFreeExtension(),
     server: sipServer(),
   }));
-  app.post("/api/extensions", { preHandler: requireUser }, async (req) => pbx.createExtension(req.body || {}, currentUser(req).email));
+  app.post("/api/extensions", { preHandler: requireUser }, async (req) => {
+    if (req.role === "client" && req.body?.options?.role === "admin") throw Object.assign(new UserError("Seul l'installateur ou un Administrateur peut donner le rôle Administrateur."), { status: 403 });
+    return pbx.createExtension(req.body || {}, currentUser(req).email);
+  });
   app.get("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
     const user = await pbx.getUser(req.params.id);
     return { user, server: sipServer(), key_offer: { fwd: pbx.phoneKeyInfo(user, "fwd"), standard: pbx.phoneKeyInfo(user, "standard") } };
   });
-  app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email));
+  app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
+    // Un Gestionnaire (accès limité) ne peut ni donner ni retirer le rôle Administrateur
+    const role = req.body?.options?.role;
+    if (req.role === "client" && role !== undefined && (role === "admin" || (await pbx.getUser(req.params.id)).options.role === "admin"))
+      throw Object.assign(new UserError("Seul l'installateur ou un Administrateur peut donner ou retirer le rôle Administrateur."), { status: 403 });
+    return pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email);
+  });
   app.get("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.extensionSecret(req.params.id));
   app.post("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.resetSecret(req.params.id));
   const provFails = new Map(); // échecs par IP (provisioning et appli) : 30 / 10 min
@@ -588,11 +598,14 @@ export async function buildApp({ db, ami } = {}) {
   const team = async (self) => {
     const [list, lines] = await Promise.all([pbx.listExtensions(), pbx.lineStates()]);
     const me = list.find((x) => x.id === self);
+    const pilot = isStandardist({ options: { role: me?.role, disabled: me?.disabled } });
     // Masqués : vus de personne ; groupes de visibilité : on ne voit que son groupe
     return list.filter((x) => x.id !== self && !x.disabled && !x.hidden && (x.team || "") === (me?.team || "")).map((x) => ({
       id: x.id, name: x.name, first_name: x.first_name, last_name: x.last_name, email: x.email,
       status: x.status, registered: x.registered, line: lines.get(x.id) || "",
       devices: [...new Set(x.contacts.map((c) => c.device?.kind).filter(Boolean))],
+      // Pilote : voit et change le renvoi immédiat de ses collègues
+      ...(pilot ? { fwd: x.always?.type && x.always.type !== "none" ? x.always : null, vm: x.vm } : {}),
     }));
   };
   const webBy = (s) => (s.imp ? `${s.imp} (incarnation)` : `${s.ext} (softphone)`);
@@ -634,15 +647,69 @@ export async function buildApp({ db, ami } = {}) {
       const oname = (o) => `${o.number ? o.number + " · " : ""}${o.name}`;
       const d = std.closed_dest || {};
       const ux = users.find((x) => x.id === d.target), ox = objs.find((o) => o.id === d.target);
-      const closed = d.type === "hangup" ? (d.prompt ? "Annonce, puis fin d'appel" : "Fin d'appel") : d.type === "user" ? (ux ? uname(ux) : d.target)
+      const closed = d.type === "hangup" ? (d.prompt ? `Annonce « ${objs.find((o) => o.id === d.prompt)?.name || "?"} »` : "Fin d'appel") : d.type === "user" ? (ux ? uname(ux) : d.target)
         : d.type === "user_vm" ? `Messagerie de ${ux ? uname(ux) : d.target}` : d.type === "external" ? d.target.replace(/(\d{2})(?=\d)/g, "$1 ") : ox ? oname(ox) : "";
       // Où envoyer les appels en fermant : choix proposés dans le softphone et l'appli
       const pick = (kind) => objs.filter((o) => o.kind === kind).map((o) => ({ id: o.id, name: oname(o) }));
-      out.standard = { state: std.state, target: std.target, since: std.since, by: std.by, label: std.label, closed, dest: { type: d.type, target: d.target || "" },
+      out.standard = { state: std.state, target: std.target, since: std.since, by: std.by, label: std.label, closed, dest: { type: d.type, target: d.target || "", prompt: d.prompt || "" },
         targets: { user: users.map((x) => ({ id: x.id, name: `${x.id} · ${uname(x)}`, vm: !!x.voicemail.enabled })),
-          group: pick("group"), queue: pick("queue"), ivr: pick("ivr"), groupvm: pick("groupvm") } };
+          group: pick("group"), queue: pick("queue"), ivr: pick("ivr"), groupvm: pick("groupvm"), prompt: objs.filter((o) => o.kind === "prompt").map((o) => ({ id: o.id, name: o.name })) } };
     }
     return out;
+  });
+  // Superviseur : appels en cours, journal de l'équipe (avec enregistrements), files d'attente
+  async function supervisorOf(req) {
+    const u = await pbx.getUser(webUser(req).ext);
+    if (!isManager(u)) throw Object.assign(new UserError("Réservé au rôle Superviseur : demande à l'administrateur du PBX de te le donner."), { status: 403 });
+    return u;
+  }
+  app.get("/api/u/supervision", { preHandler: requireWebUser }, async (req) => {
+    await supervisorOf(req);
+    const [calls, objs, lines] = await Promise.all([pbx.listCalls(), pbx.listObjects("queue"), ami.command("queue show").catch(() => null)]);
+    return { calls: calls.calls, available: calls.available, queues: lines ? queueStats(parseQueueShow(lines), objs) : [] };
+  });
+  app.get("/api/u/supervision/log", { preHandler: requireWebUser }, async (req) => {
+    await supervisorOf(req);
+    const days = [1, 7, 30].includes(Number(req.query?.days)) ? Number(req.query.days) : 1;
+    const { calls, total } = await pbx.callLog({ days, q: String(req.query?.q || "").slice(0, 40), limit: 300 });
+    return { calls: calls.reverse(), total };
+  });
+  app.get("/api/u/recordings/file", { preHandler: requireWebUser }, async (req, reply) => {
+    await supervisorOf(req);
+    const f = await admin.recordingFile(String(req.query?.f || ""));
+    return reply.type("audio/wav").header("cache-control", "no-store").send(fs.createReadStream(f));
+  });
+  // Pilote : renvoyer les appels d'un collègue absent (ou annuler son renvoi)
+  async function pilotOf(req) {
+    const u = await pbx.getUser(webUser(req).ext);
+    if (!isStandardist(u)) throw Object.assign(new UserError("Réservé au rôle Pilote : demande à l'administrateur du PBX de te le donner."), { status: 403 });
+    return u;
+  }
+  app.put("/api/u/team/:ext/forward", { preHandler: requireWebUser }, async (req) => {
+    const me = await pilotOf(req);
+    const ext = String(req.params.ext);
+    const dest = req.body?.dest;
+    const fw = dest ? { always: dest, always_last: dest } : { always: { type: "none", target: "" } };
+    const u = await pbx.updateUser(ext, { forwarding: fw }, `Pilote ${me.id} ${me.name}`);
+    return { id: u.id, fwd: u.forwarding.always.type !== "none" ? u.forwarding.always : null };
+  });
+  // Pilote : annonces (écouter, remplacer ou créer au micro)
+  app.get("/api/u/prompts", { preHandler: requireWebUser }, async (req) => {
+    await pilotOf(req);
+    return { prompts: (await pbx.listObjects("prompt")).map((o) => ({ id: o.id, name: o.name, duration: o.data.duration || 0, updated_at: o.updated_at, updated_by: o.updated_by })) };
+  });
+  app.get("/api/u/prompts/:id/audio", { preHandler: requireWebUser }, async (req, reply) => {
+    await pilotOf(req);
+    return reply.type("audio/wav").header("cache-control", "no-store").send(fs.createReadStream(await pbx.promptFile(req.params.id)));
+  });
+  app.post("/api/u/prompts", { preHandler: requireWebUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
+    const me = await pilotOf(req);
+    return pbx.savePrompt(null, req.body?.name, wavOf(req.body), `Pilote ${me.id} ${me.name}`);
+  });
+  app.put("/api/u/prompts/:id", { preHandler: requireWebUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
+    const me = await pilotOf(req);
+    const cur = await pbx.getObject("prompt", req.params.id);
+    return pbx.savePrompt(req.params.id, req.body?.name || cur.name, wavOf(req.body), `Pilote ${me.id} ${me.name}`);
   });
   // Ajouter la touche « Renvoi » (tout le monde) ou « Ouvert / Fermé » (postes autorisés) sur son téléphone IP
   app.post("/api/u/phone/key", { preHandler: requireWebUser }, async (req) => {
@@ -670,7 +737,7 @@ export async function buildApp({ db, ami } = {}) {
   const PLAN_FIELDS = ["scenarios", "branches", "outside", "week", "week_b", "alternate", "ref_monday", "holidays_fr", "holiday_scenario", "days", "override"];
   async function managerOf(req) {
     const u = await pbx.getUser(webUser(req).ext);
-    if (!isManager(u)) throw Object.assign(new UserError("Réservé aux responsables : demande à l'administrateur du PBX de te donner ce rôle."), { status: 403 });
+    if (!isManager(u)) throw Object.assign(new UserError("Réservé au rôle Superviseur : demande à l'administrateur du PBX de te le donner."), { status: 403 });
     return u;
   }
   app.get("/api/u/plannings", { preHandler: requireWebUser }, async (req) => {
@@ -689,7 +756,7 @@ export async function buildApp({ db, ami } = {}) {
     const o = await pbx.getObject("planning", req.params.id);
     if (!o.data.managers) throw Object.assign(new UserError("Ce planning n'est modifiable que depuis la console du PBX."), { status: 403 });
     const input = Object.fromEntries(PLAN_FIELDS.filter((k) => req.body?.[k] !== undefined).map((k) => [k, req.body[k]]));
-    const r = await pbx.saveObject("planning", o.id, input, `${u.id} ${u.name} (responsable)`);
+    const r = await pbx.saveObject("planning", o.id, input, `${u.id} ${u.name} (superviseur)`);
     return { id: r.id, name: r.name, data: r.data };
   });
   app.get("/api/u/calls", { preHandler: requireWebUser }, async (req) => ({ calls: await pbx.userCalls(webUser(req).ext, 150) }));
