@@ -17,6 +17,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
 import { signTicket, emailKey, HUB_USERS, TENANTS } from "../lib/sso.mjs";
 import { canonicalJson, verifySignature } from "../../pbx/lib/verify-config.mjs";
 import { encodeToken } from "../../pbx/lib/license-token.mjs";
+import { registerThemeRoutes, readTheme, writeTheme, saveAsset, removeAsset, PALETTE, DEFAULT_THEME, ASSETS, shades, hexToHsl, THEME_DIR } from "../lib/theme.mjs";
 
 const ETC = process.env.HUB_ETC || "/etc/callikoe/hub";
 const VAR = process.env.HUB_VAR || "/var/lib/callikoe/hub";
@@ -94,6 +95,7 @@ export async function buildApp({ db } = {}) {
   await app.register(cookie);
   await app.register(fastifyStatic, { root: path.join(import.meta.dirname, "public"), index: ["index.html"] });
   await app.register(fastifyStatic, { root: path.join(import.meta.dirname, "..", "public"), prefix: "/c/", decorateReply: false, allowedPath: (p) => /^\/?style\.css$/.test(p) });
+  registerThemeRoutes(app);
 
   const COOKIE = "cxhub_session";
   const cookieOpts = (req) => ({ path: "/", httpOnly: true, sameSite: "lax", secure: req.protocol === "https", maxAge: 12 * 3600 });
@@ -337,6 +339,43 @@ export async function buildApp({ db } = {}) {
       return { ok: true };
     });
   }
+
+  // ---------------------------------------------------------------- Apparence : couleur, logo, fond d'écran (console du serveur et tous ses PBX)
+  const themeView = () => { const t = readTheme(); return { theme: t, palette: PALETTE, default: DEFAULT_THEME.color, shades: shades(t.color),
+    limits: Object.fromEntries(Object.entries(ASSETS).map(([k, v]) => [k, { max: v.max, types: v.types }])) }; };
+  app.get("/api/theme", { preHandler: requireUser }, async () => themeView());
+  app.put("/api/theme", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const color = String(req.body?.color || "").toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(color) || !hexToHsl(color)) throw new UserError("Couleur invalide.", "color");
+    const t = readTheme();
+    try { writeTheme({ ...t, color }); } catch { throw new UserError("Thème non enregistré : dossier du thème non accessible (relance la mise à jour du serveur)."); }
+    await audit(req, "Apparence : couleur changée", true, color);
+    return themeView();
+  });
+  app.post("/api/theme/reset", { preHandler: requireRole("super", "admin") }, async (req) => {
+    for (const k of Object.keys(ASSETS)) removeAsset(k);
+    writeTheme({ ...DEFAULT_THEME });
+    await audit(req, "Apparence : thème Callikoe rétabli");
+    return themeView();
+  });
+  app.register(async (scope) => {
+    scope.addContentTypeParser(["application/octet-stream", "image/png", "image/jpeg", "image/webp", "image/svg+xml"], { parseAs: "buffer", bodyLimit: 4 * 1024 * 1024 + 1 }, (req, body, done) => done(null, body));
+    scope.post("/api/theme/:kind", { preHandler: requireRole("super", "admin"), bodyLimit: 4 * 1024 * 1024 + 1 }, async (req) => {
+      const kind = req.params.kind;
+      if (!ASSETS[kind]) throw new UserError("Fichier inconnu.", null, 404);
+      try { saveAsset(kind, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)); } catch (e) { throw new UserError(e.message, kind); }
+      writeTheme({ ...readTheme(), [kind]: true });
+      await audit(req, kind === "logo" ? "Apparence : logo importé" : "Apparence : fond d'écran importé");
+      return themeView();
+    });
+  });
+  app.delete("/api/theme/:kind", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const kind = req.params.kind;
+    if (!ASSETS[kind]) throw new UserError("Fichier inconnu.", null, 404);
+    removeAsset(kind); writeTheme({ ...readTheme(), [kind]: null });
+    await audit(req, kind === "logo" ? "Apparence : logo retiré" : "Apparence : fond d'écran retiré");
+    return themeView();
+  });
 
   // ---------------------------------------------------------------- Clé de signature (licences des PBX créés sur ce serveur)
   let signKey = null;

@@ -37,6 +37,7 @@ const ICONS = {
   shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9z"/>',
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  paint: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.9 1.2-1.8-.4-.9.1-2.2 1.3-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="14.5" cy="7" r="1.2"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
 };
 const icon = (k, s = 18) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ""}</svg>`;
@@ -48,7 +49,7 @@ function setNav(active, label = "") {
   document.body.classList.remove("side-open");
   const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []), ["#/licences", "Licences", "lic"]];
   // Paramètres : regroupés dans un menu repliable (ouvert quand on est sur une de ses pages)
-  const settings = [...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/surveillance", "Surveillance", "watch"],
+  const settings = [...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/apparence", "Apparence", "paint"], ["#/surveillance", "Surveillance", "watch"],
     ["#/protection", "Protection anti-intrusion", "shield"], ["#/pays", "IP Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
   const link = ([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`;
   let setOpen = settings.some(([, , k]) => k === active);
@@ -240,7 +241,7 @@ async function renderList() {
       <td data-l="Appels" title="Appels en cours / appels simultanés">${p.calls || 0}<span class="s"> / ${p.max_calls || "—"}</span></td>
       <td data-l="Postes" title="Postes connectés / postes">${p.phones_online || 0}<span class="s"> / ${p.phones || 0}</span></td>
       <td data-l="Trunks" class="${p.trunks && p.trunks_ok < p.trunks ? "warnc" : ""}" title="Trunks enregistrés / trunks">${p.trunks_ok || 0}<span class="s"> / ${p.trunks || 0}</span></td>
-      <td data-l="Licence" class="${exp !== null && exp < 30 * 86400000 ? "warnc" : ""}">${fmtDay(p.expires_at)}${p.edition ? `<span class="s">${esc(p.edition)}</span>` : ""}</td>
+      <td data-l="Licence" class="${exp !== null && exp < 30 * 86400000 ? "warnc" : ""}">${fmtDay(p.expires_at)}${p.edition ? `<span class="s">${esc(({ basic: "Basic", pro: "Essentiel", enterprise: "Intégral" })[p.edition] || p.edition)}</span>` : ""}</td>
       <td class="pa">${p.suspended ? "" : `<a class="btn sm" href="/ouvrir/${encodeURIComponent(p.slug)}">Ouvrir</a>`}
         ${menu ? `<span class="more"><button type="button" class="btn ghost sm" data-more aria-label="Plus d'actions" title="Plus d'actions">⋯</button><span class="more-menu" hidden>${menu}</span></span>` : ""}</td></tr>`;
   };
@@ -571,6 +572,58 @@ async function renderLicenses() {
     }
   };
   draw();
+}
+
+// ---------------------------------------------------------------- Apparence (couleur, logo, fond d'écran) : console du serveur et tous ses PBX
+function refreshThemeCss() {
+  const l = document.querySelector('link[href^="/theme.css"]');
+  if (l) l.href = `/theme.css?t=${Date.now()}`;
+}
+async function renderTheme() {
+  setNav("paint", "Apparence");
+  let d; try { d = await api("GET", "/api/theme"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+  const edit = can("super", "admin"), t = d.theme;
+  const mb = (n) => `${Math.round(n / 1024 / 1024)} Mo`;
+  const asset = (kind, title, hint) => `<div class="panel"><div class="ph"><h2>${title}</h2>${t[kind] ? `<span class="pill ok">Personnalisé</span>` : `<span class="pill off">Par défaut</span>`}</div>
+    <div class="pad stack">
+      <div class="th-prev th-${kind}">${t[kind] ? `<img src="/theme/${kind}?v=${t.v}" alt="">` : `<span class="hint">${kind === "logo" ? "Logo Callikoe (rond sur fond de couleur)" : "Fond uni"}</span>`}</div>
+      <p class="hint" style="margin:0">${hint}</p>
+      ${edit ? `<div class="row" style="gap:8px;flex-wrap:wrap"><label class="btn sm" style="cursor:pointer">${t[kind] ? "Remplacer" : "Importer"}…<input type="file" data-up="${kind}" accept="${d.limits[kind].types.join(",")}" hidden></label>
+        ${t[kind] ? `<button type="button" class="btn ghost sm" data-rm="${kind}">Retirer</button>` : ""}</div>` : ""}</div></div>`;
+  app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Apparence</h1>
+      <p class="sub" style="margin:0">Couleur, logo et fond d'écran de la console du serveur et de <strong>tous ses PBX</strong> (console, softphone, appli). Le changement s'applique tout de suite.</p></div>
+      ${edit ? `<button type="button" class="btn ghost" id="threset">Rétablir le thème Callikoe</button>` : ""}</div>
+    <div class="panel"><div class="ph"><h2>Couleur</h2><span class="hint">remplace le rouge partout</span></div>
+      <div class="pad stack">
+        <div class="th-sw">${d.palette.map((p) => `<button type="button" class="th-c ${p.color === t.color ? "on" : ""}" data-color="${p.color}" title="${esc(p.name)}" ${edit ? "" : "disabled"}>
+          <span style="background:${p.color}"></span><small>${esc(p.name)}</small></button>`).join("")}
+          <label class="th-c th-custom ${d.palette.some((p) => p.color === t.color) ? "" : "on"}" title="Autre couleur"><span style="background:${esc(t.color)}"><input type="color" id="thpick" value="${esc(t.color)}" ${edit ? "" : "disabled"}></span><small>Autre…</small></label></div>
+        <div class="th-demo"><span class="th-mark"></span><button type="button" class="btn sm">Bouton</button><a href="#/apparence">Lien</a><span class="pill ok">En ligne</span><span class="th-grad">Carte de la licence</span></div>
+        <p class="hint" style="margin:0">Une couleur trop claire est foncée automatiquement pour que le texte des boutons reste lisible.</p></div></div>
+    <div class="grid2" style="margin-top:16px">
+      ${asset("logo", "Logo", `Affiché en haut du menu, dans le softphone et sur les pages de connexion. PNG, JPEG, WebP ou SVG, ${mb(d.limits.logo.max)} au maximum ; idéalement carré, fond transparent.`)}
+      ${asset("bg", "Fond d'écran", `Affiché derrière les pages de connexion (console du serveur, consoles des PBX, softphone). PNG, JPEG ou WebP, ${mb(d.limits.bg.max)} au maximum ; 1920 × 1080 conseillé.`)}
+    </div>`;
+  const done = (nd, text) => { flash = { text }; refreshThemeCss(); renderTheme(); };
+  const fail = (e) => { flash = { cls: "bad", text: e.message }; renderTheme(); };
+  app.querySelectorAll("[data-color]").forEach((b) => (b.onclick = async () => { try { done(await api("PUT", "/api/theme", { color: b.dataset.color }), "Couleur appliquée à la console du serveur et à tous ses PBX."); } catch (e) { fail(e); } }));
+  $("#thpick")?.addEventListener("change", async (e) => { try { done(await api("PUT", "/api/theme", { color: e.target.value }), "Couleur appliquée à la console du serveur et à tous ses PBX."); } catch (er) { fail(er); } });
+  app.querySelectorAll("[data-up]").forEach((inp) => inp.addEventListener("change", async () => {
+    const f = inp.files[0]; if (!f) return;
+    const kind = inp.dataset.up;
+    if (f.size > d.limits[kind].max) return fail(new Error(`Fichier trop lourd (${mb(d.limits[kind].max)} au maximum).`));
+    try {
+      const res = await fetch(`/api/theme/${kind}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: f });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+      done(data, kind === "logo" ? "Logo importé : visible partout." : "Fond d'écran importé.");
+    } catch (e) { fail(e); }
+  }));
+  app.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { try { done(await api("DELETE", `/api/theme/${b.dataset.rm}`), "Retiré."); } catch (e) { fail(e); } }));
+  $("#threset")?.addEventListener("click", async () => {
+    if (!confirm("Revenir au rouge Callikoe, sans logo ni fond d'écran, sur le serveur et tous ses PBX ?")) return;
+    try { done(await api("POST", "/api/theme/reset"), "Thème Callikoe rétabli."); } catch (e) { fail(e); }
+  });
 }
 
 async function followJob(id, after) {
@@ -920,6 +973,7 @@ function route() {
   if (h === "#/cle" && can("super")) return renderSigning();
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
   if (h === "#/licences") return renderLicenses();
+  if (h === "#/apparence") return renderTheme();
   if (h === "#/telephonie") return renderTelephonie();
   if (h === "#/surveillance") return renderWatch();
   if (h === "#/pays") return renderGeo();

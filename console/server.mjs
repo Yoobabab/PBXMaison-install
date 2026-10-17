@@ -23,6 +23,7 @@ import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS,
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { createAdminService } from "./lib/admin.mjs";
 import { CX_MODE, CX_TENANT } from "./lib/config.mjs";
+import { registerThemeRoutes } from "./lib/theme.mjs";
 import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
 
@@ -42,6 +43,7 @@ export async function buildApp({ db, ami } = {}) {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 1_048_576 });
   await app.register(cookie);
   await app.register(fastifyStatic, { root: path.join(import.meta.dirname, "public"), index: ["index.html"] });
+  registerThemeRoutes(app);   // couleur, logo et fond d'écran choisis dans la console du serveur multi-tenant
 
   const COOKIE = "pbxm_session";
   const cookieOpts = (req) => ({ path: "/", httpOnly: true, sameSite: "strict", secure: req.protocol === "https", maxAge: 12 * 3600 });
