@@ -1,5 +1,5 @@
 // Console web Callikoe — application monopage sans dépendance.
-import { renderCallflow, standardBox, codeField } from "./callflow-ui.js";
+import { renderCallflow, standardBox, offerKey, codesLine } from "./callflow-ui.js";
 import { renderAdmin } from "./admin-ui.js";
 const $ = (s, r = document) => r.querySelector(s);
 const app = $("#app");
@@ -446,13 +446,33 @@ async function renderTotpRequired() {
 }
 
 // ---------------------------------------------------------------- Tableau de bord
+/** Tableau de bord : ouvert ou fermé en ce moment (fermé à la main avec le bouton Ouvert/Fermé, ou par les horaires généraux) */
+function ocCard(d) {
+  const st = d.standard, hr = d.hours;
+  const fmt = (iso) => new Date(iso).toLocaleString("fr-FR", { weekday: "long", hour: "2-digit", minute: "2-digit" });
+  let cls, title, why, btn = "";
+  if (st && st.state !== "open") {
+    cls = "closed"; title = "Fermé";
+    why = `Fermé à la main${st.by ? ` par ${esc(st.by)}` : ""}${st.since ? ` (${esc(fmt(st.since))})` : ""}${st.state === "forward" ? ` · renvoyé vers ${esc(fmtPhone(st.target))}` : ""}`;
+    btn = `<button class="btn" data-oc="open">Ouvrir</button>`;
+  } else if (hr && hr.state !== "open") {
+    cls = hr.state === "closed" ? "closed" : "pause"; title = { closed: "Fermé", break: "En pause", holiday: "Fermé · jour férié / congés" }[hr.state] || "Fermé";
+    why = `Selon les horaires « ${esc(hr.name)} »`;
+  } else {
+    cls = "open"; title = "Ouvert";
+    why = hr ? `Selon les horaires « ${esc(hr.name)} »` : "Aucun horaire général : toujours ouvert";
+  }
+  if (st && st.state === "open") btn = `<button class="btn ghost" data-oc="closed">Fermer maintenant</button>`;
+  return `<div class="oc-card ${cls}"><span class="oc-ic ${cls}"></span><div class="grow"><div class="oc-t">${title}</div><div class="s">${why}</div></div>
+    ${hr ? `<a class="btn ghost sm" href="#/gestion/horaires">Horaires</a>` : ""}${btn}</div>`;
+}
 async function renderDashboard() {
   setNav("home");
   const d = await api("GET", "/api/dashboard");
   const left = Math.floor((new Date(d.pbx.expires_at) - Date.now()) / 86400000);
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>${esc(d.pbx.name)}</h1>
     <p class="sub" style="margin:0">${esc(d.pbx.company)} · <span class="mono">${esc(d.pbx.fqdn)}</span></p></div></div>
-    ${d.standard && d.standard.state !== "open" ? `<a class="flash warn std-banner" href="#/utilisateurs${d.standard.user ? `/${esc(d.standard.user)}/renvois` : ""}"><strong>${esc(d.standard.label)}</strong>${d.standard.by ? ` · par ${esc(d.standard.by)}` : ""} — les appels n'arrivent pas normalement. Gérer ›</a>` : ""}
+    ${ocCard(d)}
     <div class="cards dash-cards">
       <a class="card" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
         <div class="s">${d.trunks.total === 0 ? "Aucun trunk : ajoute ton opérateur" : d.trunks.registered === d.trunks.total ? "Tous opérationnels" : "Au moins un trunk en défaut"}</div></a>
@@ -1000,7 +1020,7 @@ async function renderUser(id, tab = "general") {
   setNav("ext");
   clearInterval(timer);
   if (userDraft?.id !== id) userDraft = { id, data: {} };
-  const [{ user: u, server }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
+  const [{ user: u, server, key_offer: keyOffer }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
   if ((tab === "telephone" || tab === "touches") && !phoneOpts) phoneOpts = await api("GET", "/api/phone-options");
   const users = list.extensions;
   const fw = u.forwarding;
@@ -1043,16 +1063,15 @@ async function renderUser(id, tab = "general") {
     const on = fw.always?.type && fw.always.type !== "none";
     const last = on ? fw.always : (fw.always_last?.type && fw.always_last.type !== "none" ? fw.always_last : { type: "voicemail", target: "" });
     codes = await api("GET", "/api/shortcodes").then((r) => r.codes).catch(() => null);
-    std = await standardBox(cfHelpers, u, codes).catch(() => null);
+    std = await standardBox(cfHelpers, u, codes, keyOffer).catch(() => null);
     body = `<form method="post" id="uf" novalidate class="pad stack"><div class="form-msg"></div>
       <div class="fwcards">
       <section class="fwcard fw-now ${on ? "on" : ""}">
-        <header><span class="fwic">↪</span><div class="grow"><h3>Renvoi immédiat</h3><p>Tous les appels de ce poste partent ailleurs, sans sonner</p></div>
+        <header><span class="fwic">↪</span><div class="grow"><h3>Renvoi immédiat</h3><p>Tous ses appels partent ailleurs, sans sonner</p></div>
           <label class="switch big"><input type="checkbox" name="ui.fwon" ${on ? "checked" : ""}><span></span><b class="fwstate">${on ? "Activé" : "Désactivé"}</b></label></header>
         ${destField("forwarding.always_last", "Vers", last, users, u.id, { voicemail: "Sa messagerie vocale", extension: "Un collègue", external: "Un numéro (portable…)" })}
-        ${codes ? `<div><span class="dl">Codes à composer sur le téléphone</span>
-          <div class="codes">${codeField("fwd_on", "Activer", codes)}${codeField("fwd_off", "Désactiver", codes)}${codeField("fwd_number", "Vers un autre numéro", codes, "+ numéro")}</div></div>` : ""}
-        <p class="hint" style="margin:0">Aussi avec la touche « Renvoi » (onglet Touches), le softphone et l'appli.${codes ? " Les codes sont les mêmes pour tous les postes." : ""}</p>
+        ${offerKey("fwd", keyOffer, "Renvoi")}
+        ${codesLine(codes, [["fwd_on", "activer"], ["fwd_off", "désactiver"], ["fwd_number", "vers ce numéro", "+ numéro"]])}
       </section>
       ${std ? std.html : ""}
       </div>
@@ -1160,6 +1179,16 @@ async function renderUser(id, tab = "general") {
   copyButtons();
   wireDest(app);
   std?.wire(app, () => renderUser(u.id, tab));
+  app.querySelectorAll("[data-editcodes]").forEach((b) => (b.onclick = () => { const box = b.parentElement.querySelector(".codes"); box.hidden = !box.hidden; b.textContent = box.hidden ? "Modifier" : "Fermer"; }));
+  app.querySelectorAll("[data-addkey]").forEach((b) => (b.onclick = async () => {
+    if (draftDirty() && !confirm("Ajouter la touche maintenant ? Tes autres modifications non enregistrées seront gardées.")) return;
+    b.disabled = true;
+    try {
+      const r = await api("POST", `/api/extensions/${u.id}/phone/key`, { type: b.dataset.addkey });
+      flash = { text: r.position ? `Touche ajoutée (touche ${r.position}).${r.notified ? " Le téléphone se met à jour." : " Le téléphone la prendra à son prochain démarrage."}` : "La touche est déjà sur le téléphone." };
+      renderUser(u.id, tab);
+    } catch (e) { b.disabled = false; alert(e.message); }
+  }));
   const fwon = $("[name='ui.fwon']");
   fwon?.addEventListener("change", () => { fwon.closest(".fwcard").classList.toggle("on", fwon.checked); $(".fwstate").textContent = fwon.checked ? "Activé" : "Désactivé"; });
   app.querySelectorAll(".seg input").forEach((i) => i.addEventListener("change", () => app.querySelectorAll(".seg label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked))));
@@ -1483,7 +1512,7 @@ function wireKeys(u, users) {
       ${k.type === "blf" ? `<label>Collègue supervisé<select data-pv="value"><option value="">— Choisir —</option>${others.map((x) => `<option value="${esc(x.id)}" ${k.value === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label>` : ""}
       ${k.type === "speed" ? `<label>Numéro<input data-pv="value" value="${esc(k.value)}" inputmode="tel" placeholder="06 12 34 56 78 ou 201"></label>` : ""}
       ${k.type === "none" ? "" : `<label>Libellé à l'écran<input data-pv="label" value="${esc(k.label)}" maxlength="24" placeholder="${k.type === "line" ? "facultatif" : ""}"></label>`}
-      <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", fwd: "Voyant allumé quand un renvoi immédiat est actif ; un appui active le renvoi vers la destination choisie (fiche › Renvois d'appels) ou l'annule.", standard: "Voyant allumé quand le standard est fermé ou renvoyé ; un appui ferme ou rouvre le standard pour tout le PBX. Pour les postes autorisés (fiche › Renvois d'appels › Standard).", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
+      <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", fwd: "Voyant allumé quand un renvoi immédiat est actif ; un appui active le renvoi vers la destination choisie (fiche › Renvois d'appels) ou l'annule.", standard: "Voyant allumé quand c'est fermé ; un appui ferme (vers la dernière destination) ou rouvre tout le PBX. Pour les postes autorisés (fiche › Renvois d'appels › Ouvert / Fermé).", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
       <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button>
         <button type="button" class="btn ghost sm" data-multi title="Remplir les touches suivantes avec des BLF, à partir de celle-ci">Série de BLF</button></div>
       <div id="blfmulti"></div>`;
@@ -1776,6 +1805,15 @@ async function renderSystem() {
     timer = setInterval(poll, 1200);
   };
 }
+
+// Tableau de bord : bouton Ouvrir / Fermer maintenant
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest?.("[data-oc]"); if (!b) return;
+  if (b.dataset.oc === "closed" && !confirm("Fermer maintenant ? Tous les numéros de l'entreprise iront vers la destination « fermé » (réglée dans la fiche Renvois d'appels d'un poste autorisé).")) return;
+  b.disabled = true;
+  try { await api("POST", "/api/standard/state", { state: b.dataset.oc }); flash = { text: b.dataset.oc === "open" ? "C'est ouvert." : "C'est fermé." }; renderDashboard(); }
+  catch (err) { b.disabled = false; alert(err.message); }
+});
 
 // ---------------------------------------------------------------- Gestion d'appels (module callflow-ui.js)
 const cfHelpers = { api, esc, $, app, setNav, formData, showFormError, takeFlash: () => takeFlash(), setFlash: (f) => { flash = f; } };

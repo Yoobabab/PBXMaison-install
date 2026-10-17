@@ -51,34 +51,31 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   return renderList(head, kind);
 }
 
-// ---------------------------------------------------------------- Standard : ouvert / fermé / renvoyé pour tout le PBX
+// ---------------------------------------------------------------- Ouvert / Fermé : tout le PBX d'un coup (postes autorisés)
 // Réglé dans la fiche utilisateur › Renvois d'appels (app.js) : les champs « ui.std.* » font partie du formulaire de la fiche.
-const STD_LOOK = { open: ["ok", "Ouvert"], closed: ["bad", "Fermé"], forward: ["fwd", "Renvoyé"] };
-export async function standardBox(helpers, u, codes) {
+export async function standardBox(helpers, u, codes, offer) {
   h = helpers;
   const [st] = await Promise.all([h.api("GET", "/api/standard"), load()]);
   const role = u.options.role || "user";
   const locked = role === "manager" || role === "console";
   const can = role !== "user";
   const dids = [...new Set((cf.trunk_dids || []).map((d) => d.did))];
-  const code = (id, label, suffix = "") => codeField(id, label, codes, suffix);
-  const since = st.since ? `depuis le ${new Date(st.since).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}${st.by ? ` · ${esc(st.by)}` : ""}` : "";
-  const html = `<section class="fwcard std-card">
-    <header><span class="fwic">☎</span><div class="grow"><h3>Standard de l'entreprise</h3><p>Ouvrir ou fermer d'un coup tous les numéros du PBX</p></div></header>
-    <label class="switch big"><input type="checkbox" name="ui.std_can" ${can ? "checked" : ""} ${locked ? "disabled" : ""}><span></span>
-      Ce poste peut ouvrir et fermer le standard${locked ? ` <em class="hint">(inclus dans le rôle ${role === "manager" ? "Responsable" : "Accès console"})</em>` : ""}</label>
+  const closed = st.state !== "open";
+  const since = st.since ? ` depuis le ${new Date(st.since).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
+  const html = `<section class="fwcard std-card ${closed ? "closed" : ""}">
+    <header><span class="oc-ic ${closed ? "closed" : "open"}"></span><div class="grow"><h3>Ouvert / Fermé</h3><p>Fermer d'un coup tous les numéros de l'entreprise</p></div>
+      <label class="switch big"><input type="checkbox" name="ui.std_can" ${can ? "checked" : ""} ${locked ? "disabled" : ""}><span></span><b>${locked ? "Inclus dans son rôle" : "Ce poste peut le faire"}</b></label></header>
     <div class="std-body" ${can ? "" : "hidden"}>
-      <div class="std-now"><span class="dl">En ce moment <em class="hint">${since}</em></span>
-        <div class="std-states">${Object.entries(STD_LOOK).map(([k, [cls, l]]) => `<button type="button" class="std-st ${cls} ${st.state === k ? "on" : ""}" data-st="${k}"><i></i>${l}${k === "forward" && st.state === k ? ` <small>${esc(fmtP(st.target))}</small>` : ""}</button>`).join("")}</div>
-        <div class="std-fwd" hidden><input id="stdnum" inputmode="tel" placeholder="Numéro, ex. 06 12 34 56 78" value="${st.state === "forward" ? esc(fmtP(st.target)) : ""}"><button type="button" class="btn sm" id="stdgo">Renvoyer</button></div></div>
-      ${destPicker("ui.std.closed_dest", st.closed_dest, { label: "Quand le standard est fermé, les appels vont vers", withPrompt: true })}
-      <div><span class="dl">Codes à composer sur le téléphone</span>
-        <div class="codes">${code("std_close", "Fermer")}${code("std_open", "Ouvrir")}${code("std_forward", "Renvoyer vers un numéro", "+ numéro")}</div></div>
-      ${dids.length ? `<div><span class="dl">Numéros qui ne ferment jamais</span>
+      <div class="std-now ${closed ? "closed" : "open"}"><span><b>${closed ? "Fermé" : "Ouvert"}</b> en ce moment<em class="hint">${since}${st.by ? ` · ${esc(st.by)}` : ""}</em></span>
+        <button type="button" class="btn sm ${closed ? "" : "danger"}" data-st="${closed ? "open" : "closed"}">${closed ? "Ouvrir" : "Fermer"}</button></div>
+      ${destPicker("ui.std.closed_dest", st.closed_dest, { label: "Quand c'est fermé, les appels vont vers", withPrompt: true })}
+      <span class="hint" style="margin-top:-8px">Depuis le softphone ou l'appli, la destination se choisit au moment de fermer ; la touche et le code reprennent la dernière.</span>
+      ${offerKey("standard", offer, "Ouvert/Fermé")}
+      ${codesLine(codes, [["std_close", "fermer"], ["std_open", "ouvrir"], ["std_forward", "fermer vers ce numéro", "+ numéro"]])}
+      ${dids.length ? `<details class="fw-more"><summary>Numéros qui ne ferment jamais${st.skip_dids?.length ? ` (${st.skip_dids.length})` : ""}</summary>
         <div class="dids">${dids.map((d) => `<button type="button" class="chip" data-skip="${esc(d)}">${esc(fmtP(d))}</button>`).join("")}</div>
         <input type="hidden" name="ui.std.skip_dids" value="${esc((st.skip_dids || []).join(","))}">
-        <span class="hint">Touche un numéro pour qu'il ne ferme jamais (ligne directe, fax…). Les numéros directs des utilisateurs ne ferment jamais.</span></div>` : ""}
-      <p class="hint" style="margin:0">Réglages communs à tout le PBX${st.standardists.length ? ` · standardistes : ${st.standardists.map((x) => esc(`${x.id} ${x.name}`)).join(", ")}` : ""}. Aussi avec la touche « Standard » (onglet Touches), le softphone et l'appli.</p>
+        <span class="hint">Touche un numéro (fax, ligne directe…). Les numéros directs des utilisateurs ne ferment jamais.</span></details>` : ""}
     </div></section>`;
   const wire = (root, onState) => {
     wireDests(root.querySelector(".std-card"));
@@ -93,19 +90,30 @@ export async function standardBox(helpers, u, codes) {
       hid.value = [...set].join(","); draw(); hid.dispatchEvent(new Event("input", { bubbles: true }));
     }));
     if (hid) draw();
-    const fwdBox = root.querySelector(".std-fwd");
-    const go = async (state, target = "") => {
-      try { const r = await h.api("POST", "/api/standard/state", { state, target }); h.setFlash({ text: r.label }); onState(); }
-      catch (e) { h.showFormError(root.querySelector("form") || root, { ...e, field: "" }); }
-    };
-    root.querySelectorAll("[data-st]").forEach((b) => (b.onclick = () => {
-      if (b.dataset.st === "forward") { fwdBox.hidden = false; root.querySelector("#stdnum").focus(); return; }
-      if (b.dataset.st === "closed" && !confirm("Fermer le standard maintenant ? Tous les numéros du PBX iront vers la destination choisie.")) return;
-      go(b.dataset.st);
+    root.querySelectorAll(".std-card [data-st]").forEach((b) => (b.onclick = async () => {
+      const state = b.dataset.st;
+      if (state === "closed" && !confirm("Fermer maintenant ? Tous les numéros de l'entreprise iront vers la destination choisie.")) return;
+      try { await h.api("POST", "/api/standard/state", { state }); h.setFlash({ text: state === "open" ? "C'est ouvert." : "C'est fermé." }); onState(); }
+      catch (e) { alert(e.message); }
     }));
-    root.querySelector("#stdgo").onclick = () => go("forward", root.querySelector("#stdnum").value);
   };
   return { html, wire, closed: st.closed_dest, skip: st.skip_dids || [] };
+}
+/** Bouton « Ajouter la touche sur son téléphone » (Yealink configuré, touche absente) */
+export function offerKey(type, offer, label) {
+  const o = offer?.[type];
+  if (!o) return "";
+  if (o.has) return `<p class="kofr done">✓ Touche « ${escS(label)} » présente sur son ${escS(o.model)}</p>`;
+  if (o.full) return `<p class="kofr done">Plus de touche libre sur son ${escS(o.model)} (onglet Touches)</p>`;
+  return `<button type="button" class="kofr" data-addkey="${type}"><span class="plus">+</span><span class="grow"><b>Ajouter la touche « ${escS(label)} » sur son téléphone</b><small>${escS(o.model)} · première touche libre, voyant allumé quand c'est ${type === "fwd" ? "renvoyé" : "fermé"}</small></span></button>`;
+}
+/** Codes du téléphone sur une ligne, modifiables d'un clic (communs à tous les postes) */
+export function codesLine(codes, list) {
+  if (!codes) return "";
+  const c = (id) => codes.find((x) => x.id === id);
+  return `<div class="codesline"><span>Codes : ${list.map(([id, l, suf]) => `<b>${escS(c(id)?.code || "")}</b>${suf ? ` ${escS(suf)}` : ""} ${escS(l)}`).join(" · ")}</span>
+    <button type="button" class="linkbtn" data-editcodes>Modifier</button>
+    <div class="codes" hidden>${list.map(([id, l, suf]) => codeField(id, l[0].toUpperCase() + l.slice(1), codes, suf || "")).join("")}<span class="hint">Mêmes codes pour tous les postes.</span></div></div>`;
 }
 const escS = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 /** Champ « code à composer » (commun à tous les postes) */

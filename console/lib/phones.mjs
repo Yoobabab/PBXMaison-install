@@ -63,9 +63,28 @@ export const TRANSPORTS = { udp: ["UDP (5060)", 0, 5060], tcp: ["TCP (5060)", 1,
 export const RING_TYPES = { interne: "Appel interne (collègue)", externe: "Appel externe (client)", groupe: "Groupe d'appel", file: "File d'attente", svi: "Via le SVI (standard automatique)" };
 export const RINGERS = { "": "Sonnerie par défaut du téléphone", 1: "Sonnerie 1", 2: "Sonnerie 2", 3: "Sonnerie 3", 4: "Sonnerie 4", 5: "Sonnerie 5", 6: "Sonnerie 6", 7: "Sonnerie 7", 8: "Sonnerie 8" };
 export const KEY_TYPES = { line: "Ligne", blf: "BLF (supervision + interception)", status: "Statut Ne pas déranger (voyant + bascule)", fwd: "Renvoi (voyant + bascule)",
-  standard: "Standard ouvert / fermé (rôle Standardiste)", speed: "Numérotation rapide", none: "Aucune" };
+  standard: "Ouvert / Fermé (postes autorisés)", speed: "Numérotation rapide", none: "Aucune" };
 /** Libellé par défaut des touches à bascule */
-export const KEY_DEFAULT_LABEL = { status: "Ne pas déranger", fwd: "Renvoi", standard: "Standard" };
+export const KEY_DEFAULT_LABEL = { status: "Ne pas déranger", fwd: "Renvoi", standard: "Ouvert/Fermé" };
+
+/**
+ * Touche à bascule (« Renvoi », « Ouvert / Fermé »…) ajoutée d'un clic depuis la fiche Renvois ou le softphone :
+ * première touche libre du téléphone. Renvoie { keys, position } ; position = numéro de la touche (1 = première),
+ * 0 si elle existe déjà, -1 si toutes les touches sont prises ; null si le téléphone n'en a pas (pas de modèle, sans touches, pas Yealink).
+ */
+export function addToggleKey(phone, type) {
+  const m = MODELS.find((x) => x.id === phone?.model);
+  if (!m || !m.keys || !m.id.startsWith("yealink-") || !KEY_DEFAULT_LABEL[type]) return null;
+  const keys = (phone.keys || []).map((k) => ({ ...k }));
+  const all = [...keys, ...(phone.modules || []).flatMap((x) => x.keys || [])];
+  if (all.some((k) => k.type === type)) return { keys, position: 0 };
+  let i = keys.findIndex((k, n) => n > 0 && (!k || k.type === "none"));
+  if (i < 0) i = Math.max(keys.length, 1);
+  if (i >= m.keys) return { keys, position: -1 };
+  while (keys.length < i) keys.push({ type: keys.length ? "none" : "line", value: "", label: "" });
+  keys[i] = { type, value: "", label: KEY_DEFAULT_LABEL[type] };
+  return { keys, position: i + 1 };
+}
 
 /** Modules d'extension Yealink : touches par page, pages, téléphones compatibles (préfixe du modèle). */
 export const EXPANSIONS = {
@@ -322,7 +341,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     // Touche « Renvoi » : voyant = renvoi immédiat actif, appui = active le dernier renvoi ou l'annule
     if (k.type === "fwd") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `fwd${user.id}`), v(`${p}.label`, k.label || "Renvoi")];
     // Touche « Standard » : voyant = standard fermé ou renvoyé, appui = ferme ou rouvre (refusé sans le rôle Standardiste)
-    if (k.type === "standard") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, "standard"), v(`${p}.label`, k.label || "Standard")];
+    if (k.type === "standard") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, "standard"), v(`${p}.label`, k.label || "Ouvert/Fermé")];
     if (k.type === "speed") return [v(`${p}.type`, 13), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label)];
     return [v(`${p}.type`, 0), v(`${p}.value`, ""), v(`${p}.label`, "")];
   };

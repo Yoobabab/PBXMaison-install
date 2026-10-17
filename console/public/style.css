@@ -861,4 +861,31 @@ main h1::after,#app h1::after{content:"";display:block;width:44px;height:4px;bor
 .std-fwd input{flex:1;max-width:240px}
 .std-body{display:flex;flex-direction:column;gap:14px}
 .dids{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
-a.std-banner{display:block;text-decoration:none;color:inherit;margin-bottom:14px}
+/* Ouvert / Fermé : pastille, carte du tableau de bord, cartes de la fiche */
+.oc-ic{width:38px;height:38px;border-radius:12px;flex:none;position:relative;background:var(--ok)}
+.oc-ic::after{content:"";position:absolute;inset:12px;border-radius:50%;background:#fff}
+.oc-ic.closed{background:var(--bad)}.oc-ic.pause{background:var(--warn)}
+.oc-card{display:flex;align-items:center;gap:16px;padding:16px 18px;border-radius:16px;border:1.5px solid var(--line);background:var(--panel);margin-bottom:18px}
+.oc-card .oc-ic{width:48px;height:48px;border-radius:15px}.oc-card .oc-ic::after{inset:15px}
+.oc-card .oc-t{font-size:22px;font-weight:700;font-family:var(--display, inherit)}
+.oc-card.open{border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}.oc-card.open .oc-t{color:var(--ok)}
+.oc-card.closed{border-color:var(--bad);background:var(--bad-soft)}.oc-card.closed .oc-t{color:var(--bad)}
+.oc-card.pause{border-color:var(--warn);background:var(--warn-soft)}.oc-card.pause .oc-t{color:var(--warn)}
+.oc-card .s{color:var(--muted);font-size:14px}
+.oc-card .grow{flex:1}
+.std-card.closed{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.std-now{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:12px;background:var(--ok-soft)}
+.std-now.closed{background:var(--bad-soft)}
+.std-now b{font-size:15px}.std-now.open b{color:var(--ok)}.std-now.closed b{color:var(--bad)}
+.std-now .hint{margin-left:6px}
+.kofr{display:flex;align-items:center;gap:12px;width:100%;border:1.5px dashed var(--line);background:none;color:var(--ink);border-radius:12px;padding:10px 12px;font:inherit;cursor:pointer;text-align:left}
+.kofr b{display:block;font-size:14px}.kofr small{font-size:12.5px;color:var(--muted);font-weight:400}
+.kofr .plus{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-size:20px;flex:none}
+.kofr:hover{border-color:var(--accent)}
+p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;margin:0}
+.codesline{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.codesline>span b{font-family:var(--mono);color:var(--ink);background:var(--bg);border-radius:6px;padding:1px 6px}
+.linkbtn{border:0;background:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;padding:0}
+.codesline .codes{width:100%}
+.fw-more summary{cursor:pointer;font-weight:600;font-size:14px;color:var(--muted)}
+.fw-more[open] summary{margin-bottom:6px}

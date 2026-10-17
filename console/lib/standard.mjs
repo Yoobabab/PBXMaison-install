@@ -51,7 +51,7 @@ export function buildStandardDialplan(std, m) {
   const s = { ...defaultStandard(), ...std };
   const L = ["", "; Standard fermé ou renvoyé — écrit par la console web", "[standard-closed]",
     'exten => s,1,NoOp(Standard ${STD})',
-    ' same => n,Set(CDR(rule)=${IF($["${STD:0:4}" = "fwd:"]?Standard renvoyé vers ${STD:4}:Standard fermé)})',
+    ' same => n,Set(CDR(rule)=${IF($["${STD:0:4}" = "fwd:"]?Fermé, renvoyé vers ${STD:4}:Fermé (bouton Ouvert/Fermé))})',
     ' same => n,GotoIf($["${STD:0:4}" = "fwd:"]?fwd)'];
   destApps(s.closed_dest, m).forEach((a) => L.push(` same => n,${a}`));
   L.push(" same => n,Hangup()", ' same => n(fwd),Goto(user-external,${STD:4},1)');
@@ -63,7 +63,7 @@ export function buildStandardDialplan(std, m) {
 
 /** Texte lisible de l'état (console, softphone, journal) */
 export function describeState(st) {
-  if (st.state === "closed") return "Standard fermé";
-  if (st.state === "forward") return `Standard renvoyé vers ${st.target.replace(/(\d{2})(?=\d)/g, "$1 ")}`;
-  return "Standard ouvert";
+  if (st.state === "closed") return "Fermé";
+  if (st.state === "forward") return `Fermé · renvoyé vers ${st.target.replace(/(\d{2})(?=\d)/g, "$1 ")}`;
+  return "Ouvert";
 }

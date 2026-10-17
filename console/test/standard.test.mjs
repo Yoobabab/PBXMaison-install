@@ -11,7 +11,7 @@ test("standard : état lu et écrit dans la base d'Asterisk", () => {
   assert.deepEqual(parseState("fwd:089"), { state: "open", target: "" });
   assert.equal(stateValue({ state: "forward", target: "0612345678" }), "fwd:0612345678");
   assert.equal(stateValue({ state: "closed" }), "closed");
-  assert.equal(describeState({ state: "forward", target: "0612345678" }), "Standard renvoyé vers 06 12 34 56 78");
+  assert.equal(describeState({ state: "forward", target: "0612345678" }), "Fermé · renvoyé vers 06 12 34 56 78");
 });
 
 test("standard : renvoi vers un numéro français, jamais surtaxé", () => {
@@ -68,4 +68,17 @@ test("renvoi immédiat : destination gardée quand il est désactivé", () => {
   assert.equal(u.forwarding.always.type, "none");
   assert.deepEqual(u.forwarding.always_last, { type: "external", target: "0611223344" });
   assert.throws(() => validateUser({ forwarding: { always_last: { type: "none" } } }, u, ctx), /Destination/);
+});
+
+test("touche à bascule ajoutée sur la première touche libre", async () => {
+  const { addToggleKey } = await import("../lib/phones.mjs");
+  assert.equal(addToggleKey({ model: "", keys: [] }, "fwd"), null);
+  assert.equal(addToggleKey({ model: "fanvil-x4u", keys: [] }, "fwd"), null);
+  const p = { model: "yealink-t57w", keys: [{ type: "line" }, { type: "blf", value: "202", label: "Paul" }, { type: "none" }], modules: [] };
+  const r = addToggleKey(p, "standard");
+  assert.equal(r.position, 3); assert.equal(r.keys[2].type, "standard"); assert.equal(r.keys[2].label, "Ouvert/Fermé");
+  assert.equal(addToggleKey({ ...p, keys: r.keys }, "standard").position, 0);
+  const full = { model: "yealink-t31w", keys: [{ type: "line" }, { type: "blf", value: "202" }] };
+  assert.equal(addToggleKey(full, "fwd").position, -1);
+  assert.equal(addToggleKey({ model: "yealink-t31w", keys: [] }, "fwd").position, 2);
 });

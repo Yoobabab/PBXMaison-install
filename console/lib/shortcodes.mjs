@@ -23,9 +23,9 @@ export const SHORTCODES = {
   fwd_on: ["Activer son renvoi (vers la destination réglée dans sa fiche)", "Renvois", "*21", ""],
   fwd_off: ["Annuler son renvoi", "Renvois", "#21", ""],
   fwd_number: ["Renvoyer tous ses appels vers un autre numéro", "Renvois", "*22", "numéro"],
-  std_close: ["Fermer le standard (rôle Standardiste)", "Standard", "*80", ""],
-  std_open: ["Rouvrir le standard (rôle Standardiste)", "Standard", "*81", ""],
-  std_forward: ["Renvoyer le standard vers un autre numéro (rôle Standardiste)", "Standard", "*82", "numéro"],
+  std_close: ["Fermer (postes autorisés à ouvrir / fermer)", "Ouvert / Fermé", "*80", ""],
+  std_open: ["Ouvrir (postes autorisés à ouvrir / fermer)", "Ouvert / Fermé", "*81", ""],
+  std_forward: ["Fermer en renvoyant vers un numéro (postes autorisés)", "Ouvert / Fermé", "*82", "numéro"],
   q_login: ["Se connecter à toutes ses files d'attente", "Files d'attente", "*62", ""],
   q_logout: ["Se déconnecter de toutes ses files d'attente", "Files d'attente", "*63", ""],
 };

@@ -19,7 +19,7 @@ import { isManager, isStandardist } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
 import { migrateChat, createChat } from "./lib/chat.mjs";
-import { KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
+import { scheduleState, KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { createAdminService } from "./lib/admin.mjs";
 import { CX_MODE, CX_TENANT } from "./lib/config.mjs";
@@ -396,6 +396,11 @@ export async function buildApp({ db, ami } = {}) {
       activation_code: activationCode(),
       standard: await pbx.getStandard().then(async ({ state, target, since, by, label }) => ({ state, target, since, by, label,
         user: (await pbx.loadUsers()).find(isStandardist)?.id || null })).catch(() => null),
+      // Horaires généraux du PBX : ouvert / fermé / pause / férié en ce moment
+      hours: await pbx.listObjects("schedule").then((list) => {
+        const g = list.find((o) => o.data.general);
+        return g ? { id: g.id, name: g.name, state: scheduleState(g.data, new Date(), env.PBX_TIMEZONE || "Europe/Paris") } : null;
+      }).catch(() => null),
     };
   });
 
@@ -417,7 +422,10 @@ export async function buildApp({ db, ami } = {}) {
     server: sipServer(),
   }));
   app.post("/api/extensions", { preHandler: requireUser }, async (req) => pbx.createExtension(req.body || {}, currentUser(req).email));
-  app.get("/api/extensions/:id", { preHandler: requireUser }, async (req) => ({ user: await pbx.getUser(req.params.id), server: sipServer() }));
+  app.get("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
+    const user = await pbx.getUser(req.params.id);
+    return { user, server: sipServer(), key_offer: { fwd: pbx.phoneKeyInfo(user, "fwd"), standard: pbx.phoneKeyInfo(user, "standard") } };
+  });
   app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email));
   app.get("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.extensionSecret(req.params.id));
   app.post("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.resetSecret(req.params.id));
@@ -618,15 +626,31 @@ export async function buildApp({ db, ami } = {}) {
     const u = await pbx.getUser(webUser(req).ext);
     const std = isStandardist(u) ? await pbx.getStandard() : null;
     const codes = Object.fromEntries((await admin.getShortcodes()).codes.filter((c) => /^(fwd|std)_/.test(c.id)).map((c) => [c.id, c.code]));
-    let closed = "";
+    const out = { forward: u.forwarding.always, last: u.forwarding.always_last, codes,
+      phone: { fwd: pbx.phoneKeyInfo(u, "fwd"), standard: std ? pbx.phoneKeyInfo(u, "standard") : null }, standard: null };
     if (std) {
-      const d = std.closed_dest || {}, users = await pbx.loadUsers(), objs = await pbx.listObjects();
-      const uname = (id) => { const x = users.find((y) => y.id === id); return x ? `${x.first_name} ${x.last_name}`.trim() || `poste ${id}` : id; };
-      closed = d.type === "hangup" ? (d.prompt ? "Annonce, puis fin d'appel" : "Fin d'appel") : d.type === "user" ? uname(d.target) : d.type === "user_vm" ? `Messagerie de ${uname(d.target)}`
-        : d.type === "external" ? d.target.replace(/(\d{2})(?=\d)/g, "$1 ") : objs.find((o) => o.id === d.target)?.name || "";
+      const users = (await pbx.loadUsers()).filter((x) => !x.options.disabled), objs = await pbx.listObjects();
+      const uname = (x) => `${x.first_name} ${x.last_name}`.trim() || `Poste ${x.id}`;
+      const oname = (o) => `${o.number ? o.number + " · " : ""}${o.name}`;
+      const d = std.closed_dest || {};
+      const ux = users.find((x) => x.id === d.target), ox = objs.find((o) => o.id === d.target);
+      const closed = d.type === "hangup" ? (d.prompt ? "Annonce, puis fin d'appel" : "Fin d'appel") : d.type === "user" ? (ux ? uname(ux) : d.target)
+        : d.type === "user_vm" ? `Messagerie de ${ux ? uname(ux) : d.target}` : d.type === "external" ? d.target.replace(/(\d{2})(?=\d)/g, "$1 ") : ox ? oname(ox) : "";
+      // Où envoyer les appels en fermant : choix proposés dans le softphone et l'appli
+      const pick = (kind) => objs.filter((o) => o.kind === kind).map((o) => ({ id: o.id, name: oname(o) }));
+      out.standard = { state: std.state, target: std.target, since: std.since, by: std.by, label: std.label, closed, dest: { type: d.type, target: d.target || "" },
+        targets: { user: users.map((x) => ({ id: x.id, name: `${x.id} · ${uname(x)}`, vm: !!x.voicemail.enabled })),
+          group: pick("group"), queue: pick("queue"), ivr: pick("ivr"), groupvm: pick("groupvm") } };
     }
-    return { forward: u.forwarding.always, last: u.forwarding.always_last, codes,
-      standard: std && { state: std.state, target: std.target, since: std.since, by: std.by, label: std.label, closed } };
+    return out;
+  });
+  // Ajouter la touche « Renvoi » (tout le monde) ou « Ouvert / Fermé » (postes autorisés) sur son téléphone IP
+  app.post("/api/u/phone/key", { preHandler: requireWebUser }, async (req) => {
+    const s = webUser(req);
+    const type = req.body?.type;
+    if (type !== "fwd" && type !== "standard") throw new UserError("Touche inconnue.");
+    if (type === "standard" && !isStandardist(await pbx.getUser(s.ext))) throw Object.assign(new UserError("Réservé aux postes autorisés à ouvrir et fermer."), { status: 403 });
+    return pbx.addPhoneKey(s.ext, type, webBy(s));
   });
   // Standard (tout le PBX) : ouvert / fermé / renvoyé, par les utilisateurs Standardiste, Responsable ou Accès console
   app.get("/api/u/standard", { preHandler: requireWebUser }, async (req) => {
@@ -776,6 +800,11 @@ export async function buildApp({ db, ami } = {}) {
 
   // ---------------------------------------------------------------- Gestion d'appels
   // Standard : état (ouvert / fermé / renvoyé) et réglages (destination quand fermé, numéros non concernés)
+  app.post("/api/extensions/:id/phone/key", { preHandler: requireUser }, async (req) => {
+    const type = req.body?.type;
+    if (type !== "fwd" && type !== "standard") throw new UserError("Touche inconnue.");
+    return pbx.addPhoneKey(req.params.id, type, currentUser(req)?.email || "console");
+  });
   app.get("/api/standard", { preHandler: requireUser }, async () => {
     const users = await pbx.loadUsers();
     return { ...(await pbx.getStandard()), standardists: users.filter(isStandardist).map((u) => ({ id: u.id, name: `${u.first_name} ${u.last_name}`.trim() || `Poste ${u.id}`, role: u.options.role })) };

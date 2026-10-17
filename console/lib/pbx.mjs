@@ -11,7 +11,7 @@ import { CX_MODE, KAMAILIO_URI, VAR as CX_VAR } from "./config.mjs";
 import { numberRisk, deviceCategory, CATEGORY_LABELS } from "./watch.mjs";
 import { runConfigure } from "./admin.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
-  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, contactSource, connectionType, modelById } from "./phones.mjs";
+  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, contactSource, connectionType, modelById, addToggleKey } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
@@ -1375,6 +1375,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   /** Change l'état du standard (console, softphone, appli) : appliqué tout de suite par Asterisk */
   async function setStandardState(input, by) {
     const st = validateState(input);
+    // Fermeture avec une destination choisie à ce moment-là (softphone, appli) : elle devient la destination « fermé »
+    if (st.state === "closed" && input?.dest) await setStandardConfig({ closed_dest: input.dest }, by);
     await ami.command(`database put callikoe standard ${stateValue(st)}`);
     await ami.command(`database put callikoe standard_by console`);
     try { await ami.command(`devstate change Custom:cxstd ${st.state === "open" ? "NOT_INUSE" : "INUSE"}`); } catch { /* voyant au prochain passage */ }
@@ -1409,6 +1411,22 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await db.setSetting("standard", next);
     await db.query("INSERT INTO pbxmaison_audit (email, ip, action, ok, detail) VALUES ($1, '', $2, true, 'depuis le téléphone')", [by || "", describeState(next)]).catch(() => {});
   }
+  /** Touche « Renvoi » ou « Ouvert / Fermé » ajoutée d'un clic sur le téléphone IP du poste (fiche Renvois, softphone, appli) */
+  function phoneKeyInfo(u, type) {
+    const r = addToggleKey(u.phone, type);
+    return r ? { model: modelById(u.phone.model)?.label || "", has: r.position === 0, full: r.position === -1 } : null;
+  }
+  async function addPhoneKey(ext, type, by) {
+    const u = await getUser(ext);
+    const r = addToggleKey(u.phone, type);
+    if (!r) throw new UserError("Ce poste n'a pas de téléphone IP Yealink configuré (fiche › Téléphone IP).");
+    if (r.position === -1) throw new UserError("Toutes les touches du téléphone sont déjà prises : libère-en une dans l'onglet Touches.");
+    if (r.position === 0) return { position: 0, notified: false };
+    await updateUser(ext, { phone: { keys: r.keys } }, by);
+    let notified = false;
+    try { await notifyPhone(ext, "resync"); notified = true; } catch { /* le téléphone la prendra à son prochain démarrage */ }
+    return { position: r.position, notified };
+  }
   /** Renvoi immédiat changé par code ou touche (*21, *22, #21, touche « Renvoi ») : appliqué comme depuis la console */
   async function pollForwardCodes() {
     let lines;
@@ -1430,7 +1448,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   }
 
   return {
-    getStandard, setStandardState, setStandardConfig, pollStandard, pollForwardCodes,
+    getStandard, setStandardState, setStandardConfig, pollStandard, pollForwardCodes, phoneKeyInfo, addPhoneKey,
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, deleteImpact, findConsoleUser, consoleUserActive,

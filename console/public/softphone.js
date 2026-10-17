@@ -42,7 +42,7 @@ const I = {
   calls: () => svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
   vm: () => svg('<circle cx="6.5" cy="12" r="3.5"/><circle cx="17.5" cy="12" r="3.5"/><path d="M6.5 15.5h11"/>'),
   gear: () => svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
-  fwd: () => svg('<path d="M15 4l5 5-5 5"/><path d="M20 9H10a6 6 0 0 0-6 6v4"/>'),
+  fwd: (z) => svg('<path d="M15 4l5 5-5 5"/><path d="M20 9H10a6 6 0 0 0-6 6v4"/>', z),
   building: () => svg('<path d="M4 21V5.5A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5V21M15 10h3.5a1.5 1.5 0 0 1 1.5 1.5V21M2.5 21h19M8 8h3M8 12h3M8 16h3"/>'),
   cal: () => svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h3M13 14h3M8 17.5h3"/>'),
   spk: () => svg('<path d="M4 9.5v5h3.5L12 19V5L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
@@ -248,9 +248,13 @@ if (IN_APP) document.documentElement.classList.add("in-app");
 const NAV = IN_APP
   ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
   : [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
+const TITLES = { renvoi: "Renvoi", clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
 // Responsable : onglet Plannings (dans le menu de l'appli, où la barre du bas est déjà pleine)
-const navItems = () => !me?.user?.manager || IN_APP ? NAV : [...NAV.slice(0, -1), ["planning", "Plannings", I.cal], NAV.at(-1)];
+// Renvoi : menu à part (barre de gauche ; dans l'appli : menu du profil, en haut à droite)
+const navItems = () => {
+  const base = IN_APP ? NAV : [...NAV.slice(0, -1), ["renvoi", "Renvoi", I.fwd], NAV.at(-1)];
+  return !me?.user?.manager || IN_APP ? base : [...base.slice(0, -1), ["planning", "Plannings", I.cal], base.at(-1)];
+};
 
 function presenceOf(c) {
   if (!c.registered) return { cls: "off", label: "Hors ligne" };
@@ -328,6 +332,7 @@ function toggleMenu(force) {
     <div class="pm-head">${avatar(me.user.name, myPresence().cls, "")}<div><strong>${esc(me.user.name)}</strong><div class="s">Poste ${esc(me.user.id)}</div></div></div>
     ${Object.entries(STATUS).map(([k, l]) => `<button class="pm-it ${me.user.status === k ? "on" : ""}" data-st="${k}"><i class="pres ${k}"></i>${l}${me.user.status === k ? '<span class="ck">✓</span>' : ""}</button>`).join("")}
     <hr>
+    <a class="pm-it" href="#/renvoi">${I.fwd(18)}Renvoi de mes appels${fwdOn() ? '<span class="pm-on">activé</span>' : ""}</a>
     <a class="pm-it" href="#/reglages/transfert">Renvois par statut…</a>
     ${me.user.manager ? `<a class="pm-it" href="#/planning">${I.cal()}Plannings d'appels…</a>` : ""}
     ${IN_APP ? `<button class="pm-it" id="appaccounts">${I.team()}Comptes…</button>` : `<button class="pm-it" id="logout">${I.logout()}${me.impersonated_by ? "Quitter l'incarnation" : "Se déconnecter"}</button>`}
@@ -339,9 +344,9 @@ function toggleMenu(force) {
   if ($("#logout")) $("#logout").onclick = async () => { try { ua?.stop(); } catch { /* */ } ua = null; await api("POST", "/api/u/logout"); me.impersonated_by ? window.close() : renderLogin(); };
   setTimeout(() => document.addEventListener("click", () => toggleMenu(false), { once: true }));
 }
-// ------------------------------------------------------------------ Touches « Renvoi » (mon poste) et « Standard » (tout le PBX)
-// Même effet que les codes tapés sur un poste (*21 / #21, *80 / *81…) et que les touches du téléphone de bureau.
-let keyInfo = { codes: {}, last: null };
+// ------------------------------------------------------------------ Ouvert / Fermé (postes autorisés) et Renvoi (menu à part, pour tous)
+// Même effet que les codes tapés sur un poste (*80 / *81, *21 / #21) et que les touches du téléphone de bureau.
+let keyInfo = { codes: {}, last: null, phone: {} };
 const fwdOn = () => (me.user.forwarding.always?.type || "none") !== "none";
 const fwdDest = () => fwdOn() ? me.user.forwarding.always : (keyInfo.last || me.user.forwarding.always_last || { type: "voicemail", target: "" });
 function destText(d) {
@@ -350,85 +355,161 @@ function destText(d) {
   if (d.type === "extension") return nameOf(d.target) || d.target;
   return "";
 }
-const stdText = (st) => st.state === "open" ? "Ouvert" : st.state === "closed" ? "Fermé" : `Renvoyé · ${fmtNum(st.target)}`;
+const fmtSince = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "";
 function renderKeys() {
   const k = $("#keys"); if (!k || !me) return;
   const st = me.standard;
-  k.innerHTML = `<div class="sp-keys">
-    <button class="sp-key fwd ${fwdOn() ? "lit" : ""}" id="kfwd"><span class="kic">${I.fwd()}</span><span class="kt"><b>Renvoi</b><small>${fwdOn() ? `→ ${esc(destText(me.user.forwarding.always))}` : "Désactivé"}</small></span><i class="led"></i></button>
-    ${st ? `<button class="sp-key std ${st.state !== "open" ? "lit" : ""} st-${st.state}" id="kstd"><span class="kic">${I.building()}</span><span class="kt"><b>Standard</b><small>${esc(stdText(st))}</small></span><i class="led"></i></button>` : ""}
-  </div>`;
-  $("#kfwd").onclick = (e) => { e.stopPropagation(); keySheet("fwd"); };
-  $("#kstd")?.addEventListener("click", (e) => { e.stopPropagation(); keySheet("std"); });
+  const fw = fwdOn() ? `<a class="sp-fwdbar" href="#/renvoi">${I.fwd(16)}<span>Tes appels sont renvoyés vers <b>${esc(destText(me.user.forwarding.always))}</b></span><button type="button" id="fwoff">Désactiver</button></a>` : "";
+  k.innerHTML = `${st ? `<div class="sp-keys"><button class="sp-oc ${st.state === "open" ? "open" : "closed"}" id="kstd">
+      <span class="oc-dot"></span><span class="kt"><b>${st.state === "open" ? "Ouvert" : "Fermé"}</b><small>${st.state === "open" ? "Les appels arrivent normalement" : `→ ${esc(st.state === "forward" ? fmtNum(st.target) : st.closed || "destination prévue")}`}</small></span>
+      <span class="oc-act">${st.state === "open" ? "Fermer" : "Ouvrir"}</span></button></div>` : ""}${fw}`;
+  $("#kstd")?.addEventListener("click", (e) => { e.stopPropagation(); ocSheet(); });
+  $("#fwoff")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); saveFwd(null); });
+  const nav = $(`[data-r="renvoi"]`); if (nav) nav.classList.toggle("fw-on", fwdOn());
 }
 async function refreshKeys() {
   try {
     const r = await api("GET", "/api/u/keys");
-    me.user.forwarding.always = r.forward; keyInfo = { codes: r.codes || {}, last: r.last }; me.standard = r.standard;
+    me.user.forwarding.always = r.forward; keyInfo = { codes: r.codes || {}, last: r.last, phone: r.phone || {} }; me.standard = r.standard;
   } catch { return; }
   renderKeys();
+  if (page === "renvoi" && !$("#page input:focus")) renderPage();
+}
+async function saveFwd(dest) {
+  try {
+    const fw = dest ? { always: dest, always_last: dest } : { always: { type: "none", target: "" } };
+    const r = await api("PUT", "/api/u/settings", { forwarding: fw });
+    me.user = r.user; if (dest) keyInfo.last = dest;
+    toast(dest ? `Renvoi vers ${destText(dest)}` : "Renvoi désactivé");
+    renderKeys(); if (page === "renvoi" || page === "reglages") renderPage();
+    return true;
+  } catch (err) { toast(err.message, "bad"); return false; }
+}
+/** « Ajouter la touche sur mon téléphone » (Yealink configuré dans la fiche, touche pas encore présente) */
+function keyOffer(type) {
+  const p = keyInfo.phone?.[type];
+  if (!p) return "";
+  if (p.has) return `<p class="kofr done">✓ Touche « ${type === "fwd" ? "Renvoi" : "Ouvert/Fermé"} » présente sur ton ${esc(p.model)}</p>`;
+  if (p.full) return "";
+  return `<button type="button" class="kofr" data-addkey="${type}"><span class="ks-ic">☎</span><span class="grow"><b>Ajouter la touche sur mon téléphone</b><small>${esc(p.model)} · voyant allumé quand c'est ${type === "fwd" ? "renvoyé" : "fermé"}</small></span><span class="plus">+</span></button>`;
+}
+function wireKeyOffer(root) {
+  $$("[data-addkey]", root).forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation(); b.disabled = true;
+    try {
+      const r = await api("POST", "/api/u/phone/key", { type: b.dataset.addkey });
+      keyInfo.phone[b.dataset.addkey].has = true;
+      toast(r.position ? `Touche ajoutée (n° ${r.position})${r.notified ? " : le téléphone se met à jour" : " : visible au prochain démarrage du téléphone"}` : "La touche est déjà sur ton téléphone");
+      b.outerHTML = `<p class="kofr done">✓ Touche ajoutée sur ton ${esc(keyInfo.phone[b.dataset.addkey].model)}</p>`;
+    } catch (err) { toast(err.message, "bad"); b.disabled = false; }
+  });
 }
 function closeSheet() { const m = $("#menu"); if (m) m.innerHTML = ""; }
-function keySheet(kind) {
+function openSheet(html, cls = "") {
   const m = $("#menu");
-  const c = keyInfo.codes || {};
-  const code = (id) => c[id] ? `<b>${esc(c[id])}</b>` : "";
-  let inner;
-  if (kind === "fwd") {
-    const on = fwdOn(), d = fwdDest();
-    const mob = me.user.mobile;
-    const choices = [
-      ...(me.user.voicemail.enabled ? [["voicemail", "", "📮", "Ma messagerie"]] : []),
-      ...(mob ? [["external", mob, "📱", `Mon portable · ${fmtNum(mob)}`]] : []),
-    ];
-    const isOther = d.type === "external" ? d.target !== mob : d.type === "extension";
-    inner = `<div class="ks-head"><div><h3>Renvoyer mes appels</h3><p>Mon poste ne sonne plus : tout part vers…</p></div>
-        <label class="ks-switch"><input type="checkbox" id="kson" ${on ? "checked" : ""}><span></span></label></div>
-      <div class="ks-list">${choices.map(([t, n, ic, l]) => `<button class="ks-it ${!isOther && d.type === t && (t !== "external" || d.target === n) ? "on" : ""}" data-t="${t}" data-n="${esc(n)}"><span class="ks-ic">${ic}</span><span class="grow">${esc(l)}</span><i class="ks-ck"></i></button>`).join("")}
-        <div class="ks-it ks-other ${isOther ? "on" : ""}"><span class="ks-ic">☎</span><input id="ksnum" inputmode="tel" placeholder="Un autre numéro" value="${isOther && d.type === "external" ? esc(fmtNum(d.target)) : ""}"><button class="btn sm" id="ksgo">OK</button></div></div>
-      <p class="ks-code">Sur un téléphone : ${code("fwd_on")} activer · ${code("fwd_off")} désactiver</p>`;
-  } else {
-    const st = me.standard;
-    inner = `<div class="ks-head"><div><h3>Standard</h3><p>Tous les numéros de l'entreprise</p></div></div>
-      <div class="ks-big">
-        <button class="ks-tile open ${st.state === "open" ? "on" : ""}" data-s="open"><span class="dot"></span><b>Ouvert</b><small>Les appels arrivent normalement</small></button>
-        <button class="ks-tile closed ${st.state === "closed" ? "on" : ""}" data-s="closed"><span class="dot"></span><b>Fermé</b><small>${st.closed ? `→ ${esc(st.closed)}` : "Vers la destination prévue"}</small></button>
-      </div>
-      <div class="ks-it ks-other ${st.state === "forward" ? "on" : ""}"><span class="ks-ic">↪</span><input id="ksnum" inputmode="tel" placeholder="Renvoyer vers un numéro" value="${st.state === "forward" ? esc(fmtNum(st.target)) : ""}"><button class="btn sm" id="ksgo">OK</button></div>
-      <p class="ks-code">Sur un téléphone : ${code("std_close")} fermer · ${code("std_open")} ouvrir</p>`;
-  }
-  m.innerHTML = `<div class="ks-scrim"></div><div class="ksheet panel ${kind}"><span class="ks-grab"></span>${inner}</div>`;
+  m.innerHTML = `<div class="ks-scrim"></div><div class="ksheet panel ${cls}"><span class="ks-grab"></span>${html}</div>`;
   const sh = m.querySelector(".ksheet");
   sh.onclick = (e) => e.stopPropagation();
   m.querySelector(".ks-scrim").onclick = closeSheet;
-  const kr = $(kind === "fwd" ? "#kfwd" : "#kstd").getBoundingClientRect();
-  if (innerWidth > 760) Object.assign(sh.style, { top: `${kr.bottom + 8}px`, left: `${kr.left}px` });
-  const busy = (on) => sh.classList.toggle("busy", on);
-  const setFwd = async (dest) => {
-    busy(true);
-    try {
-      const fw = dest ? { always: dest, always_last: dest } : { always: { type: "none", target: "" } };
-      const r = await api("PUT", "/api/u/settings", { forwarding: fw });
-      me.user = r.user; if (dest) keyInfo.last = dest;
-      toast(dest ? `Renvoi vers ${destText(dest)}` : "Renvoi désactivé");
-      closeSheet(); renderKeys(); if (page === "reglages") renderPage();
-    } catch (err) { toast(err.message, "bad"); busy(false); }
-  };
-  const setStd = async (state, target = "") => {
-    if (state === me.standard.state && state !== "forward") return closeSheet();
-    busy(true);
-    try { me.standard = { ...me.standard, ...(await api("POST", "/api/u/standard", { state, target })) }; toast(me.standard.label); closeSheet(); renderKeys(); }
-    catch (err) { toast(err.message, "bad"); busy(false); }
-  };
-  const num = $("#ksnum", sh);
-  const goNum = () => { const n = clean(num.value); if (!n) return num.focus(); kind === "fwd" ? setFwd({ type: "external", target: n }) : setStd("forward", n); };
-  $("#ksgo", sh).onclick = goNum;
-  num.onkeydown = (e) => { if (e.key === "Enter") goNum(); };
-  if (kind === "fwd") {
-    $("#kson", sh).onchange = (e) => setFwd(e.target.checked ? fwdDest() : null);
-    $$("[data-t]", sh).forEach((b) => b.onclick = () => setFwd({ type: b.dataset.t, target: b.dataset.n }));
-  } else $$("[data-s]", sh).forEach((b) => b.onclick = () => setStd(b.dataset.s));
-  setTimeout(() => document.addEventListener("click", closeSheet, { once: true }));
+  const key = $("#kstd");
+  if (key && innerWidth > 760) { const r = key.getBoundingClientRect(); Object.assign(sh.style, { top: `${r.bottom + 8}px`, left: `${r.left}px` }); }
+  return sh;
+}
+// Fermer : où vont les appels ? (messagerie, collègue, groupe, file, SVI, numéro) — la dernière destination est proposée d'office
+const OC_KINDS = [["user_vm", "📮", "Une messagerie"], ["user", "👤", "Un collègue"], ["group", "👥", "Un groupe d'appel"], ["queue", "⏳", "Une file d'attente"], ["ivr", "🔢", "Le SVI"], ["external", "📱", "Un numéro (portable…)"]];
+function ocSheet() {
+  const st = me.standard, c = keyInfo.codes || {};
+  if (st.state !== "open") {
+    const sh = openSheet(`<div class="ks-head"><span class="oc-big closed"></span><div><h3>C'est fermé</h3><p>${st.since ? `Depuis ${esc(fmtSince(st.since))} · ` : ""}les appels vont vers <b>${esc(st.state === "forward" ? fmtNum(st.target) : st.closed || "la destination prévue")}</b></p></div></div>
+      <button class="ks-main open" id="ocgo">Ouvrir</button>
+      ${keyOffer("standard")}
+      <p class="ks-code">Sur un téléphone : <b>${esc(c.std_open || "*81")}</b> ouvrir</p>`, "oc");
+    $("#ocgo", sh).onclick = () => setOc("open");
+    wireKeyOffer(sh);
+    return;
+  }
+  const t = st.targets || {};
+  const vms = [...(t.user || []).filter((u) => u.vm).map((u) => ({ type: "user_vm", id: u.id, name: `Messagerie de ${u.name.replace(/^\d+ · /, "")}` })), ...(t.groupvm || []).map((o) => ({ type: "groupvm", id: o.id, name: o.name }))];
+  const list = (k) => k === "user_vm" ? vms : (t[k] || []).map((o) => ({ type: k, id: o.id, name: o.name }));
+  const cur = st.dest || {};
+  const curKind = cur.type === "groupvm" ? "user_vm" : cur.type;
+  let pick = cur.type && cur.type !== "hangup" ? { type: cur.type, target: cur.target } : null;
+  const kinds = OC_KINDS.filter(([k]) => k === "external" || list(k).length);
+  const sh = openSheet(`<div class="ks-head"><span class="oc-big open"></span><div><h3>Fermer</h3><p>Où envoyer les appels pendant la fermeture ?</p></div></div>
+    <div class="oc-kinds">${kinds.map(([k, ic, l]) => `<div class="oc-k ${k === curKind ? "on" : ""}" data-k="${k}">
+      <button type="button" class="oc-kh"><span class="ks-ic">${ic}</span><span class="grow">${l}</span><span class="oc-sel">${k === curKind && st.closed ? esc(st.closed) : ""}</span><span class="chev">›</span></button>
+      <div class="oc-kb">${k === "external" ? `<input inputmode="tel" class="oc-num" placeholder="06 12 34 56 78" value="${cur.type === "external" ? esc(fmtNum(cur.target)) : ""}">`
+        : list(k).map((o) => `<button type="button" class="oc-o ${cur.type === o.type && cur.target === o.id ? "on" : ""}" data-t="${o.type}" data-id="${esc(o.id)}">${esc(o.name)}</button>`).join("")}</div></div>`).join("")}</div>
+    <button class="ks-main closed" id="ocgo" ${pick ? "" : "disabled"}>Fermer${pick && st.closed ? ` · vers ${esc(st.closed)}` : ""}</button>
+    ${keyOffer("standard")}
+    <p class="ks-code">Sur un téléphone : <b>${esc(c.std_close || "*80")}</b> fermer (vers la dernière destination)</p>`, "oc");
+  const go = $("#ocgo", sh);
+  const setPick = (p, label) => { pick = p; go.disabled = !p; go.textContent = p ? `Fermer · vers ${label}` : "Fermer"; };
+  $$(".oc-k", sh).forEach((box) => box.querySelector(".oc-kh").onclick = () => {
+    const was = box.classList.contains("open");
+    $$(".oc-k", sh).forEach((x) => x.classList.remove("open"));
+    if (!was) box.classList.add("open");
+    box.querySelector(".oc-num")?.focus();
+  });
+  $$(".oc-o", sh).forEach((b) => b.onclick = () => {
+    $$(".oc-o", sh).forEach((x) => x.classList.remove("on")); $$(".oc-k", sh).forEach((x) => x.classList.remove("on"));
+    b.classList.add("on"); b.closest(".oc-k").classList.add("on");
+    b.closest(".oc-k").querySelector(".oc-sel").textContent = b.textContent;
+    setPick({ type: b.dataset.t, target: b.dataset.id }, b.textContent);
+  });
+  const num = $(".oc-num", sh);
+  num?.addEventListener("input", () => {
+    const n = clean(num.value);
+    $$(".oc-o", sh).forEach((x) => x.classList.remove("on")); $$(".oc-k", sh).forEach((x) => x.classList.toggle("on", x.dataset.k === "external" && !!n));
+    setPick(n ? { type: "external", target: n } : null, fmtNum(n) || n);
+  });
+  go.onclick = () => setOc("closed", pick);
+  wireKeyOffer(sh);
+}
+async function setOc(state, dest = null) {
+  const sh = $(".ksheet"); sh?.classList.add("busy");
+  try {
+    const r = await api("POST", "/api/u/standard", { state, ...(dest ? { dest } : {}) });
+    toast(state === "open" ? "C'est ouvert : les appels arrivent normalement" : "C'est fermé");
+    me.standard = { ...me.standard, ...r }; closeSheet(); renderKeys(); refreshKeys();
+  } catch (err) { toast(err.message, "bad"); sh?.classList.remove("busy"); }
+}
+
+// Page « Renvoi » : renvoyer tous mes appels (menu à part, pour tout le monde)
+function pageRenvoi(el) {
+  const on = fwdOn(), d = fwdDest(), u = me.user, c = keyInfo.codes || {};
+  const mob = u.mobile;
+  const isMob = d.type === "external" && d.target === mob;
+  const choices = [
+    ...(u.voicemail.enabled ? [["voicemail", "📮", "Ma messagerie", "", d.type === "voicemail"]] : []),
+    ...(mob ? [["mobile", "📱", "Mon portable", fmtNum(mob), isMob]] : []),
+    ["extension", "👤", "Un collègue", "", d.type === "extension"],
+    ["external", "☎", "Un autre numéro", "", d.type === "external" && !isMob],
+  ];
+  el.innerHTML = `<section class="panel fwpage ${on ? "on" : ""}">
+    <div class="fwp-head"><span class="fwp-ic">${I.fwd(26)}</span><div class="grow"><h2>${on ? "Renvoi activé" : "Renvoi désactivé"}</h2>
+      <p>${on ? `Ton poste ne sonne plus : tes appels vont vers <b>${esc(destText(d))}</b>.` : "Ton poste sonne normalement."}</p></div>
+      <label class="ks-switch big"><input type="checkbox" id="fwsw" ${on ? "checked" : ""}><span></span></label></div>
+    <div class="fwp-body"><span class="dl">${on ? "Renvoyé vers" : "Quand je l'active, renvoyer vers"}</span>
+      <div class="ks-list">${choices.map(([k, ic, l, sub, sel]) => `<div class="ks-it fwc ${sel ? "on" : ""}" data-c="${k}"><span class="ks-ic">${ic}</span>
+        ${k === "extension" ? `<select class="grow fwx"><option value="">Un collègue…</option>${contacts.filter((x) => x.id !== u.id).map((x) => `<option value="${esc(x.id)}" ${d.type === "extension" && d.target === x.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.id)}</option>`).join("")}</select>`
+        : k === "external" ? `<input class="grow fwn" inputmode="tel" placeholder="Un autre numéro" value="${d.type === "external" && !isMob ? esc(fmtNum(d.target)) : ""}"><button class="btn sm" id="fwok">OK</button>`
+        : `<span class="grow">${l}${sub ? ` <small>${esc(sub)}</small>` : ""}</span>`}<i class="ks-ck"></i></div>`).join("")}</div>
+      ${keyOffer("fwd")}
+      <p class="ks-code">Sur un téléphone : <b>${esc(c.fwd_on || "*21")}</b> activer · <b>${esc(c.fwd_off || "#21")}</b> désactiver · <b>${esc(c.fwd_number || "*22")}</b> + numéro</p>
+    </div></section>`;
+  // Choisir une destination active aussitôt le renvoi vers elle ; l'interrupteur active ou coupe avec la destination affichée
+  const apply = (dest) => saveFwd(dest);
+  $("#fwsw", el).onchange = (e) => saveFwd(e.target.checked ? d : null);
+  $$(".fwc", el).forEach((row) => {
+    const k = row.dataset.c;
+    if (k === "voicemail") row.onclick = () => apply({ type: "voicemail", target: "" });
+    if (k === "mobile") row.onclick = () => apply({ type: "external", target: mob });
+  });
+  $(".fwx", el).onchange = (e) => { if (e.target.value) apply({ type: "extension", target: e.target.value }); };
+  const n = $(".fwn", el), ok = () => { const v = clean(n.value); if (v) apply({ type: "external", target: v }); else n.focus(); };
+  $("#fwok", el).onclick = ok; n.onkeydown = (e) => { if (e.key === "Enter") ok(); };
+  wireKeyOffer(el);
 }
 
 async function setStatus(st) {
@@ -456,7 +537,7 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, clavier: (x) => renderDialer(x, true) })[page](el);
+  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, renvoi: pageRenvoi, clavier: (x) => renderDialer(x, true) })[page](el);
 }
 
 // ------------------------------------------------------------------ Plannings d'appels (responsables)
