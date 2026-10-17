@@ -652,17 +652,17 @@ export async function buildApp({ db, ami } = {}) {
     if (type === "standard" && !isStandardist(await pbx.getUser(s.ext))) throw Object.assign(new UserError("Réservé aux postes autorisés à ouvrir et fermer."), { status: 403 });
     return pbx.addPhoneKey(s.ext, type, webBy(s));
   });
-  // Standard (tout le PBX) : ouvert / fermé / renvoyé, par les utilisateurs Standardiste, Responsable ou Accès console
+  // Standard (tout le PBX) : ouvert / fermé / renvoyé, par les utilisateurs Pilote, Responsable ou Accès console
   app.get("/api/u/standard", { preHandler: requireWebUser }, async (req) => {
     const u = await pbx.getUser(webUser(req).ext);
-    if (!isStandardist(u)) throw Object.assign(new UserError("Réservé aux standardistes : demande à l'administrateur du PBX de te donner ce rôle."), { status: 403 });
+    if (!isStandardist(u)) throw Object.assign(new UserError("Réservé au rôle Pilote : demande à l'administrateur du PBX de te le donner."), { status: 403 });
     const { state, target, since, by, label } = await pbx.getStandard();
     return { state, target, since, by, label };
   });
   app.post("/api/u/standard", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
     const u = await pbx.getUser(s.ext);
-    if (!isStandardist(u)) throw Object.assign(new UserError("Réservé aux standardistes : demande à l'administrateur du PBX de te donner ce rôle."), { status: 403 });
+    if (!isStandardist(u)) throw Object.assign(new UserError("Réservé au rôle Pilote : demande à l'administrateur du PBX de te le donner."), { status: 403 });
     const { state, target, since, by, label } = await pbx.setStandardState(req.body || {}, `poste ${s.ext} (${s.imp ? "incarnation" : "softphone / appli"})`);
     return { state, target, since, by, label };
   });

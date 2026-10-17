@@ -113,7 +113,7 @@ export function buildShortcodesDialplan(codes) {
     " same => n,Set(DB(callikoe_fwd/${EXTEN:3})=toggle)",
     " same => n,Set(DEVICE_STATE(Custom:fwd${EXTEN:3})=${IF($[\"${DEVICE_STATE(Custom:fwd${EXTEN:3})}\" = \"NOT_INUSE\"]?INUSE:NOT_INUSE)})",
     " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()", " same => n(deny),Playback(pbx-invalid)", " same => n,Hangup()");
-  // Standard (tout le PBX) : réservé aux postes du contexte [std-allow] (rôle Standardiste, Responsable, Accès console)
+  // Standard (tout le PBX) : réservé aux postes du contexte [std-allow] (rôle Pilote, Responsable, Accès console)
   L.push(`exten => ${lit(c.std_close)},1,Answer()`, " same => n,Gosub(std-set,s,1(closed))");
   L.push(`exten => ${lit(c.std_open)},1,Answer()`, " same => n,Gosub(std-set,s,1(open))");
   L.push(`exten => _${lit(c.std_forward)}0[1-79]XXXXXXXX,1,Answer()`, ` same => n,Gosub(std-set,s,1(fwd:\${EXTEN:${c.std_forward.length}}))`);

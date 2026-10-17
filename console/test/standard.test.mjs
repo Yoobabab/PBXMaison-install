@@ -31,7 +31,7 @@ test("standard : plan de numérotation fermé / renvoyé / numéros exclus", () 
   assert.match(d, /\[standard-skip\]\nexten => 0123456789,1,Return\(\)/);
 });
 
-test("rôle Standardiste et renvoi immédiat d'un utilisateur", () => {
+test("rôle Pilote et renvoi immédiat d'un utilisateur", () => {
   const ctx = { cc: "33", extensions: new Set(["201", "202"]), didOwners: new Map() };
   const u = validateUser({ first_name: "Léa", options: { role: "standard" }, forwarding: { always: { type: "external", target: "06 12 34 56 78" } } }, defaultUser("201"), ctx);
   assert.ok(isStandardist(u));

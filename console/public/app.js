@@ -1040,8 +1040,8 @@ async function renderUser(id, tab = "general") {
   if (tab === "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label>Numéro de poste<input value="${esc(u.id)}" readonly></label>
-      <label>Rôle<select name="options.role">${[["user", "Utilisateur"], ["standard", "Standardiste"], ["manager", "Responsable"], ["console", "Accès console (client)"]].map(([k, l]) => `<option value="${k}" ${(u.options.role || "user") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-        <span class="hint">Standardiste : ouvre, ferme ou renvoie le standard de tout le PBX (réglages dans Renvois d'appels). Responsable : en plus, modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
+      <label>Rôle<select name="options.role">${[["user", "Utilisateur"], ["standard", "Pilote"], ["manager", "Responsable"], ["console", "Accès console (client)"]].map(([k, l]) => `<option value="${k}" ${(u.options.role || "user") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <span class="hint">Pilote : ouvre et ferme tout le PBX d'un coup (bouton Ouvert / Fermé ; réglages dans Renvois d'appels). Responsable : en plus, modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
       <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>

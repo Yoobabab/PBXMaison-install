@@ -16,10 +16,10 @@ export class UserError extends Error {
 }
 
 /** Rôle d'un utilisateur du PBX : un responsable gère les plannings depuis son softphone et l'appli. */
-export const USER_ROLES = { user: "Utilisateur", standard: "Standardiste (ouvre et ferme le standard)", manager: "Responsable (standard + plannings)", console: "Accès console (restreint)" };
+export const USER_ROLES = { user: "Utilisateur", standard: "Pilote (ouvre et ferme tout le PBX)", manager: "Responsable (Pilote + plannings)", console: "Accès console (restreint)" };
 /** Responsable : modifie les plannings depuis son softphone ; « accès console » : en plus, se connecte à la console du PBX (accès restreint). */
 export const isManager = (u) => ["manager", "console"].includes(u?.options?.role) && !u.options.disabled;
-/** Standardiste : ouvre, ferme ou renvoie le standard (tout le PBX) depuis son téléphone, le softphone ou l'appli */
+/** Pilote : ouvre, ferme ou renvoie tout le PBX (tout le PBX) depuis son téléphone, le softphone ou l'appli */
 export const isStandardist = (u) => ["standard", "manager", "console"].includes(u?.options?.role) && !u.options.disabled;
 /** Renvoi immédiat (tous les appels) : réglable par code, touche, softphone, appli ou console */
 export const ALWAYS_TYPES = { none: "Aucun", voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe" };
@@ -259,7 +259,7 @@ export function buildUsersDialplan(users) {
   for (const u of users) L.push(`exten => status${u.id},hint,Custom:dnd${u.id}`);
   // Touche « Renvoi » : voyant allumé si un renvoi immédiat est actif
   for (const u of users) L.push(`exten => fwd${u.id},hint,Custom:fwd${u.id}`);
-  L.push("", "; Postes autorisés à ouvrir / fermer le standard (rôle Standardiste, Responsable ou Accès console)", "[std-allow]");
+  L.push("", "; Postes autorisés à ouvrir / fermer le standard (rôle Pilote, Responsable ou Accès console)", "[std-allow]");
   for (const u of users) if (isStandardist(u)) L.push(`exten => ${u.id},1,Return()`);
   L.push("", "; SDA attribuées directement à un utilisateur", "[did-map]");
   for (const u of users) for (const d of u.dids) L.push(`exten => ${d},1,Goto(users,${u.id},1)`);

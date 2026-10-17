@@ -340,7 +340,7 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     if (k.type === "status") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `status${user.id}`), v(`${p}.label`, k.label || "Ne pas déranger")];
     // Touche « Renvoi » : voyant = renvoi immédiat actif, appui = active le dernier renvoi ou l'annule
     if (k.type === "fwd") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `fwd${user.id}`), v(`${p}.label`, k.label || "Renvoi")];
-    // Touche « Standard » : voyant = standard fermé ou renvoyé, appui = ferme ou rouvre (refusé sans le rôle Standardiste)
+    // Touche « Standard » : voyant = standard fermé ou renvoyé, appui = ferme ou rouvre (refusé sans le rôle Pilote)
     if (k.type === "standard") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, "standard"), v(`${p}.label`, k.label || "Ouvert/Fermé")];
     if (k.type === "speed") return [v(`${p}.type`, 13), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label)];
     return [v(`${p}.type`, 0), v(`${p}.value`, ""), v(`${p}.label`, "")];
