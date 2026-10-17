@@ -394,7 +394,8 @@ export async function buildApp({ db, ami } = {}) {
       extensions: { total: exts.length, registered: exts.filter((e) => e.registered).length },
       calls: { available: calls.available, active: calls.calls.length },
       activation_code: activationCode(),
-      standard: await pbx.getStandard().then(({ state, target, since, by, label }) => ({ state, target, since, by, label })).catch(() => null),
+      standard: await pbx.getStandard().then(async ({ state, target, since, by, label }) => ({ state, target, since, by, label,
+        user: (await pbx.loadUsers()).find(isStandardist)?.id || null })).catch(() => null),
     };
   });
 
@@ -616,7 +617,16 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/u/keys", { preHandler: requireWebUser }, async (req) => {
     const u = await pbx.getUser(webUser(req).ext);
     const std = isStandardist(u) ? await pbx.getStandard() : null;
-    return { forward: u.forwarding.always, standard: std && { state: std.state, target: std.target, since: std.since, by: std.by, label: std.label } };
+    const codes = Object.fromEntries((await admin.getShortcodes()).codes.filter((c) => /^(fwd|std)_/.test(c.id)).map((c) => [c.id, c.code]));
+    let closed = "";
+    if (std) {
+      const d = std.closed_dest || {}, users = await pbx.loadUsers(), objs = await pbx.listObjects();
+      const uname = (id) => { const x = users.find((y) => y.id === id); return x ? `${x.first_name} ${x.last_name}`.trim() || `poste ${id}` : id; };
+      closed = d.type === "hangup" ? (d.prompt ? "Annonce, puis fin d'appel" : "Fin d'appel") : d.type === "user" ? uname(d.target) : d.type === "user_vm" ? `Messagerie de ${uname(d.target)}`
+        : d.type === "external" ? d.target.replace(/(\d{2})(?=\d)/g, "$1 ") : objs.find((o) => o.id === d.target)?.name || "";
+    }
+    return { forward: u.forwarding.always, last: u.forwarding.always_last, codes,
+      standard: std && { state: std.state, target: std.target, since: std.since, by: std.by, label: std.label, closed } };
   });
   // Standard (tout le PBX) : ouvert / fermé / renvoyé, par les utilisateurs Standardiste, Responsable ou Accès console
   app.get("/api/u/standard", { preHandler: requireWebUser }, async (req) => {

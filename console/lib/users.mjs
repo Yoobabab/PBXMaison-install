@@ -158,10 +158,11 @@ export function validateUser(input, current, ctx) {
       if (!Number.isInteger(t) || t < 5 || t > 120) throw new UserError("Délai de non-réponse : 5 à 120 secondes.", "forwarding.timeout");
       u.forwarding.timeout = t;
     }
-    for (const rule of ["always", "no_answer", "busy", "away", "dnd"]) {
+    for (const rule of ["always", "always_last", "no_answer", "busy", "away", "dnd"]) {
       if (!fw[rule]) continue;
       const type = fw[rule].type;
-      if (rule === "always" ? !ALWAYS_TYPES[type] : !DEST_TYPES[type]) throw new UserError("Destination inconnue.", `forwarding.${rule}`);
+      // always_last : où va le renvoi immédiat quand on l'active (code, touche « Renvoi », softphone)
+      if (rule === "always_last" ? (!ALWAYS_TYPES[type] || type === "none") : rule === "always" ? !ALWAYS_TYPES[type] : !DEST_TYPES[type]) throw new UserError("Destination inconnue.", `forwarding.${rule}`);
       let target = "";
       if (type === "extension") {
         target = String(fw[rule].target || "").trim();

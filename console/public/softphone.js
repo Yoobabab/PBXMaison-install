@@ -42,6 +42,8 @@ const I = {
   calls: () => svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
   vm: () => svg('<circle cx="6.5" cy="12" r="3.5"/><circle cx="17.5" cy="12" r="3.5"/><path d="M6.5 15.5h11"/>'),
   gear: () => svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  fwd: () => svg('<path d="M15 4l5 5-5 5"/><path d="M20 9H10a6 6 0 0 0-6 6v4"/>'),
+  building: () => svg('<path d="M4 21V5.5A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5V21M15 10h3.5a1.5 1.5 0 0 1 1.5 1.5V21M2.5 21h19M8 8h3M8 12h3M8 16h3"/>'),
   cal: () => svg('<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h3M13 14h3M8 17.5h3"/>'),
   spk: () => svg('<path d="M4 9.5v5h3.5L12 19V5L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
   keypad: () => svg('<circle cx="6" cy="5" r="1.3"/><circle cx="12" cy="5" r="1.3"/><circle cx="18" cy="5" r="1.3"/><circle cx="6" cy="11" r="1.3"/><circle cx="12" cy="11" r="1.3"/><circle cx="18" cy="11" r="1.3"/><circle cx="6" cy="17" r="1.3"/><circle cx="12" cy="17" r="1.3"/><circle cx="18" cy="17" r="1.3"/><circle cx="12" cy="22" r="1.1"/>'),
@@ -289,6 +291,7 @@ function renderShell() {
   $("#mebtn").onclick = (e) => { e.stopPropagation(); toggleMenu(); };
   renderBanner();
   renderKeys();
+  refreshKeys();
   renderDrawer();
   badges();
 }
@@ -337,63 +340,95 @@ function toggleMenu(force) {
   setTimeout(() => document.addEventListener("click", () => toggleMenu(false), { once: true }));
 }
 // ------------------------------------------------------------------ Touches « Renvoi » (mon poste) et « Standard » (tout le PBX)
-// Même effet que les codes *21 / *22 / #21 et *80 / *81 / *82 tapés sur un poste, et que les touches du téléphone de bureau.
+// Même effet que les codes tapés sur un poste (*21 / #21, *80 / *81…) et que les touches du téléphone de bureau.
+let keyInfo = { codes: {}, last: null };
 const fwdOn = () => (me.user.forwarding.always?.type || "none") !== "none";
-function fwdLabel() {
-  const a = me.user.forwarding.always || {};
-  if (a.type === "voicemail") return "vers ma messagerie";
-  if (a.type === "external") return `vers ${fmtNum(a.target)}`;
-  if (a.type === "extension") return `vers ${nameOf(a.target) || a.target}`;
-  return "désactivé";
+const fwdDest = () => fwdOn() ? me.user.forwarding.always : (keyInfo.last || me.user.forwarding.always_last || { type: "voicemail", target: "" });
+function destText(d) {
+  if (d.type === "voicemail") return "ma messagerie";
+  if (d.type === "external") return fmtNum(d.target);
+  if (d.type === "extension") return nameOf(d.target) || d.target;
+  return "";
 }
-const stdOn = () => me.standard && me.standard.state !== "open";
+const stdText = (st) => st.state === "open" ? "Ouvert" : st.state === "closed" ? "Fermé" : `Renvoyé · ${fmtNum(st.target)}`;
 function renderKeys() {
   const k = $("#keys"); if (!k || !me) return;
+  const st = me.standard;
   k.innerHTML = `<div class="sp-keys">
-    <button class="sp-key fwd ${fwdOn() ? "lit" : ""}" id="kfwd" title="Renvoyer tous mes appels (code *21 / *22, annuler #21)"><i></i><span><b>Renvoi</b><small>${esc(fwdLabel())}</small></span></button>
-    ${me.standard ? `<button class="sp-key std ${stdOn() ? "lit" : ""}" id="kstd" title="Ouvrir, fermer ou renvoyer le standard (codes *80 / *81 / *82)"><i></i><span><b>Standard</b><small>${esc(me.standard.state === "open" ? "ouvert" : me.standard.state === "closed" ? "fermé" : `renvoyé vers ${fmtNum(me.standard.target)}`)}</small></span></button>` : ""}
+    <button class="sp-key fwd ${fwdOn() ? "lit" : ""}" id="kfwd"><span class="kic">${I.fwd()}</span><span class="kt"><b>Renvoi</b><small>${fwdOn() ? `→ ${esc(destText(me.user.forwarding.always))}` : "Désactivé"}</small></span><i class="led"></i></button>
+    ${st ? `<button class="sp-key std ${st.state !== "open" ? "lit" : ""} st-${st.state}" id="kstd"><span class="kic">${I.building()}</span><span class="kt"><b>Standard</b><small>${esc(stdText(st))}</small></span><i class="led"></i></button>` : ""}
   </div>`;
-  $("#kfwd").onclick = (e) => { e.stopPropagation(); keyMenu("fwd"); };
-  $("#kstd")?.addEventListener("click", (e) => { e.stopPropagation(); keyMenu("std"); });
+  $("#kfwd").onclick = (e) => { e.stopPropagation(); keySheet("fwd"); };
+  $("#kstd")?.addEventListener("click", (e) => { e.stopPropagation(); keySheet("std"); });
 }
 async function refreshKeys() {
-  try { const r = await api("GET", "/api/u/keys"); me.user.forwarding.always = r.forward; me.standard = r.standard; } catch { return; }
+  try {
+    const r = await api("GET", "/api/u/keys");
+    me.user.forwarding.always = r.forward; keyInfo = { codes: r.codes || {}, last: r.last }; me.standard = r.standard;
+  } catch { return; }
   renderKeys();
 }
-function keyMenu(kind) {
+function closeSheet() { const m = $("#menu"); if (m) m.innerHTML = ""; }
+function keySheet(kind) {
   const m = $("#menu");
-  const isF = kind === "fwd";
-  const cur = isF ? (me.user.forwarding.always?.type || "none") : me.standard.state;
-  const last = me.user.forwarding.always_last || {};
-  const lastNum = isF ? (last.type === "external" ? last.target : (me.user.forwarding.always?.type === "external" ? me.user.forwarding.always.target : me.user.mobile || "")) : (me.standard.target || "");
-  const opt = (v, l, sub = "") => `<button class="pm-it ${cur === v ? "on" : ""}" data-kv="${v}"><span class="km-l">${l}${sub ? `<small>${esc(sub)}</small>` : ""}</span>${cur === v ? '<span class="ck">✓</span>' : ""}</button>`;
-  m.innerHTML = `<div class="pmenu panel keymenu">
-    <div class="pm-head"><div><strong>${isF ? "Renvoi de mes appels" : "Standard du PBX"}</strong><div class="s">${isF ? "Tous les appels vers mon poste" : "Tous les appels qui arrivent au standard"}</div></div></div>
-    ${isF ? opt("none", "Pas de renvoi") + (me.user.voicemail.enabled ? opt("voicemail", "Vers ma messagerie") : "") : opt("open", "Ouvert") + opt("closed", "Fermé", "message ou messagerie prévus par l'administrateur")}
-    <form class="km-num" id="kmnum"><label class="s">${isF ? "Vers un numéro" : "Renvoyer vers un numéro"}</label>
-      <div class="row-c"><input id="kmn" inputmode="tel" placeholder="06 12 34 56 78" value="${esc(fmtNum(lastNum))}"><button class="btn sm" type="submit">${cur === (isF ? "external" : "forward") ? "Changer" : "Renvoyer"}</button></div></form>
-    <p class="hint km-code">Depuis un poste : ${isF ? "<b>*21</b> + numéro, <b>*22</b> messagerie, <b>#21</b> annuler" : "<b>*80</b> fermer, <b>*81</b> ouvrir, <b>*82</b> + numéro renvoyer"}</p>
-  </div>`;
-  const pm = m.querySelector(".pmenu");
-  pm.onclick = (e) => e.stopPropagation();
-  const kr = $(isF ? "#kfwd" : "#kstd").getBoundingClientRect();   // sous la touche (sur mobile : en bas, voir softphone.css)
-  if (innerWidth > 760) Object.assign(pm.style, { top: `${kr.bottom + 8}px`, left: `${kr.left}px` });
-  const apply = async (v, num = "") => {
+  const c = keyInfo.codes || {};
+  const code = (id) => c[id] ? `<b>${esc(c[id])}</b>` : "";
+  let inner;
+  if (kind === "fwd") {
+    const on = fwdOn(), d = fwdDest();
+    const mob = me.user.mobile;
+    const choices = [
+      ...(me.user.voicemail.enabled ? [["voicemail", "", "📮", "Ma messagerie"]] : []),
+      ...(mob ? [["external", mob, "📱", `Mon portable · ${fmtNum(mob)}`]] : []),
+    ];
+    const isOther = d.type === "external" ? d.target !== mob : d.type === "extension";
+    inner = `<div class="ks-head"><div><h3>Renvoyer mes appels</h3><p>Mon poste ne sonne plus : tout part vers…</p></div>
+        <label class="ks-switch"><input type="checkbox" id="kson" ${on ? "checked" : ""}><span></span></label></div>
+      <div class="ks-list">${choices.map(([t, n, ic, l]) => `<button class="ks-it ${!isOther && d.type === t && (t !== "external" || d.target === n) ? "on" : ""}" data-t="${t}" data-n="${esc(n)}"><span class="ks-ic">${ic}</span><span class="grow">${esc(l)}</span><i class="ks-ck"></i></button>`).join("")}
+        <div class="ks-it ks-other ${isOther ? "on" : ""}"><span class="ks-ic">☎</span><input id="ksnum" inputmode="tel" placeholder="Un autre numéro" value="${isOther && d.type === "external" ? esc(fmtNum(d.target)) : ""}"><button class="btn sm" id="ksgo">OK</button></div></div>
+      <p class="ks-code">Sur un téléphone : ${code("fwd_on")} activer · ${code("fwd_off")} désactiver</p>`;
+  } else {
+    const st = me.standard;
+    inner = `<div class="ks-head"><div><h3>Standard</h3><p>Tous les numéros de l'entreprise</p></div></div>
+      <div class="ks-big">
+        <button class="ks-tile open ${st.state === "open" ? "on" : ""}" data-s="open"><span class="dot"></span><b>Ouvert</b><small>Les appels arrivent normalement</small></button>
+        <button class="ks-tile closed ${st.state === "closed" ? "on" : ""}" data-s="closed"><span class="dot"></span><b>Fermé</b><small>${st.closed ? `→ ${esc(st.closed)}` : "Vers la destination prévue"}</small></button>
+      </div>
+      <div class="ks-it ks-other ${st.state === "forward" ? "on" : ""}"><span class="ks-ic">↪</span><input id="ksnum" inputmode="tel" placeholder="Renvoyer vers un numéro" value="${st.state === "forward" ? esc(fmtNum(st.target)) : ""}"><button class="btn sm" id="ksgo">OK</button></div>
+      <p class="ks-code">Sur un téléphone : ${code("std_close")} fermer · ${code("std_open")} ouvrir</p>`;
+  }
+  m.innerHTML = `<div class="ks-scrim"></div><div class="ksheet panel ${kind}"><span class="ks-grab"></span>${inner}</div>`;
+  const sh = m.querySelector(".ksheet");
+  sh.onclick = (e) => e.stopPropagation();
+  m.querySelector(".ks-scrim").onclick = closeSheet;
+  const kr = $(kind === "fwd" ? "#kfwd" : "#kstd").getBoundingClientRect();
+  if (innerWidth > 760) Object.assign(sh.style, { top: `${kr.bottom + 8}px`, left: `${kr.left}px` });
+  const busy = (on) => sh.classList.toggle("busy", on);
+  const setFwd = async (dest) => {
+    busy(true);
     try {
-      if (isF) {
-        const r = await api("PUT", "/api/u/settings", { forwarding: { always: { type: v, target: v === "external" ? clean(num) : "" } } });
-        me.user = r.user; toast(fwdOn() ? `Renvoi activé ${fwdLabel()}` : "Renvoi désactivé");
-      } else {
-        me.standard = await api("POST", "/api/u/standard", { state: v, target: num });
-        toast(me.standard.label);
-      }
-      toggleMenu(false); renderKeys();
-      if (page === "reglages") renderPage();
-    } catch (err) { toast(err.message, "bad"); }
+      const fw = dest ? { always: dest, always_last: dest } : { always: { type: "none", target: "" } };
+      const r = await api("PUT", "/api/u/settings", { forwarding: fw });
+      me.user = r.user; if (dest) keyInfo.last = dest;
+      toast(dest ? `Renvoi vers ${destText(dest)}` : "Renvoi désactivé");
+      closeSheet(); renderKeys(); if (page === "reglages") renderPage();
+    } catch (err) { toast(err.message, "bad"); busy(false); }
   };
-  $$("[data-kv]", m).forEach((b) => b.onclick = () => apply(b.dataset.kv));
-  $("#kmnum").onsubmit = (e) => { e.preventDefault(); apply(isF ? "external" : "forward", $("#kmn").value); };
-  setTimeout(() => document.addEventListener("click", () => toggleMenu(false), { once: true }));
+  const setStd = async (state, target = "") => {
+    if (state === me.standard.state && state !== "forward") return closeSheet();
+    busy(true);
+    try { me.standard = { ...me.standard, ...(await api("POST", "/api/u/standard", { state, target })) }; toast(me.standard.label); closeSheet(); renderKeys(); }
+    catch (err) { toast(err.message, "bad"); busy(false); }
+  };
+  const num = $("#ksnum", sh);
+  const goNum = () => { const n = clean(num.value); if (!n) return num.focus(); kind === "fwd" ? setFwd({ type: "external", target: n }) : setStd("forward", n); };
+  $("#ksgo", sh).onclick = goNum;
+  num.onkeydown = (e) => { if (e.key === "Enter") goNum(); };
+  if (kind === "fwd") {
+    $("#kson", sh).onchange = (e) => setFwd(e.target.checked ? fwdDest() : null);
+    $$("[data-t]", sh).forEach((b) => b.onclick = () => setFwd({ type: b.dataset.t, target: b.dataset.n }));
+  } else $$("[data-s]", sh).forEach((b) => b.onclick = () => setStd(b.dataset.s));
+  setTimeout(() => document.addEventListener("click", closeSheet, { once: true }));
 }
 
 async function setStatus(st) {

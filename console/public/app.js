@@ -1,5 +1,5 @@
 // Console web Callikoe — application monopage sans dépendance.
-import { renderCallflow } from "./callflow-ui.js";
+import { renderCallflow, standardBox, codeField } from "./callflow-ui.js";
 import { renderAdmin } from "./admin-ui.js";
 const $ = (s, r = document) => r.querySelector(s);
 const app = $("#app");
@@ -452,7 +452,7 @@ async function renderDashboard() {
   const left = Math.floor((new Date(d.pbx.expires_at) - Date.now()) / 86400000);
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>${esc(d.pbx.name)}</h1>
     <p class="sub" style="margin:0">${esc(d.pbx.company)} · <span class="mono">${esc(d.pbx.fqdn)}</span></p></div></div>
-    ${d.standard && d.standard.state !== "open" ? `<a class="flash warn std-banner" href="#/gestion/standard"><strong>${esc(d.standard.label)}</strong>${d.standard.by ? ` · par ${esc(d.standard.by)}` : ""} — les appels n'arrivent pas normalement. Gérer ›</a>` : ""}
+    ${d.standard && d.standard.state !== "open" ? `<a class="flash warn std-banner" href="#/utilisateurs${d.standard.user ? `/${esc(d.standard.user)}/renvois` : ""}"><strong>${esc(d.standard.label)}</strong>${d.standard.by ? ` · par ${esc(d.standard.by)}` : ""} — les appels n'arrivent pas normalement. Gérer ›</a>` : ""}
     <div class="cards dash-cards">
       <a class="card" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
         <div class="s">${d.trunks.total === 0 ? "Aucun trunk : ajoute ton opérateur" : d.trunks.registered === d.trunks.total ? "Tous opérationnels" : "Au moins un trunk en défaut"}</div></a>
@@ -991,7 +991,7 @@ function tabOfField(f = "") {
   if (/^phone\.(keys|modules)/.test(f)) return "touches";
   if (f.startsWith("phone")) return "telephone";
   if (f.startsWith("voicemail")) return "messagerie";
-  if (/^(status|forwarding|options\.(ring_mobile|accept_group_calls))/.test(f)) return "renvois";
+  if (/^(ui\.|status|forwarding|options\.(ring_mobile|accept_group_calls))/.test(f)) return "renvois";
   if (f.startsWith("options")) return "options";
   return "general";
 }
@@ -1015,13 +1015,13 @@ async function renderUser(id, tab = "general") {
         <button type="button" class="btn" id="usave">Enregistrer</button></span></div>
     ${u.forwards.length ? `<div class="note fwsum"><strong>En ce moment :</strong> ${u.forwards.map((f) => esc(f.text)).join(" · ")}</div>` : ""}${tabs}`;
   const save = "";   // un seul bouton « Enregistrer », en haut de la fiche, pour tous les onglets
-  let body = "";
+  let body = "", codes = null, std = null;
 
   if (tab === "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label>Numéro de poste<input value="${esc(u.id)}" readonly></label>
       <label>Rôle<select name="options.role">${[["user", "Utilisateur"], ["standard", "Standardiste"], ["manager", "Responsable"], ["console", "Accès console (client)"]].map(([k, l]) => `<option value="${k}" ${(u.options.role || "user") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-        <span class="hint">Standardiste : ouvre, ferme ou renvoie le standard de tout le PBX (touche « Standard », softphone, appli, *80 / *81 / *82), même sans faire partie des groupes ou files. Responsable : en plus, modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
+        <span class="hint">Standardiste : ouvre, ferme ou renvoie le standard de tout le PBX (réglages dans Renvois d'appels). Responsable : en plus, modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
       <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
@@ -1040,12 +1040,24 @@ async function renderUser(id, tab = "general") {
       </div>
       <div class="pad appbox" id="appqr" style="border-top:1px solid var(--line)"></div>`;
   } else if (tab === "renvois") {
+    const on = fw.always?.type && fw.always.type !== "none";
+    const last = on ? fw.always : (fw.always_last?.type && fw.always_last.type !== "none" ? fw.always_last : { type: "voicemail", target: "" });
+    codes = await api("GET", "/api/shortcodes").then((r) => r.codes).catch(() => null);
+    std = await standardBox(cfHelpers, u, codes).catch(() => null);
     body = `<form method="post" id="uf" novalidate class="pad stack"><div class="form-msg"></div>
+      <div class="fwcards">
+      <section class="fwcard fw-now ${on ? "on" : ""}">
+        <header><span class="fwic">↪</span><div class="grow"><h3>Renvoi immédiat</h3><p>Tous les appels de ce poste partent ailleurs, sans sonner</p></div>
+          <label class="switch big"><input type="checkbox" name="ui.fwon" ${on ? "checked" : ""}><span></span><b class="fwstate">${on ? "Activé" : "Désactivé"}</b></label></header>
+        ${destField("forwarding.always_last", "Vers", last, users, u.id, { voicemail: "Sa messagerie vocale", extension: "Un collègue", external: "Un numéro (portable…)" })}
+        ${codes ? `<div><span class="dl">Codes à composer sur le téléphone</span>
+          <div class="codes">${codeField("fwd_on", "Activer", codes)}${codeField("fwd_off", "Désactiver", codes)}${codeField("fwd_number", "Vers un autre numéro", codes, "+ numéro")}</div></div>` : ""}
+        <p class="hint" style="margin:0">Aussi avec la touche « Renvoi » (onglet Touches), le softphone et l'appli.${codes ? " Les codes sont les mêmes pour tous les postes." : ""}</p>
+      </section>
+      ${std ? std.html : ""}
+      </div>
       <div><span class="dl">Statut actuel</span><div class="seg">${Object.entries(STATUS_LABELS).map(([k, l]) => `<label class="${u.status === k ? "on" : ""}"><input type="radio" name="status" value="${k}" ${u.status === k ? "checked" : ""}>${l}</label>`).join("")}</div>
         <span class="hint">Le statut choisit les règles appliquées ci-dessous.</span></div>
-      <fieldset><legend>Renvoi immédiat ${fw.always?.type && fw.always.type !== "none" ? '<span class="pill wait">Actif</span>' : ""}</legend>
-        ${destField("forwarding.always", "Renvoyer tous les appels vers (quel que soit le statut)", fw.always || { type: "none", target: "" }, users, u.id, { none: "Aucun renvoi", voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe" })}
-        <span class="hint">Aussi depuis le poste : touche « Renvoi » (Téléphone IP › Touches), *21 + numéro, *22 vers la messagerie, #21 pour annuler ; et dans le softphone ou l'appli.</span></fieldset>
       <fieldset><legend>Disponible</legend>
         <label class="short">Délai de non-réponse<span class="suffix"><input name="forwarding.timeout" type="number" min="5" max="120" value="${esc(fw.timeout)}"><span>secondes</span></span></label>
         ${destField("forwarding.no_answer", "Si pas de réponse, transférer vers", fw.no_answer, users, u.id)}
@@ -1147,6 +1159,9 @@ async function renderUser(id, tab = "general") {
   app.innerHTML = `${takeFlash()}${head}<div class="panel tabbed">${body}</div>`;
   copyButtons();
   wireDest(app);
+  std?.wire(app, () => renderUser(u.id, tab));
+  const fwon = $("[name='ui.fwon']");
+  fwon?.addEventListener("change", () => { fwon.closest(".fwcard").classList.toggle("on", fwon.checked); $(".fwstate").textContent = fwon.checked ? "Activé" : "Désactivé"; });
   app.querySelectorAll(".seg input").forEach((i) => i.addEventListener("change", () => app.querySelectorAll(".seg label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked))));
 
   const form = $("#uf");
@@ -1174,8 +1189,34 @@ async function renderUser(id, tab = "general") {
     if (typeof data.dids === "string") data.dids = data.dids.split("\n");
     if (userDraft.keys) data.phone = { ...(data.phone || {}), keys: userDraft.keys, modules: userDraft.mods.map((k) => ({ keys: k })) };
     if (userDraft.extra) data.phone = { ...(data.phone || {}), extra: userDraft.extra };
-    if (!Object.keys(data).length) { flash = { text: "Rien à enregistrer." }; return renderUser(u.id, tab); }
+    // Onglet Renvois : renvoi immédiat (interrupteur + destination), standard et codes (réglages communs au PBX)
+    const ui = data.ui; delete data.ui;
+    let extraSaved = false;
+    if (ui?.fwon !== undefined) {
+      const last = data.forwarding?.always_last || u.forwarding.always_last || { type: "voicemail", target: "" };
+      data.forwarding = { ...(data.forwarding || {}), always: ui.fwon ? last : { type: "none", target: "" } };
+    }
+    if (ui?.std_can !== undefined) {
+      const role = u.options.role || "user";
+      if (ui.std_can && role === "user") data.options = { ...(data.options || {}), role: "standard" };
+      if (!ui.std_can && role === "standard") data.options = { ...(data.options || {}), role: "user" };
+    }
+    if (!Object.keys(data).length && !ui) { flash = { text: "Rien à enregistrer." }; return renderUser(u.id, tab); }
     try {
+      try {
+        const changed = Object.fromEntries(Object.entries(ui?.codes || {}).filter(([k, v]) => codes?.find((c) => c.id === k)?.code !== v.replace(/\s/g, "")));
+        if (Object.keys(changed).length) { await api("PUT", "/api/shortcodes", changed); extraSaved = true; }
+      } catch (e) { e.field = e.field ? `ui.codes.${e.field}` : ""; throw e; }
+      if (ui?.std && std) {
+        const d = ui.std.closed_dest || {};
+        const closed = { type: d.type, target: d.target || "", ...(d.prompt_on && d.prompt ? { prompt: d.prompt } : {}) };
+        const skip = String(ui.std.skip_dids ?? std.skip.join(",")).split(",").filter(Boolean);
+        if (JSON.stringify(closed) !== JSON.stringify({ type: std.closed.type, target: std.closed.target || "", ...(std.closed.prompt ? { prompt: std.closed.prompt } : {}) }) || skip.join() !== std.skip.join()) {
+          try { await api("PUT", "/api/standard", { closed_dest: closed, skip_dids: skip }); extraSaved = true; }
+          catch (e) { e.field = e.field ? `ui.std.${e.field}` : ""; throw e; }
+        }
+      }
+      if (!Object.keys(data).length) { userDraft = null; flash = { text: extraSaved ? "Enregistré et appliqué." : "Rien à enregistrer." }; return renderUser(u.id, tab); }
       const r = await api("PUT", `/api/extensions/${u.id}`, data);
       userDraft = null;
       // Le téléphone reprend sa configuration tout de suite, sans redémarrer
@@ -1442,7 +1483,7 @@ function wireKeys(u, users) {
       ${k.type === "blf" ? `<label>Collègue supervisé<select data-pv="value"><option value="">— Choisir —</option>${others.map((x) => `<option value="${esc(x.id)}" ${k.value === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label>` : ""}
       ${k.type === "speed" ? `<label>Numéro<input data-pv="value" value="${esc(k.value)}" inputmode="tel" placeholder="06 12 34 56 78 ou 201"></label>` : ""}
       ${k.type === "none" ? "" : `<label>Libellé à l'écran<input data-pv="label" value="${esc(k.label)}" maxlength="24" placeholder="${k.type === "line" ? "facultatif" : ""}"></label>`}
-      <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", fwd: "Voyant allumé quand un renvoi immédiat est actif ; un appui réactive le dernier renvoi (portable, messagerie…) ou l'annule. Aussi par code : *21 + numéro, *22 messagerie, #21 annuler.", standard: "Voyant allumé quand le standard est fermé ou renvoyé ; un appui ferme ou rouvre le standard pour tout le PBX. Réservé aux rôles Standardiste, Responsable et Accès console (fiche › Général › Rôle).", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
+      <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", fwd: "Voyant allumé quand un renvoi immédiat est actif ; un appui active le renvoi vers la destination choisie (fiche › Renvois d'appels) ou l'annule.", standard: "Voyant allumé quand le standard est fermé ou renvoyé ; un appui ferme ou rouvre le standard pour tout le PBX. Pour les postes autorisés (fiche › Renvois d'appels › Standard).", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
       <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button>
         <button type="button" class="btn ghost sm" data-multi title="Remplir les touches suivantes avec des BLF, à partir de celle-ci">Série de BLF</button></div>
       <div id="blfmulti"></div>`;

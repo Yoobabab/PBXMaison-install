@@ -12,7 +12,7 @@ import { UserError, displayName } from "./users.mjs";
 import { splitPcapFile } from "./pcap-split.mjs";
 import { validateRule, describeRule, buildOutboundDialplan, rangesText, CID_MODES } from "./outbound.mjs";
 import { defaultSecurity, validateSecurity, buildSecurityDialplan, securityGlobals, sipAcl, ipAllowed, checkIp, COUNTRIES } from "./security.mjs";
-import { defaultShortcodes, validateShortcodes, buildShortcodesDialplan, shortcodesList } from "./shortcodes.mjs";
+import { defaultShortcodes, normalizeShortcodes, validateShortcodes, buildShortcodesDialplan, shortcodesList } from "./shortcodes.mjs";
 import { defaultRecording, validateRecording, recordingGlobals, recordingPath, purgeRecordings, recordingUsage, REC_DIR } from "./recording.mjs";
 import { defaultBackup, validateBackup, publicBackup, backupDue, listBackups, backupPath, uploadBackup, BACKUP_DIR, SCHEDULES, PROTOCOLS } from "./backup.mjs";
 import { ALERT_EVENTS, SEVERITY, CRITICAL_SERVICES, defaultAlerts, validateAlerts, publicAlerts, detectAlerts } from "./alerts.mjs";
@@ -171,7 +171,7 @@ export function createAdminService({ db, ami, pbx }) {
   }
 
   // ---------------------------------------------------------------- Codes raccourcis
-  const shortcodes = () => get("shortcodes", defaultShortcodes());
+  const shortcodes = async () => normalizeShortcodes(await get("shortcodes", defaultShortcodes()));
   async function getShortcodes() { return { codes: shortcodesList(await shortcodes()) }; }
   async function setShortcodes(input) {
     await db.setSetting("shortcodes", validateShortcodes(input, await shortcodes()));

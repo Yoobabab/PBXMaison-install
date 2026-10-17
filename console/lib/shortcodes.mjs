@@ -20,12 +20,12 @@ export const SHORTCODES = {
   st_available: ["Statut : disponible", "Statut", "*30", ""],
   st_away: ["Statut : absent", "Statut", "*31", ""],
   st_dnd: ["Statut : ne pas déranger", "Statut", "*32", ""],
-  fwd_number: ["Renvoyer tous ses appels vers un numéro", "Renvois", "*21", "numéro"],
-  fwd_vm: ["Renvoyer tous ses appels vers sa messagerie", "Renvois", "*22", ""],
+  fwd_on: ["Activer son renvoi (vers la destination réglée dans sa fiche)", "Renvois", "*21", ""],
   fwd_off: ["Annuler son renvoi", "Renvois", "#21", ""],
+  fwd_number: ["Renvoyer tous ses appels vers un autre numéro", "Renvois", "*22", "numéro"],
   std_close: ["Fermer le standard (rôle Standardiste)", "Standard", "*80", ""],
   std_open: ["Rouvrir le standard (rôle Standardiste)", "Standard", "*81", ""],
-  std_forward: ["Renvoyer le standard vers un numéro (rôle Standardiste)", "Standard", "*82", "numéro"],
+  std_forward: ["Renvoyer le standard vers un autre numéro (rôle Standardiste)", "Standard", "*82", "numéro"],
   q_login: ["Se connecter à toutes ses files d'attente", "Files d'attente", "*62", ""],
   q_logout: ["Se déconnecter de toutes ses files d'attente", "Files d'attente", "*63", ""],
 };
@@ -33,10 +33,18 @@ export const SHORTCODES = {
 export function defaultShortcodes() {
   return Object.fromEntries(Object.entries(SHORTCODES).map(([k, v]) => [k, v[2]]));
 }
+/** Codes enregistrés → tous les codes connus (nouveaux codes : valeur par défaut ; anciens codes disparus : retirés) */
+export function normalizeShortcodes(c = {}) {
+  const cur = { ...c };
+  if (cur.fwd_vm !== undefined) { delete cur.fwd_number; delete cur.fwd_vm; }   // ancienne version (*21 + numéro, *22 messagerie)
+  const out = defaultShortcodes();
+  for (const k of Object.keys(out)) if (typeof cur[k] === "string" && cur[k]) out[k] = cur[k];
+  return out;
+}
 
 /** Valide les codes : *, # et chiffres, pas de doublon, pas de préfixe d'un autre code à suffixe, pas de numéro d'urgence. */
 export function validateShortcodes(input, current = defaultShortcodes()) {
-  const out = { ...defaultShortcodes(), ...current };
+  const out = normalizeShortcodes(current);
   for (const k of Object.keys(SHORTCODES)) {
     if (input[k] === undefined) continue;
     const v = String(input[k]).replace(/\s/g, "");
@@ -65,7 +73,8 @@ export function validateShortcodes(input, current = defaultShortcodes()) {
 const lit = (c) => c;
 
 /** Contexte [shortcodes], inclus dans [from-internal]. */
-export function buildShortcodesDialplan(c) {
+export function buildShortcodesDialplan(codes) {
+  const c = normalizeShortcodes(codes);
   const SRC = "${CUT(CUT(CHANNEL(name),/,2),-,1)}";
   const L = ["", "; Codes raccourcis — écrit par la console web", "[shortcodes]"];
   L.push(`exten => ${lit(c.park)},1,NoOp(Parcage)`, " same => n,Park(default)", " same => n,Hangup()");
@@ -96,9 +105,9 @@ export function buildShortcodesDialplan(c) {
     " same => n(deny),Playback(pbx-invalid)", " same => n,Hangup()");
   // Renvoi immédiat : noté dans la base Asterisk, la console l'applique (renvois, voyant de la touche « Renvoi ») dans les secondes qui suivent
   const fwd = (v) => [` same => n,Set(DB(callikoe_fwd/${SRC})=${v})`, " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()"];
-  L.push(`exten => _${lit(c.fwd_number)}0[1-79]XXXXXXXX,1,Answer()`, ...fwd(`num:\${EXTEN:${c.fwd_number.length}}`));
-  L.push(`exten => ${lit(c.fwd_vm)},1,Answer()`, ...fwd("vm"));
+  L.push(`exten => ${lit(c.fwd_on)},1,Answer()`, ...fwd("on"));
   L.push(`exten => ${lit(c.fwd_off)},1,Answer()`, ...fwd("off"));
+  L.push(`exten => _${lit(c.fwd_number)}0[1-79]XXXXXXXX,1,Answer()`, ...fwd(`num:\${EXTEN:${c.fwd_number.length}}`));
   // Touche « Renvoi » (BLF sur fwd<poste>) : appui = active le dernier renvoi utilisé, ou l'annule
   L.push("exten => _fwdX.,1,Answer()", ` same => n,GotoIf($["${SRC}" != "\${EXTEN:3}"]?deny)`,
     " same => n,Set(DB(callikoe_fwd/${EXTEN:3})=toggle)",
@@ -126,6 +135,7 @@ export function buildShortcodesDialplan(c) {
 }
 
 /** Liste lisible (page Codes raccourcis, aide du softphone). */
-export function shortcodesList(c) {
+export function shortcodesList(codes) {
+  const c = normalizeShortcodes(codes);
   return Object.entries(SHORTCODES).map(([id, [label, group, def, suffix]]) => ({ id, label, group, code: c[id] || def, default: def, suffix }));
 }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseState, stateValue, validateState, validateConfig, buildStandardDialplan, describeState, defaultStandard } from "../lib/standard.mjs";
 import { defaultUser, validateUser, buildUsersDialplan, isStandardist, forwardSummary } from "../lib/users.mjs";
-import { buildShortcodesDialplan, defaultShortcodes } from "../lib/shortcodes.mjs";
+import { buildShortcodesDialplan, defaultShortcodes, normalizeShortcodes, validateShortcodes } from "../lib/shortcodes.mjs";
 
 test("standard : état lu et écrit dans la base d'Asterisk", () => {
   assert.deepEqual(parseState(""), { state: "open", target: "" });
@@ -47,8 +47,25 @@ test("rôle Standardiste et renvoi immédiat d'un utilisateur", () => {
   assert.equal(off.forwarding.always_last.target, "0612345678");   // retenu pour la touche Renvoi
 });
 
-test("codes *21 *22 #21 *80 *81 *82 et touches Renvoi / Standard", () => {
+test("codes *21 #21 *22 *80 *81 *82 et touches Renvoi / Standard", () => {
   const d = buildShortcodesDialplan(defaultShortcodes());
-  for (const re of [/_\*210\[1-79\]X{8}/, /\*22,1/, /#21,1/, /\*80,1/, /\*81,1/, /_\*820\[1-79\]X{8}/, /exten => standard,hint,Custom:cxstd/, /\[std-set\]/, /DIALPLAN_EXISTS\(std-allow/])
+  for (const re of [/exten => \*21,1,/, /\}\)=on\)/, /_\*220\[1-79\]X{8}/, /#21,1/, /\*80,1/, /\*81,1/, /_\*820\[1-79\]X{8}/, /exten => standard,hint,Custom:cxstd/, /\[std-set\]/, /DIALPLAN_EXISTS\(std-allow/])
     assert.match(d, re);
+});
+
+test("codes : anciens réglages repris sans casser le plan de numérotation", () => {
+  const old = { park: "*0", fwd_number: "*21", fwd_vm: "*22", fwd_off: "#21" };   // version précédente, sans les codes du standard
+  const n = normalizeShortcodes(old);
+  assert.equal(n.fwd_on, "*21"); assert.equal(n.fwd_number, "*22"); assert.equal(n.std_close, "*80");
+  assert.equal(n.fwd_vm, undefined);
+  assert.doesNotMatch(buildShortcodesDialplan(old), /undefined/);
+  assert.throws(() => validateShortcodes({ fwd_on: "*80" }, old), /deux fois/);
+});
+
+test("renvoi immédiat : destination gardée quand il est désactivé", () => {
+  const ctx = { cc: "33", extensions: new Set(["201"]), didOwners: new Map() };
+  const u = validateUser({ first_name: "A", forwarding: { always: { type: "none" }, always_last: { type: "external", target: "0611223344" } } }, defaultUser("201"), ctx);
+  assert.equal(u.forwarding.always.type, "none");
+  assert.deepEqual(u.forwarding.always_last, { type: "external", target: "0611223344" });
+  assert.throws(() => validateUser({ forwarding: { always_last: { type: "none" } } }, u, ctx), /Destination/);
 });

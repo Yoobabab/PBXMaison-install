@@ -1421,8 +1421,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       try {
         const u = await getUser(ext);
         const on = u.forwarding.always?.type && u.forwarding.always.type !== "none";
+        const last = u.forwarding.always_last || { type: "voicemail", target: "" };
         const always = v.startsWith("num:") ? { type: "external", target: v.slice(4) } : v === "vm" ? { type: "voicemail", target: "" }
-          : v === "off" ? { type: "none", target: "" } : v === "toggle" ? (on ? { type: "none", target: "" } : (u.forwarding.always_last || { type: "voicemail", target: "" })) : null;
+          : v === "on" ? last : v === "off" ? { type: "none", target: "" } : v === "toggle" ? (on ? { type: "none", target: "" } : last) : null;
         if (always) await updateUser(ext, { forwarding: { always } }, "code ou touche du téléphone");
       } catch (e) { console.error(`Renvoi ${ext} :`, e.message); try { await applyDialplan(); } catch { /* voyant remis au prochain passage */ } }
     }
