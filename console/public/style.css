@@ -595,7 +595,7 @@ body.no-side .shell{margin-left:0}
 .phv-k:hover span,.phv-k:focus-visible span{border-color:#9fb6d8}
 .phv-k.sel span{border-color:#fff;background:#ffffff26}
 .phv-k.off{visibility:hidden}
-.phv-screen{flex:1;min-width:150px;background:linear-gradient(160deg,#4f7eb0,#2e4c74 60%,#1d2f4b);border-radius:8px;border:3px solid #111;display:flex;flex-direction:column;min-height:200px}
+.phv-screen{flex:1;min-width:150px;background:#1d2f4b url("/phone/callikoe-v3-800x480.png") center/cover no-repeat;border-radius:8px;border:3px solid #111;display:flex;flex-direction:column;min-height:200px}
 .phv-bar{display:flex;justify-content:space-between;font-size:11px;padding:4px 8px;background:#00000040}
 .phv-mid{flex:1;display:flex;align-items:center;justify-content:center}
 .phv-clock{font-size:30px;font-weight:300}

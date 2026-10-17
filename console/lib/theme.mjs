@@ -158,6 +158,8 @@ export function themeCss(t = readTheme()) {
     css += `.login::before,.wizard::before{content:"";display:block;height:56px;margin:0 auto 18px;background:${u} center/contain no-repeat}\n`;
     css += `.sp-brand i{width:44px;height:44px;border-radius:10px;background:${u} center/contain no-repeat;box-shadow:none}\n`;
   }
+  // Téléphone dessiné dans la console (Utilisateurs › touches BLF) : même fond d'écran que les vrais postes
+  if (t.walls) css += `.phv-screen{background-image:url("/phone/theme/wall-800x480-${t.walls}.png")}.phv-mid{align-items:flex-start;padding-top:6px}\n`;
   if (t.bg) {
     const u = `url("/theme/bg?v=${v}")`;
     css += `body.no-side{background:var(--bg) ${u} center/cover no-repeat fixed}\n.sp-login-wrap{background:${u} center/cover no-repeat}\n`;
