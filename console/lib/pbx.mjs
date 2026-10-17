@@ -20,6 +20,7 @@ import { pathNow, ringTargets, parseContacts, deviceStates, inboundVerdict, simu
 import { defaultSecurity } from "./security.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
 import { sees, nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
+import { readTheme, wallpaperName } from "./theme.mjs";
 
 export const EMERGENCY = ["15", "17", "18", "112", "114", "115", "116000", "119", "191", "196", "197"];
 const FORMATS = ["national", "e164", "e164_plus"];
@@ -814,8 +815,10 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     else if (model?.format === "grandstream") text = buildGrandstreamXml(u.phone.mac || "", acc, srv);
     else {
       // Codes de statut (Codes raccourcis) : le bouton NPD du téléphone prévient le PBX, le statut se voit partout
+      const theme = readTheme();
       const codes = { st_available: "*30", st_dnd: "*32", pickup: "**", ...(await db.getSetting("shortcodes", {})) };
-      text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes }, names);
+      text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes,
+        wallpaper: (screen) => wallpaperName(screen, theme) }, names);
     }
     return { user: u, text, format: model?.format || "yealink" };
   }

@@ -39,6 +39,16 @@ test("fichier Yealink", () => {
   assert.match(cfg, /^linekey\.29\.type = 0$/m);
 });
 
+test("fond d'écran du téléphone : Callikoe, ou celui du thème du serveur", () => {
+  const p = validatePhone({ model: "yealink-t57w", mac: "44dbd229fa7b" }, defaultPhone(), ctx);
+  const srv = { host: "pbx.exemple.fr", prov_url: "https://pbx.exemple.fr/prov/x/", assets_url: "https://pbx.exemple.fr/phone/" };
+  const u = { id: "201", first_name: "Marie", last_name: "D" }, sec = { auth_id: "AbC", password: "pw" };
+  assert.match(buildYealinkCfg(u, p, sec, srv), /^phone_setting\.backgrounds = Config:callikoe-v3-800x480\.png$/m);
+  const cfg = buildYealinkCfg(u, p, sec, { ...srv, wallpaper: (sz) => `wall-${sz}-42.png` });
+  assert.match(cfg, /^wallpaper_upload\.url = https:\/\/pbx\.exemple\.fr\/phone\/theme\/wall-800x480-42\.png$/m);
+  assert.match(cfg, /^phone_setting\.backgrounds = Config:wall-800x480-42\.png$/m);
+});
+
 test("reconnaissance des appareils", () => {
   assert.deepEqual(
     [identifyDevice("Yealink SIP-T57W 96.86.0.30 44:db:d2:29:fa:7b").kind, identifyDevice("Yealink SIP-T57W 96.86.0.30 44:db:d2:29:fa:7b").mac],

@@ -294,9 +294,14 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("features.remote_phonebook.flash_time", 300),
     "",
     ...(model?.screen && server.assets_url ? [
-      "## Fond d'écran Callikoe",
-      v("wallpaper_upload.url", `${server.assets_url}callikoe-v3-${model.screen}.png`),
-      v("phone_setting.backgrounds", `Config:callikoe-v3-${model.screen}.png`),
+      "## Fond d'écran (aux couleurs du thème du serveur, sinon Callikoe)",
+      ...(server.wallpaper?.(model.screen) ? [
+        v("wallpaper_upload.url", `${server.assets_url}theme/${server.wallpaper(model.screen)}`),
+        v("phone_setting.backgrounds", `Config:${server.wallpaper(model.screen)}`),
+      ] : [
+        v("wallpaper_upload.url", `${server.assets_url}callikoe-v3-${model.screen}.png`),
+        v("phone_setting.backgrounds", `Config:callikoe-v3-${model.screen}.png`),
+      ]),
       "",
     ] : []),
     "## Sonneries selon le type d'appel",

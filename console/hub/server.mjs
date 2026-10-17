@@ -17,7 +17,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
 import { signTicket, emailKey, HUB_USERS, TENANTS } from "../lib/sso.mjs";
 import { canonicalJson, verifySignature } from "../../pbx/lib/verify-config.mjs";
 import { encodeToken } from "../../pbx/lib/license-token.mjs";
-import { registerThemeRoutes, readTheme, writeTheme, saveAsset, removeAsset, PALETTE, DEFAULT_THEME, ASSETS, shades, hexToHsl, THEME_DIR } from "../lib/theme.mjs";
+import { registerThemeRoutes, readTheme, writeTheme, saveAsset, removeAsset, saveWalls, removeWalls, WALL_SIZES, PALETTE, DEFAULT_THEME, ASSETS, shades, hexToHsl } from "../lib/theme.mjs";
 
 const ETC = process.env.HUB_ETC || "/etc/callikoe/hub";
 const VAR = process.env.HUB_VAR || "/var/lib/callikoe/hub";
@@ -94,7 +94,7 @@ export async function buildApp({ db } = {}) {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 262_144 });
   await app.register(cookie);
   await app.register(fastifyStatic, { root: path.join(import.meta.dirname, "public"), index: ["index.html"] });
-  await app.register(fastifyStatic, { root: path.join(import.meta.dirname, "..", "public"), prefix: "/c/", decorateReply: false, allowedPath: (p) => /^\/?style\.css$/.test(p) });
+  await app.register(fastifyStatic, { root: path.join(import.meta.dirname, "..", "public"), prefix: "/c/", decorateReply: false, allowedPath: (p) => /^\/?(style\.css|phone\/callikoe-v3-\d+x\d+\.png)$/.test(p) });
   registerThemeRoutes(app);
 
   const COOKIE = "cxhub_session";
@@ -341,7 +341,7 @@ export async function buildApp({ db } = {}) {
   }
 
   // ---------------------------------------------------------------- Apparence : couleur, logo, fond d'écran (console du serveur et tous ses PBX)
-  const themeView = () => { const t = readTheme(); return { theme: t, palette: PALETTE, default: DEFAULT_THEME.color, shades: shades(t.color),
+  const themeView = () => { const t = readTheme(); return { theme: t, palette: PALETTE, default: DEFAULT_THEME.color, shades: shades(t.color), wall_sizes: WALL_SIZES,
     limits: Object.fromEntries(Object.entries(ASSETS).map(([k, v]) => [k, { max: v.max, types: v.types }])) }; };
   app.get("/api/theme", { preHandler: requireUser }, async () => themeView());
   app.put("/api/theme", { preHandler: requireRole("super", "admin") }, async (req) => {
@@ -354,8 +354,22 @@ export async function buildApp({ db } = {}) {
   });
   app.post("/api/theme/reset", { preHandler: requireRole("super", "admin") }, async (req) => {
     for (const k of Object.keys(ASSETS)) removeAsset(k);
+    removeWalls();
     writeTheme({ ...DEFAULT_THEME });
     await audit(req, "Apparence : thème Callikoe rétabli");
+    return themeView();
+  });
+  // Fonds d'écran des téléphones de bureau : dessinés par la page Apparence (couleur + logo), une image par taille d'écran
+  app.register(async (scope) => {
+    scope.post("/api/theme/walls", { preHandler: requireRole("super", "admin"), bodyLimit: 10 * 1024 * 1024 }, async (req) => {
+      try { saveWalls(req.body?.images || {}); } catch (e) { throw new UserError(e.message); }
+      writeTheme({ ...readTheme(), walls: Date.now() });
+      await audit(req, "Apparence : fonds d'écran des téléphones mis à jour");
+      return themeView();
+    });
+  });
+  app.delete("/api/theme/walls", { preHandler: requireRole("super", "admin") }, async (req) => {
+    removeWalls(); writeTheme({ ...readTheme(), walls: null });
     return themeView();
   });
   app.register(async (scope) => {

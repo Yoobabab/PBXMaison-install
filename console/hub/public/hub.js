@@ -579,6 +579,35 @@ function refreshThemeCss() {
   const l = document.querySelector('link[href^="/theme.css"]');
   if (l) l.href = `/theme.css?t=${Date.now()}`;
 }
+// Fonds d'écran des téléphones de bureau (Yealink) : dessinés ici aux couleurs du thème, avec le logo, une image par taille d'écran
+async function drawWalls(d) {
+  const t = d.theme;
+  if (t.color === d.default && !t.logo) { if (t.walls) await api("DELETE", "/api/theme/walls"); return null; }
+  const stops = d.shades.grad.match(/#[0-9a-f]{6}/gi) || [d.shades.accent, d.shades.accent, d.shades.accent];
+  let logo = null;
+  if (t.logo) { logo = new Image(); logo.src = `/theme/logo?v=${t.v}`; try { await logo.decode(); } catch { logo = null; } }
+  const images = {};
+  for (const sz of d.wall_sizes) {
+    const [w, h] = sz.split("x").map(Number), c = document.createElement("canvas"); c.width = w; c.height = h;
+    const g = c.getContext("2d");
+    const lg = g.createLinearGradient(0, 0, w, h);
+    lg.addColorStop(0, d.shades.hover); lg.addColorStop(0.55, stops[1] || d.shades.accent); lg.addColorStop(1, stops[2] || d.shades.accent);
+    g.fillStyle = lg; g.fillRect(0, 0, w, h);
+    g.fillStyle = "rgba(0,0,0,.18)"; g.fillRect(0, 0, w, h);                 // un peu plus sombre : heure et touches restent lisibles
+    const cx = w / 2, cy = h * 0.62, u = h / 272;
+    g.strokeStyle = "rgba(255,255,255,.09)"; g.lineWidth = Math.max(1, u);
+    for (let r = 1; r <= 5; r++) { g.beginPath(); g.arc(cx, cy, 34 * u * r, 0, Math.PI * 2); g.stroke(); }
+    const s = Math.round(h * 0.3), x = cx - s / 2, y = cy - s / 2, rad = s * 0.22;
+    g.save(); g.shadowColor = "rgba(0,0,0,.25)"; g.shadowBlur = 12 * u;
+    g.beginPath(); g.roundRect(x, y, s, s, rad); g.fillStyle = logo ? "#fff" : "rgba(255,255,255,.16)"; g.fill(); g.restore();
+    if (logo) {
+      const pad = s * 0.12, iw = logo.naturalWidth || s, ih = logo.naturalHeight || s, k = Math.min((s - 2 * pad) / iw, (s - 2 * pad) / ih);
+      g.drawImage(logo, cx - iw * k / 2, cy - ih * k / 2, iw * k, ih * k);
+    } else { g.beginPath(); g.arc(cx, cy, s * 0.2, 0, Math.PI * 2); g.lineWidth = s * 0.08; g.strokeStyle = "#fff"; g.stroke(); }
+    images[sz] = c.toDataURL("image/png");
+  }
+  return api("POST", "/api/theme/walls", { images });
+}
 async function renderTheme() {
   setNav("paint", "Apparence");
   let d; try { d = await api("GET", "/api/theme"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
@@ -603,8 +632,14 @@ async function renderTheme() {
     <div class="grid2" style="margin-top:16px">
       ${asset("logo", "Logo", `Affiché en haut du menu, dans le softphone et sur les pages de connexion. PNG, JPEG, WebP ou SVG, ${mb(d.limits.logo.max)} au maximum ; idéalement carré, fond transparent.`)}
       ${asset("bg", "Fond d'écran", `Affiché derrière les pages de connexion (console du serveur, consoles des PBX, softphone). PNG, JPEG ou WebP, ${mb(d.limits.bg.max)} au maximum ; 1920 × 1080 conseillé.`)}
-    </div>`;
-  const done = (nd, text) => { flash = { text }; refreshThemeCss(); renderTheme(); };
+    </div>
+    <div class="panel" style="margin-top:16px"><div class="ph"><h2>Téléphones de bureau</h2>${t.walls ? `<span class="pill ok">Aux couleurs du thème</span>` : `<span class="pill off">Fond Callikoe</span>`}</div>
+      <div class="pad stack"><div class="th-prev th-wall"><img src="${t.walls ? `/phone/theme/wall-480x272-${t.walls}.png` : "/c/phone/callikoe-v3-480x272.png"}" alt="" onerror="this.remove()"></div>
+        <p class="hint" style="margin:0">Fond d'écran des téléphones Yealink à écran couleur, dessiné automatiquement avec ta couleur et ton logo (4 tailles d'écran). Les téléphones le chargent à leur prochaine synchronisation ou à leur redémarrage.</p></div></div>`;
+  const done = async (nd, text) => {
+    try { await drawWalls(nd); } catch (e) { text += ` (fonds d'écran des téléphones non mis à jour : ${e.message})`; }
+    flash = { text }; refreshThemeCss(); renderTheme();
+  };
   const fail = (e) => { flash = { cls: "bad", text: e.message }; renderTheme(); };
   app.querySelectorAll("[data-color]").forEach((b) => (b.onclick = async () => { try { done(await api("PUT", "/api/theme", { color: b.dataset.color }), "Couleur appliquée à la console du serveur et à tous ses PBX."); } catch (e) { fail(e); } }));
   $("#thpick")?.addEventListener("change", async (e) => { try { done(await api("PUT", "/api/theme", { color: e.target.value }), "Couleur appliquée à la console du serveur et à tous ses PBX."); } catch (er) { fail(er); } });

@@ -19,7 +19,9 @@ export const PALETTE = [
   { id: "orange", name: "Orange", color: "#c2410c" },
   { id: "anthracite", name: "Anthracite", color: "#374151" },
 ];
-export const DEFAULT_THEME = { color: "#d8141c", logo: null, bg: null, v: 0 };
+export const DEFAULT_THEME = { color: "#d8141c", logo: null, bg: null, walls: null, v: 0 };
+/** Tailles d'écran des téléphones de bureau (fonds d'écran dessinés aux couleurs du thème par la page Apparence) */
+export const WALL_SIZES = ["320x240", "480x272", "800x480", "1024x600"];
 export const ASSETS = {
   logo: { max: 1024 * 1024, types: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] },
   bg: { max: 4 * 1024 * 1024, types: ["image/png", "image/jpeg", "image/webp"] },
@@ -79,7 +81,7 @@ export function readTheme(dir = THEME_DIR) {
 }
 export function writeTheme(t, dir = THEME_DIR) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
-  const out = { color: t.color, logo: t.logo || null, bg: t.bg || null, v: Date.now() };
+  const out = { color: t.color, logo: t.logo || null, bg: t.bg || null, walls: t.walls || null, v: Date.now() };
   fs.writeFileSync(path.join(dir, "theme.json.new"), JSON.stringify(out), { mode: 0o644 });
   fs.renameSync(path.join(dir, "theme.json.new"), path.join(dir, "theme.json"));
   return out;
@@ -106,9 +108,36 @@ export function saveAsset(kind, buf, dir = THEME_DIR) {
   fs.renameSync(path.join(dir, `${kind}.new`), path.join(dir, kind));
   return type;
 }
-export function removeAsset(kind, dir = THEME_DIR) { if (ASSETS[kind]) fs.rmSync(path.join(dir, kind), { force: true }); }
+export function removeAsset(kind, dir = THEME_DIR) { if (ASSETS[kind] || isWall(kind)) fs.rmSync(path.join(dir, kind), { force: true }); }
+const isWall = (kind) => WALL_SIZES.some((sz) => kind === `wall-${sz}`);
+/** Fonds d'écran des téléphones : PNG aux tailles connues, écrits ensemble */
+export function saveWalls(images, dir = THEME_DIR) {
+  const bufs = {};
+  for (const sz of WALL_SIZES) {
+    const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(images?.[sz] || ""));
+    if (!m) throw new Error(`Fond d'écran ${sz} manquant.`);
+    const buf = Buffer.from(m[1], "base64");
+    if (sniffImage(buf) !== "image/png" || buf.length > 2 * 1024 * 1024) throw new Error(`Fond d'écran ${sz} invalide.`);
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+    if (`${w}x${h}` !== sz) throw new Error(`Fond d'écran ${sz} : mauvaise taille (${w}x${h}).`);
+    bufs[sz] = buf;
+  }
+  fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+  for (const [sz, buf] of Object.entries(bufs)) { fs.writeFileSync(path.join(dir, `wall-${sz}.new`), buf, { mode: 0o644 }); fs.renameSync(path.join(dir, `wall-${sz}.new`), path.join(dir, `wall-${sz}`)); }
+}
+export function removeWalls(dir = THEME_DIR) { for (const sz of WALL_SIZES) fs.rmSync(path.join(dir, `wall-${sz}`), { force: true }); }
+/** Adresse du fond d'écran d'un téléphone (null : fond Callikoe d'origine) ; le nom change avec le thème pour que le poste le recharge */
+export function wallpaperName(screen, t = readTheme()) {
+  return t.walls && WALL_SIZES.includes(screen) ? `wall-${screen}-${t.walls}.png` : null;
+}
+/** Couleurs publiques du thème (appli mobile) */
+export function themePublic(t = readTheme()) {
+  const d = shades(t.color);
+  const stops = d.grad.match(/#[0-9a-f]{6}/gi) || [];
+  return { color: d.accent, dark: d.darkAccent, soft: d.soft, gradient: stops, logo: !!t.logo, custom: t.color !== DEFAULT_THEME.color || !!t.logo, v: t.v || 0 };
+}
 export function assetFile(kind, dir = THEME_DIR) {
-  if (!ASSETS[kind]) return null;
+  if (!ASSETS[kind] && !isWall(kind)) return null;
   const f = path.join(dir, kind);
   try { const buf = fs.readFileSync(f); return { buf, type: sniffImage(buf) }; } catch { return null; }
 }
@@ -137,6 +166,14 @@ export function themeCss(t = readTheme()) {
 }
 /** Réponses HTTP communes (console du serveur et consoles des PBX) */
 export function registerThemeRoutes(app, dir = () => THEME_DIR) {
+  app.get("/theme.json", async (req, reply) => reply.header("cache-control", "no-cache").header("access-control-allow-origin", "*").send(themePublic(readTheme(dir()))));
+  // Téléphones de bureau : fond d'écran du thème (le numéro de version dans le nom force le téléchargement après un changement)
+  app.get("/phone/theme/:file", async (req, reply) => {
+    const m = /^wall-(\d+x\d+)-\d+\.png$/.exec(req.params.file);
+    const f = m && assetFile(`wall-${m[1]}`, dir());
+    if (!f) return reply.code(404).send("");
+    return reply.type("image/png").header("cache-control", "public, max-age=31536000, immutable").send(f.buf);
+  });
   app.get("/theme.css", async (req, reply) => reply.type("text/css; charset=utf-8").header("cache-control", "no-cache").send(themeCss(readTheme(dir()))));
   app.get("/theme/:kind", async (req, reply) => {
     const f = assetFile(req.params.kind, dir());
