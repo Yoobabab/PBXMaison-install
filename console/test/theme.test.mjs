@@ -37,3 +37,17 @@ test("feuille de style : rien à changer par défaut, couleur, logo et fond", ()
   fs.writeFileSync(path.join(dir, "theme.json"), "{\"color\":\"rouge\"}");
   assert.equal(readTheme(dir).color, "#d8141c");     // couleur invalide : thème par défaut
 });
+
+test("option Marque blanche : thème gardé mais non appliqué sans l'option", async () => {
+  const { brandingLock, setBrandingLock } = await import("../lib/theme.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "theme-"));
+  writeTheme({ color: "#1d4ed8", logo: true, walls: 123 }, dir);
+  setBrandingLock({ until: null, price_ht: 290 }, dir);
+  assert.ok(brandingLock(dir));
+  assert.equal(readTheme(dir).color, "#d8141c");                    // appliqué : Callikoe
+  assert.equal(readTheme(dir).logo, null);
+  assert.doesNotMatch(themeCss(readTheme(dir)), /--accent|logo/);
+  assert.equal(readTheme(dir, { raw: true }).color, "#1d4ed8");      // enregistré : gardé
+  setBrandingLock(null, dir);
+  assert.equal(readTheme(dir).color, "#1d4ed8");
+});

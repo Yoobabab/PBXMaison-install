@@ -611,7 +611,8 @@ async function drawWalls(d) {
 async function renderTheme() {
   setNav("paint", "Apparence");
   let d; try { d = await api("GET", "/api/theme"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
-  const edit = can("super", "admin"), t = d.theme;
+  const lock = d.branding?.locked;
+  const edit = can("super", "admin") && !lock, t = d.theme;
   const mb = (n) => `${Math.round(n / 1024 / 1024)} Mo`;
   const asset = (kind, title, hint) => `<div class="panel"><div class="ph"><h2>${title}</h2>${t[kind] ? `<span class="pill ok">Personnalisé</span>` : `<span class="pill off">Par défaut</span>`}</div>
     <div class="pad stack">
@@ -619,9 +620,17 @@ async function renderTheme() {
       <p class="hint" style="margin:0">${hint}</p>
       ${edit ? `<div class="row" style="gap:8px;flex-wrap:wrap"><label class="btn sm" style="cursor:pointer">${t[kind] ? "Remplacer" : "Importer"}…<input type="file" data-up="${kind}" accept="${d.limits[kind].types.join(",")}" hidden></label>
         ${t[kind] ? `<button type="button" class="btn ghost sm" data-rm="${kind}">Retirer</button>` : ""}</div>` : ""}</div></div>`;
-  app.innerHTML = takeFlash() + `<div class="bar"><div class="grow"><h1>Apparence</h1>
-      <p class="sub" style="margin:0">Couleur, logo et fond d'écran de la console du serveur et de <strong>tous ses PBX</strong> (console, softphone, appli). Le changement s'applique tout de suite.</p></div>
+  const eur = (n) => Number(n).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+  // Option Marque blanche (serveur relié au portail pro) : sans elle, la page est en lecture seule et tout reste aux couleurs Callikoe
+  const lockBox = lock ? `<div class="mb-lock"><span class="mb-ic"></span><div class="grow"><strong>Option Marque blanche</strong>
+      <p>Mets ta couleur, ton logo et ton fond d'écran sur cette console, tous tes PBX, le softphone, l'appli et les téléphones de tes clients.
+      ${d.branding.price_ht === 0 ? "Incluse dans ton tarif : active-la dans le portail pro." : d.branding.price_ht ? `${esc(eur(d.branding.price_ht))} HT par an, pour tous tes serveurs.` : ""}
+      ${t.color !== d.default || t.logo || t.bg ? " Tes réglages ci-dessous sont gardés : ils reviennent dès que l'option est active." : ""}</p></div>
+      ${d.branding.order_url ? `<a class="btn" href="${esc(d.branding.order_url)}" target="_blank" rel="noopener">Commander l'option</a>` : ""}</div>` : "";
+  app.innerHTML = takeFlash() + lockBox + `<div class="bar"><div class="grow"><h1>Apparence</h1>
+      <p class="sub" style="margin:0">Couleur, logo et fond d'écran de la console du serveur et de <strong>tous ses PBX</strong> (console, softphone, appli). Le changement s'applique tout de suite.${d.branding?.until && !lock ? ` <span class="pill ok">Marque blanche jusqu'au ${esc(new Date(d.branding.until).toLocaleDateString("fr-FR"))}</span>` : ""}</p></div>
       ${edit ? `<button type="button" class="btn ghost" id="threset">Rétablir le thème Callikoe</button>` : ""}</div>
+    <div class="${lock ? "mb-off" : ""}">
     <div class="panel"><div class="ph"><h2>Couleur</h2><span class="hint">remplace le rouge partout</span></div>
       <div class="pad stack">
         <div class="th-sw">${d.palette.map((p) => `<button type="button" class="th-c ${p.color === t.color ? "on" : ""}" data-color="${p.color}" title="${esc(p.name)}" ${edit ? "" : "disabled"}>
@@ -635,7 +644,7 @@ async function renderTheme() {
     </div>
     <div class="panel" style="margin-top:16px"><div class="ph"><h2>Téléphones de bureau</h2>${t.walls ? `<span class="pill ok">Aux couleurs du thème</span>` : `<span class="pill off">Fond Callikoe</span>`}</div>
       <div class="pad stack"><div class="th-prev th-wall"><img src="${t.walls ? `/phone/theme/wall-480x272-${t.walls}.png` : "/c/phone/callikoe-v3-480x272.png"}" alt="" onerror="this.remove()"></div>
-        <p class="hint" style="margin:0">Fond d'écran des téléphones Yealink à écran couleur, dessiné automatiquement avec ta couleur et ton logo (4 tailles d'écran). Les téléphones le chargent à leur prochaine synchronisation ou à leur redémarrage.</p></div></div>`;
+        <p class="hint" style="margin:0">Fond d'écran des téléphones Yealink à écran couleur, dessiné automatiquement avec ta couleur et ton logo (4 tailles d'écran). Les téléphones le chargent à leur prochaine synchronisation ou à leur redémarrage.</p></div></div></div>`;
   const done = async (nd, text) => {
     try { await drawWalls(nd); } catch (e) { text += ` (fonds d'écran des téléphones non mis à jour : ${e.message})`; }
     flash = { text }; refreshThemeCss(); renderTheme();

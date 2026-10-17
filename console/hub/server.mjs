@@ -17,7 +17,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
 import { signTicket, emailKey, HUB_USERS, TENANTS } from "../lib/sso.mjs";
 import { canonicalJson, verifySignature } from "../../pbx/lib/verify-config.mjs";
 import { encodeToken } from "../../pbx/lib/license-token.mjs";
-import { registerThemeRoutes, readTheme, writeTheme, saveAsset, removeAsset, saveWalls, removeWalls, WALL_SIZES, PALETTE, DEFAULT_THEME, ASSETS, shades, hexToHsl } from "../lib/theme.mjs";
+import { registerThemeRoutes, readTheme, brandingLock, setBrandingLock, writeTheme, saveAsset, removeAsset, saveWalls, removeWalls, WALL_SIZES, PALETTE, DEFAULT_THEME, ASSETS, shades, hexToHsl } from "../lib/theme.mjs";
 
 const ETC = process.env.HUB_ETC || "/etc/callikoe/hub";
 const VAR = process.env.HUB_VAR || "/var/lib/callikoe/hub";
@@ -341,13 +341,19 @@ export async function buildApp({ db } = {}) {
   }
 
   // ---------------------------------------------------------------- Apparence : couleur, logo, fond d'écran (console du serveur et tous ses PBX)
-  const themeView = () => { const t = readTheme(); return { theme: t, palette: PALETTE, default: DEFAULT_THEME.color, shades: shades(t.color), wall_sizes: WALL_SIZES,
+  // Thème enregistré (même quand l'option Marque blanche manque : il revient dès qu'elle est réactivée)
+  const rawTheme = () => readTheme(undefined, { raw: true });
+  // Serveur d'un partenaire : personnalisation réservée à l'option Marque blanche (portail pro)
+  const brandingInfo = () => { const lock = brandingLock(); return { locked: !!lock, until: lock?.until || portalBranding?.until || null, price_ht: lock?.price_ht ?? portalBranding?.price_ht ?? null, order_url: lock?.order_url || portalBranding?.order_url || "" }; };
+  const brandingGuard = () => { if (brandingLock()) throw new UserError("Personnalisation réservée à l'option Marque blanche : commande-la dans le portail pro (menu Marque blanche)."); };
+  const themeView = () => { const t = rawTheme(); return { branding: brandingInfo(), theme: t, palette: PALETTE, default: DEFAULT_THEME.color, shades: shades(t.color), wall_sizes: WALL_SIZES,
     limits: Object.fromEntries(Object.entries(ASSETS).map(([k, v]) => [k, { max: v.max, types: v.types }])) }; };
   app.get("/api/theme", { preHandler: requireUser }, async () => themeView());
   app.put("/api/theme", { preHandler: requireRole("super", "admin") }, async (req) => {
+    brandingGuard();
     const color = String(req.body?.color || "").toLowerCase();
     if (!/^#[0-9a-f]{6}$/.test(color) || !hexToHsl(color)) throw new UserError("Couleur invalide.", "color");
-    const t = readTheme();
+    const t = rawTheme();
     try { writeTheme({ ...t, color }); } catch { throw new UserError("Thème non enregistré : dossier du thème non accessible (relance la mise à jour du serveur)."); }
     await audit(req, "Apparence : couleur changée", true, color);
     return themeView();
@@ -362,23 +368,25 @@ export async function buildApp({ db } = {}) {
   // Fonds d'écran des téléphones de bureau : dessinés par la page Apparence (couleur + logo), une image par taille d'écran
   app.register(async (scope) => {
     scope.post("/api/theme/walls", { preHandler: requireRole("super", "admin"), bodyLimit: 10 * 1024 * 1024 }, async (req) => {
+    brandingGuard();
       try { saveWalls(req.body?.images || {}); } catch (e) { throw new UserError(e.message); }
-      writeTheme({ ...readTheme(), walls: Date.now() });
+      writeTheme({ ...rawTheme(), walls: Date.now() });
       await audit(req, "Apparence : fonds d'écran des téléphones mis à jour");
       return themeView();
     });
   });
   app.delete("/api/theme/walls", { preHandler: requireRole("super", "admin") }, async (req) => {
-    removeWalls(); writeTheme({ ...readTheme(), walls: null });
+    removeWalls(); writeTheme({ ...rawTheme(), walls: null });
     return themeView();
   });
   app.register(async (scope) => {
     scope.addContentTypeParser(["application/octet-stream", "image/png", "image/jpeg", "image/webp", "image/svg+xml"], { parseAs: "buffer", bodyLimit: 4 * 1024 * 1024 + 1 }, (req, body, done) => done(null, body));
     scope.post("/api/theme/:kind", { preHandler: requireRole("super", "admin"), bodyLimit: 4 * 1024 * 1024 + 1 }, async (req) => {
+    brandingGuard();
       const kind = req.params.kind;
       if (!ASSETS[kind]) throw new UserError("Fichier inconnu.", null, 404);
       try { saveAsset(kind, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)); } catch (e) { throw new UserError(e.message, kind); }
-      writeTheme({ ...readTheme(), [kind]: true });
+      writeTheme({ ...rawTheme(), [kind]: true });
       await audit(req, kind === "logo" ? "Apparence : logo importé" : "Apparence : fond d'écran importé");
       return themeView();
     });
@@ -386,7 +394,7 @@ export async function buildApp({ db } = {}) {
   app.delete("/api/theme/:kind", { preHandler: requireRole("super", "admin") }, async (req) => {
     const kind = req.params.kind;
     if (!ASSETS[kind]) throw new UserError("Fichier inconnu.", null, 404);
-    removeAsset(kind); writeTheme({ ...readTheme(), [kind]: null });
+    removeAsset(kind); writeTheme({ ...rawTheme(), [kind]: null });
     await audit(req, kind === "logo" ? "Apparence : logo retiré" : "Apparence : fond d'écran retiré");
     return themeView();
   });
@@ -398,6 +406,9 @@ export async function buildApp({ db } = {}) {
   // Serveur d'un partenaire (configuration signée avec le jeton du portail pro) : licences achetées dans le portail, signées par lui
   const partnerCfg = () => { const p = serverConfig().partner; return p?.token && /^https:\/\//.test(p.portal || "") || (p?.token && process.env.HUB_PORTAL_URL) ? p : null; };
   const portalMode = () => !signKey && !!partnerCfg();
+  let portalBranding = null;
+  // Serveur qui signe lui-même ses licences (installateur) : jamais de verrou Marque blanche
+  if (!portalMode() && brandingLock()) { try { setBrandingLock(null); } catch { /* */ } }
   const portalUrl = () => process.env.HUB_PORTAL_URL || partnerCfg()?.portal || "";
   async function portal(pathname, body) {
     const p = partnerCfg();
@@ -472,6 +483,13 @@ export async function buildApp({ db } = {}) {
     const pbx = (d.pbx || []).map((p) => ({ slug: p.slug, name: p.name, fqdn: p.fqdn, license: p.license, pbx_id: reg.find((t) => t.slug === p.slug)?.pbx_id || "", suspended: !!p.suspended }));
     let r; try { r = await portal("/v1/hub/sync", { pbx, version: process.env.CX_VERSION || "" }); portalSync.error = ""; }
     catch (e) { portalSync.error = e.message; return; }
+    // Option Marque blanche (portail pro) : sans elle, le thème enregistré n'est pas appliqué (consoles, softphone, appli, téléphones)
+    if (r.branding && typeof r.branding.active === "boolean") {
+      portalBranding = { until: r.branding.until || null, price_ht: Number.isFinite(r.branding.price_ht) ? r.branding.price_ht : null, order_url: /^https:\/\//.test(r.branding.order_url || "") ? r.branding.order_url : "" };
+      const was = !!brandingLock();
+      try { setBrandingLock(r.branding.active ? null : portalBranding); } catch { /* dossier du thème non accessible */ }
+      if (was === !!r.branding.active) await audit({ ip: "portail", cookies: {} }, r.branding.active ? "Option Marque blanche active : thème personnalisé appliqué" : "Option Marque blanche inactive : thème Callikoe appliqué", true, "", "portail").catch(() => {});
+    }
     if (r.editions && typeof r.editions === "object") portalEditions = Object.fromEntries(Object.entries(r.editions).filter(([k, v]) => EDITIONS[k] && typeof v === "string").map(([k, v]) => [k, v.slice(0, 30)]));
     const keys = [];
     for (const l of r.licenses || []) {

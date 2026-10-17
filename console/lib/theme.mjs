@@ -73,7 +73,24 @@ export function shades(color) {
 }
 
 // ------------------------------------------------------------------ Lecture / écriture
-export function readTheme(dir = THEME_DIR) {
+/**
+ * Option Marque blanche (serveur d'un partenaire relié au portail pro) : sans l'option, le thème enregistré est gardé
+ * mais n'est pas appliqué — consoles, softphone, appli et téléphones restent aux couleurs Callikoe.
+ * Fichier « locked.json » dans le dossier du thème, écrit par la console du serveur à chaque synchronisation avec le portail.
+ */
+export function brandingLock(dir = THEME_DIR) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, "locked.json"), "utf8")); } catch { return null; }
+}
+export function setBrandingLock(lock, dir = THEME_DIR) {
+  const f = path.join(dir, "locked.json");
+  if (!lock) { fs.rmSync(f, { force: true }); return; }
+  fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+  fs.writeFileSync(`${f}.new`, JSON.stringify({ at: new Date().toISOString(), ...lock }), { mode: 0o644 });
+  fs.renameSync(`${f}.new`, f);
+}
+/** Thème appliqué (Callikoe si l'option Marque blanche manque) ; { raw: true } = thème enregistré, pour la page Apparence */
+export function readTheme(dir = THEME_DIR, { raw = false } = {}) {
+  if (!raw) { const lock = brandingLock(dir); if (lock) return { ...DEFAULT_THEME, v: Date.parse(lock.at) || 1 }; }
   try {
     const t = JSON.parse(fs.readFileSync(path.join(dir, "theme.json"), "utf8"));
     return { ...DEFAULT_THEME, ...t, color: hexToHsl(t.color) ? t.color.toLowerCase() : DEFAULT_THEME.color };
