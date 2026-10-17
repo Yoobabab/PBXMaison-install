@@ -1176,8 +1176,12 @@ async function renderUser(id, tab = "general") {
       <label>Code PIN<input name="voicemail.pin" type="password" inputmode="numeric" maxlength="8" value="${esc(vm.pin)}" autocomplete="new-password"><span class="hint">4 à 8 chiffres.</span></label>
       <span class="hide-sm"></span>
       <label class="check full"><input type="checkbox" name="voicemail.skip_pin" ${vm.skip_pin ? "checked" : ""}> Ne pas demander le code depuis son propre poste</label>
-      <div class="note full">Consulter : <strong>*97</strong> depuis son poste, <strong>*98</strong> depuis un autre poste (numéro de boîte + code).
-        Envoi des messages par e-mail : prévu dans une prochaine version.</div>
+      <fieldset class="full"><legend>Envoi par e-mail</legend>
+        <label class="check"><input type="checkbox" name="voicemail.email" ${vm.email ? "checked" : ""}> Envoyer chaque nouveau message à ${u.email ? `<strong>${esc(u.email)}</strong>` : "l'e-mail de la fiche <span class=\"hint\">(à renseigner dans Général)</span>"}</label>
+        <label class="check"><input type="checkbox" name="voicemail.email_attach" ${vm.email_attach !== false ? "checked" : ""}> Joindre l'enregistrement (fichier audio)</label>
+        <label class="check"><input type="checkbox" name="voicemail.email_delete" ${vm.email_delete ? "checked" : ""}> Effacer le message du répondeur une fois envoyé</label>
+        <span class="hint">Le serveur d'envoi se règle dans Administration › Alertes › Réglages.</span></fieldset>
+      <div class="note full">Consulter : <strong>*97</strong> depuis son poste, <strong>*98</strong> depuis un autre poste (numéro de boîte + code).</div>
       ${save}</form>`;
   } else if (tab === "options") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>

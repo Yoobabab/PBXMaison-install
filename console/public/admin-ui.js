@@ -286,6 +286,12 @@ async function pageRecordings(sub) {
             <button class="ghost-ic" data-del="${H.esc(c.recording)}" title="Supprimer">${ic(I.trash)}</button>` : `<span class="s">Fichier supprimé</span>`}
         </div>`).join("")}</div>${pg.html}` : `<div class="empty">${s.enabled ? "Aucun appel enregistré sur la période." : "L'enregistrement est arrêté : active-le dans les réglages."}</div>`}</div>`);
   const f = H.$("#recf");
+  H.$("#tmgo")?.addEventListener("click", async (e) => {
+    const b = e.target; b.disabled = true; const t = b.textContent; b.textContent = "Envoi…";
+    try { await H.api("POST", "/api/alerts/test-mail", { to: H.$("#tmto").value }); ok("E-mail de test envoyé : vérifie la boîte de réception (et les indésirables)."); }
+    catch (err) { H.setFlash({ cls: "bad", text: err.message }); }
+    pageAlerts("reglages"); b.textContent = t;
+  });
   if (f) onSubmit(f, async (v) => { await H.api("PUT", "/api/recording", { ...v, retention_days: Number(v.retention_days) }); ok("Réglages enregistrés."); location.hash = "#/enregistrements"; });
   H.wirePager(H.app, () => pageRecordings(sub));
   const setQ = (k, v) => { sessionStorage.setItem("pbxm_rec_q", JSON.stringify({ ...q, [k]: v })); H.resetPage("rec"); pageRecordings(); };
@@ -441,13 +447,14 @@ async function pageAlerts(sub) {
           <td class="nw">${pill(SEV[sev], d.severity[sev])}</td></tr>`).join("")}
       </tbody></table></div></div>
       ${Object.keys(d.events).some((k) => k === "disk" || /disk|disque/i.test(k)) ? "" : `<input type="hidden" name="disk_threshold" value="${s.disk_threshold}">`}
-      <div class="panel"><div class="ph"><h2>Envoi par e-mail</h2><span class="pill wait">En préparation</span></div><div class="pad stack">
-        <p class="hint" style="margin:0">Les alertes sont déjà détectées et notées dans le journal. L'envoi par e-mail sera activé dans une prochaine mise à jour avec ces réglages.</p>
-        <label>Destinataires<textarea name="recipients" rows="2" placeholder="technicien@irt-network.fr, gerant@client.fr">${H.esc(s.recipients.join(", "))}</textarea></label>
-        <div class="cx-g3"><label>Serveur SMTP<input name="smtp.host" value="${H.esc(s.smtp.host)}" placeholder="smtp.exemple.fr"></label><label>Port<input name="smtp.port" type="number" value="${s.smtp.port}"></label>
+      <div class="panel"><div class="ph"><h2>Envoi des e-mails</h2>${d.sending_enabled ? pill("ok", "Prêt") : pill("wait", "À régler")}</div><div class="pad stack">
+        <p class="hint" style="margin:0">Le serveur d'envoi sert aux alertes et aux messages vocaux envoyés par e-mail (fiche utilisateur › Messagerie vocale). Celui de l'entreprise convient : OVH, Microsoft 365, Gmail, la messagerie du client…</p>
+        <label>Destinataires des alertes<textarea name="recipients" rows="2" placeholder="technicien@irt-network.fr, gerant@client.fr">${H.esc(s.recipients.join(", "))}</textarea></label>
+        <div class="cx-g3"><label>Serveur SMTP<input name="smtp.host" value="${H.esc(s.smtp.host)}" placeholder="ssl0.ovh.net"></label><label>Port<input name="smtp.port" type="number" value="${s.smtp.port}"></label>
           <label>Sécurité<select name="smtp.security">${[["starttls", "STARTTLS (587)"], ["tls", "TLS (465)"], ["none", "Aucune (25)"]].map(([k, l]) => `<option value="${k}" ${s.smtp.security === k ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
-        <div class="cx-g3"><label>Identifiant<input name="smtp.user" value="${H.esc(s.smtp.user)}" autocomplete="off"></label><label>Mot de passe<input type="password" name="smtp.password" placeholder="${s.smtp.has_password ? "•••••••• (inchangé)" : ""}" autocomplete="new-password"></label>
+        <div class="cx-g3"><label>Identifiant<input name="smtp.user" value="${H.esc(s.smtp.user)}" autocomplete="off" placeholder="standard@client.fr"></label><label>Mot de passe<input type="password" name="smtp.password" placeholder="${s.smtp.has_password ? "•••••••• (inchangé)" : ""}" autocomplete="new-password"></label>
           <label>Expéditeur<input name="smtp.from" value="${H.esc(s.smtp.from)}" placeholder="standard@client.fr"></label></div>
+        <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><input id="tmto" type="email" placeholder="Adresse pour le test" style="max-width:260px" value="${H.esc(s.recipients[0] || "")}"><button type="button" class="btn ghost" id="tmgo">Envoyer un e-mail de test</button><span class="hint">Enregistre d'abord les réglages.</span></div>
       </div></div>
       <div class="actions" style="margin-top:16px"><button class="btn">Enregistrer</button></div></form>`
     : `<div class="kpis">${kpi("alerts" in I ? "alerts" : "clock", "7 derniers jours", recent.length, recent.length ? `${recent.filter((l) => l.severity === "critical").length} critique(s)` : "Rien à signaler", recent.some((l) => l.severity === "critical") ? "warn" : "good")}
@@ -462,6 +469,12 @@ async function pageAlerts(sub) {
             <td class="nw">${g.count > 1 ? `<span class="pill off">×${g.count}</span>` : "1"}</td></tr>`).join("")}</tbody></table></div>`
           : `<div class="empty">${ic(I.check, 30)}<p>${d.log.length ? "Aucune alerte de ce niveau." : "Aucune alerte. Tout va bien."}</p></div>`}</div>`);
   const f = H.$("#alf");
+  H.$("#tmgo")?.addEventListener("click", async (e) => {
+    const b = e.target; b.disabled = true; const t = b.textContent; b.textContent = "Envoi…";
+    try { await H.api("POST", "/api/alerts/test-mail", { to: H.$("#tmto").value }); ok("E-mail de test envoyé : vérifie la boîte de réception (et les indésirables)."); }
+    catch (err) { H.setFlash({ cls: "bad", text: err.message }); }
+    pageAlerts("reglages"); b.textContent = t;
+  });
   if (f) onSubmit(f, async (v) => { v.disk_threshold = Number(v.disk_threshold); v.smtp.port = Number(v.smtp.port); await H.api("PUT", "/api/alerts", v); ok("Réglages des alertes enregistrés."); pageAlerts("reglages"); });
   H.app.querySelectorAll("[name=allvl]").forEach((r) => r.onchange = () => { sessionStorage.setItem("pbxm_al_lvl", r.value); pageAlerts(sub); });
   H.$("#alclr")?.addEventListener("click", async () => { if (!confirm("Vider tout le journal des alertes ?")) return; await H.api("DELETE", "/api/alerts/log"); pageAlerts(sub); });
@@ -593,6 +606,12 @@ async function pageAccounts() {
       ${d.invites.map((i) => `<tr><td><b>${H.esc(i.name || i.email)}</b><div class="s">${H.esc(i.email)}</div></td><td>${H.esc(d.roles[i.role])}</td><td colspan="2">${pill("off", "Invitation en attente")} <span class="s">expire ${fmtDT(i.expires_at)}</span></td><td></td></tr>`).join("")}
       </tbody></table></div></div>`;
   const f = H.$("#acf");
+  H.$("#tmgo")?.addEventListener("click", async (e) => {
+    const b = e.target; b.disabled = true; const t = b.textContent; b.textContent = "Envoi…";
+    try { await H.api("POST", "/api/alerts/test-mail", { to: H.$("#tmto").value }); ok("E-mail de test envoyé : vérifie la boîte de réception (et les indésirables)."); }
+    catch (err) { H.setFlash({ cls: "bad", text: err.message }); }
+    pageAlerts("reglages"); b.textContent = t;
+  });
   if (f) onSubmit(f, async (v) => {
     const r = await H.api("POST", "/api/accounts", v);
     H.$("#aclink").innerHTML = `<div class="note">Envoie ce lien à ${H.esc(v.email)} (valable ${r.expires_in_hours} h, une seule fois) :<div class="cx-copy" style="margin-top:8px"><code>${H.esc(r.link)}</code><button type="button" class="btn ghost sm" data-copy="${H.esc(r.link)}">Copier</button></div></div>`;

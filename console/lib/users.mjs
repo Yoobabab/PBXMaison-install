@@ -48,7 +48,7 @@ export function defaultUser(id) {
       dnd: { type: "voicemail", target: "" },
     },
     options: { ring_mobile: false, accept_group_calls: true, disabled: false, block_external: false, hidden: false, role: "user" },
-    voicemail: { enabled: true, pin: "", skip_pin: true },
+    voicemail: { enabled: true, pin: "", skip_pin: true, email: false, email_attach: true, email_delete: false },
   };
 }
 
@@ -153,12 +153,16 @@ export function validateUser(input, current, ctx) {
     const vm = input.voicemail;
     if (vm.enabled !== undefined) u.voicemail.enabled = !!vm.enabled;
     if (vm.skip_pin !== undefined) u.voicemail.skip_pin = !!vm.skip_pin;
+    // Messages envoyés par e-mail (à l'adresse de la fiche), avec ou sans le fichier audio, effacés du répondeur ou non
+    for (const k of ["email", "email_attach", "email_delete"]) if (vm[k] !== undefined) u.voicemail[k] = !!vm[k];
     if (vm.pin !== undefined) {
       const pin = String(vm.pin).trim();
       if (pin && !/^\d{4,8}$/.test(pin)) throw new UserError("Code PIN : 4 à 8 chiffres.", "voicemail.pin");
       u.voicemail.pin = pin;
     }
   }
+  if (u.voicemail.email && u.voicemail.enabled && !u.email) throw new UserError("Renseigne l'e-mail de l'utilisateur (onglet Général) pour lui envoyer ses messages.", "voicemail.email");
+  if (!u.voicemail.email || !u.voicemail.email_attach) u.voicemail.email_delete = false;   // effacer seulement si le message part en pièce jointe
   if (u.voicemail.enabled && !u.voicemail.pin) u.voicemail.pin = String(Math.floor(100000 + Math.random() * 900000));
 
   if (input.forwarding) {

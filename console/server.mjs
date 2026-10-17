@@ -616,7 +616,7 @@ export async function buildApp({ db, ami } = {}) {
   const selfView = (u) => ({
     id: u.id, name: u.name, first_name: u.first_name, last_name: u.last_name, status: u.status, email: u.email,
     mobile: u.mobile, dids: u.dids, outbound_cid: u.outbound_cid,
-    forwarding: u.forwarding, voicemail: { enabled: u.voicemail.enabled, pin: u.voicemail.pin, skip_pin: u.voicemail.skip_pin },
+    forwarding: u.forwarding, voicemail: { enabled: u.voicemail.enabled, pin: u.voicemail.pin, skip_pin: u.voicemail.skip_pin, email: !!u.voicemail.email, email_attach: u.voicemail.email_attach !== false },
     ring_mobile: u.options.ring_mobile, manager: isManager(u), standardist: isStandardist(u),
   });
   app.get("/api/u/me", { preHandler: requireWebUser }, async (req) => {
@@ -795,7 +795,10 @@ export async function buildApp({ db, ami } = {}) {
     const input = {};
     if (b.mobile !== undefined) input.mobile = b.mobile;
     if (b.forwarding) input.forwarding = b.forwarding;
-    if (b.voicemail?.pin !== undefined) input.voicemail = { pin: b.voicemail.pin };
+    if (b.voicemail) {
+      input.voicemail = {};
+      for (const k of ["pin", "email", "email_attach"]) if (b.voicemail[k] !== undefined) input.voicemail[k] = b.voicemail[k];
+    }
     if (b.ring_mobile !== undefined) input.options = { ring_mobile: !!b.ring_mobile };
     if (b.status !== undefined) input.status = b.status;
     const u = await pbx.updateUser(s.ext, input, webBy(s));
@@ -1017,6 +1020,7 @@ export async function buildApp({ db, ami } = {}) {
   app.put("/api/alerts", { preHandler: requireUser }, async (req) => admin.setAlerts(req.body || {}));
   app.delete("/api/alerts/log", { preHandler: requireUser }, async () => admin.clearAlerts());
   app.post("/api/alerts/check", { preHandler: requireUser }, async () => { await admin.monitor(); return admin.getAlerts(); });
+  app.post("/api/alerts/test-mail", { preHandler: requireUser }, async (req) => admin.testMail(req.body?.to));
 
   // ---------------------------------------------------------------- Passerelles et DECT
   app.get("/api/gateways", { preHandler: requireUser }, async () => admin.listGateways());

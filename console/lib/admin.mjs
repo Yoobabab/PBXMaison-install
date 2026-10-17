@@ -18,6 +18,8 @@ import { defaultBackup, validateBackup, publicBackup, backupDue, listBackups, ba
 import { ALERT_EVENTS, SEVERITY, CRITICAL_SERVICES, defaultAlerts, validateAlerts, publicAlerts, detectAlerts } from "./alerts.mjs";
 import { GATEWAY_MODELS, GATEWAY_TYPES, validateGateway, manualGuide } from "./devices.mjs";
 import { EMERGENCY } from "./pbx.mjs";
+import { smtpReady, transportOf, smtpError, voicemailMail, alertMail, messagesToMail } from "./mail.mjs";
+import * as vmbox from "./voicemail.mjs";
 
 /** Lance pbx-configure et renvoie { code, out, lines (JSON par ligne) }. */
 export function runConfigure(args, { timeout = 120_000 } = {}) {
@@ -53,6 +55,8 @@ export function createAdminService({ db, ami, pbx }) {
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_alerts (
       id bigserial PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), event text NOT NULL, severity text NOT NULL,
       title text NOT NULL, text text NOT NULL, email text NOT NULL DEFAULT 'pending')`);
+    // Messages vocaux déjà envoyés par e-mail (jamais deux fois)
+    await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_vm_mailed (key text PRIMARY KEY, box text NOT NULL, at timestamptz NOT NULL DEFAULT now())`);
   }
 
   // ---------------------------------------------------------------- Règles sortantes
@@ -394,13 +398,85 @@ export function createAdminService({ db, ami, pbx }) {
   async function getAlerts() {
     const a = await alertSettings();
     const log = (await db.query("SELECT id, at, event, severity, title, text, email FROM pbxmaison_alerts ORDER BY at DESC LIMIT 200")).rows;
-    return { settings: publicAlerts(a), events: ALERT_EVENTS, severity: SEVERITY, log, sending_enabled: false };
+    return { settings: publicAlerts(a), events: ALERT_EVENTS, severity: SEVERITY, log, sending_enabled: smtpReady(a.smtp) };
   }
   async function setAlerts(input) {
     await db.setSetting("alerts", validateAlerts(input, await alertSettings()));
     return getAlerts();
   }
   async function clearAlerts() { await db.query("DELETE FROM pbxmaison_alerts"); return getAlerts(); }
+
+  // ---------------------------------------------------------------- E-mails (serveur d'envoi réglé dans Alertes › Réglages)
+  const pbxName = () => pbxEnv().PBX_NAME || pbxEnv().PBX_COMPANY || "Callikoe";
+  const tzName = () => pbxEnv().PBX_TIMEZONE || "Europe/Paris";
+  async function sendMail(to, mail, attachments = []) {
+    const a = await alertSettings();
+    if (!smtpReady(a.smtp)) throw new UserError("Serveur d'envoi des e-mails non réglé (Administration › Alertes › Réglages).");
+    try {
+      await transportOf(a.smtp).sendMail({ from: { name: pbxName(), address: a.smtp.from }, to, subject: mail.subject, text: mail.text, html: mail.html, attachments });
+    } catch (e) { throw new UserError(smtpError(e)); }
+  }
+  async function testMail(to) {
+    const addr = String(to || "").trim();
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(addr)) throw new UserError("Adresse du destinataire invalide.", "to");
+    await sendMail(addr, { subject: `Test d'envoi — ${pbxName()}`, text: `Cet e-mail confirme que ${pbxName()} peut envoyer des e-mails (alertes et messages vocaux).`,
+      html: `<p style="font-family:Arial,sans-serif">Cet e-mail confirme que <b>${pbxName().replace(/[<>&]/g, "")}</b> peut envoyer des e-mails (alertes et messages vocaux).</p>` });
+    return { ok: true };
+  }
+  // Échec d'envoi signalé dans le journal au plus une fois toutes les 6 heures
+  let mailFailAt = 0;
+  const mailFailed = async (msg) => {
+    if (Date.now() - mailFailAt < 6 * 3600_000) return;
+    mailFailAt = Date.now();
+    await db.query("INSERT INTO pbxmaison_alerts (event, severity, title, text, email) VALUES ('mail_failed', 'warning', 'Envoi d''e-mail en échec', $1, 'failed')", [msg]).catch(() => {});
+  };
+  /** Alertes en attente → e-mail aux destinataires (celles de plus d'une heure ne partent plus) */
+  async function sendAlerts() {
+    const a = await alertSettings();
+    if (!smtpReady(a.smtp) || !a.recipients.length) return;
+    await db.query("UPDATE pbxmaison_alerts SET email = 'skipped' WHERE email = 'pending' AND at < now() - interval '1 hour'");
+    const r = await db.query("SELECT id, at, title, text, severity FROM pbxmaison_alerts WHERE email = 'pending' ORDER BY at LIMIT 10");
+    for (const al of r.rows) {
+      try { await sendMail(a.recipients, alertMail({ ...al, pbxName: pbxName(), tz: tzName() })); await db.query("UPDATE pbxmaison_alerts SET email = 'sent' WHERE id = $1", [al.id]); }
+      catch (e) { await db.query("UPDATE pbxmaison_alerts SET email = 'failed' WHERE id = $1", [al.id]); await mailFailed(e.message); return; }
+    }
+  }
+  /** Nouveaux messages vocaux → e-mail à l'utilisateur (option de sa fiche), puis effacés du répondeur si demandé */
+  async function sendVoicemails() {
+    const a = await alertSettings();
+    if (!smtpReady(a.smtp)) return;
+    const users = (await pbx.loadUsers()).filter((u) => u.voicemail.enabled && u.voicemail.email && u.email && !u.options.disabled);
+    if (!users.length) return;
+    const keyOf = (u, m) => m.msg_id ? `${u.id}:${m.msg_id}` : `${u.id}:${m.at}:${m.caller_number}`;
+    for (const u of users) {
+      const list = vmbox.listMessages(u.id).map((m) => ({ ...m, key: keyOf(u, m) }));
+      if (!list.length) continue;
+      const done = new Set((await db.query("SELECT key FROM pbxmaison_vm_mailed WHERE box = $1", [u.id])).rows.map((x) => x.key));
+      const todo = messagesToMail(list, done);
+      for (const m of todo) {
+        const mail = voicemailMail({ box: u.id, boxName: displayName(u), caller: m.caller_number, callerName: m.caller_name, at: m.at, duration: m.duration, pbxName: pbxName(), tz: tzName(), attach: u.voicemail.email_attach });
+        let attachments = [];
+        if (u.voicemail.email_attach) {
+          const f = vmbox.audioPath(u.id, m.id);
+          const local = m.at ? new Date(m.at).toLocaleString("sv-SE", { timeZone: tzName() }).slice(0, 16).replace(/[: ]/g, "-") : "message";
+          attachments = [{ filename: `message-${local}${f.type === "audio/wav" ? ".wav" : ".gsm"}`, path: f.file, contentType: f.type }];
+        }
+        try { await sendMail(u.email, mail, attachments); } catch (e) { await mailFailed(`Message vocal de ${u.id} : ${e.message}`); return; }
+        await db.query("INSERT INTO pbxmaison_vm_mailed (key, box) VALUES ($1, $2) ON CONFLICT DO NOTHING", [m.key, u.id]);
+      }
+      // Effacés du répondeur (après envoi en pièce jointe) : un par un, la liste est renumérotée à chaque suppression
+      if (u.voicemail.email_delete && u.voicemail.email_attach && todo.length) {
+        const sent = new Set(todo.map((m) => m.key));
+        for (let i = 0; i < 50; i++) {
+          const m = vmbox.listMessages(u.id).find((x) => sent.has(keyOf(u, x)));
+          if (!m) break;
+          try { vmbox.deleteMessage(u.id, m.id); } catch { break; }
+        }
+        ami.connect().then(() => ami.send({ Action: "VoicemailRefresh", Context: "default", Mailbox: u.id })).catch(() => {});
+      }
+    }
+    await db.query("DELETE FROM pbxmaison_vm_mailed WHERE at < now() - interval '30 days'");
+  }
 
   // Serveur multi-tenant : le moteur de CE PBX (callikoe-asterisk@<client>) et l'aiguilleur SIP commun
   const TENANT = process.env.CX_MODE === "tenant" ? (process.env.CX_TENANT || "") : "";
@@ -567,11 +643,13 @@ export function createAdminService({ db, ami, pbx }) {
       if (backupDue(b, last?.trigger === "schedule" ? last.at : null) && !backupJob?.running) await runBackup("schedule");
     }, 60_000);
     tick(async () => { const r = await recording(); purgeRecordings(r.retention_days); }, 6 * 3600_000);
+    tick(sendVoicemails, 15_000);
+    tick(sendAlerts, 30_000);
     refreshAllow().catch(() => {});
   }
 
   return {
-    migrate, start, dialplanParts, consoleAllowed, refreshAllow,
+    migrate, start, dialplanParts, testMail, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
     getSecurity, setSecurity, banIp,
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,

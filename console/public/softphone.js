@@ -1106,6 +1106,8 @@ function setGeneral(el) {
       ${u.voicemail.enabled ? `<p class="hint">Depuis ton poste, compose <strong>*97</strong> pour écouter tes messages.</p>
       <form id="fpin" class="stack" novalidate>
         <label>Code PIN (4 à 8 chiffres)<input name="pin" type="password" inputmode="numeric" autocomplete="new-password" value="${esc(u.voicemail.pin)}"></label>
+        <label class="ck"><input type="checkbox" name="vmemail" ${u.voicemail.email ? "checked" : ""} ${u.email ? "" : "disabled"}> Recevoir chaque nouveau message par e-mail${u.email ? ` (${esc(u.email)})` : " — demande à l'administrateur d'ajouter ton e-mail"}</label>
+        <label class="ck"><input type="checkbox" name="vmattach" ${u.voicemail.email_attach ? "checked" : ""} ${u.email ? "" : "disabled"}> Avec l'enregistrement en pièce jointe</label>
         <div><button class="btn" type="submit">Enregistrer</button></div>
       </form>` : `<p class="hint">Non activée pour ton poste.</p>`}
     </section>
@@ -1124,7 +1126,10 @@ function setGeneral(el) {
   </div>`;
   addEyes();
   $("#fmob").onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); saveSettings({ mobile: f.get("mobile"), ring_mobile: f.get("ring_mobile") === "on" }); };
-  $("#fpin")?.addEventListener("submit", (e) => { e.preventDefault(); saveSettings({ voicemail: { pin: new FormData(e.target).get("pin") } }); });
+  $("#fpin")?.addEventListener("submit", (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    saveSettings({ voicemail: { pin: f.get("pin"), ...(u.email ? { email: f.get("vmemail") === "on", email_attach: f.get("vmattach") === "on" } : {}) } });
+  });
   $("#theme").onchange = (e) => { store.set("callikoe_theme", e.target.value); applyTheme(); };
   drawNotif(); drawQr();
 }
