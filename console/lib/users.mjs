@@ -16,9 +16,13 @@ export class UserError extends Error {
 }
 
 /** Rôle d'un utilisateur du PBX : un responsable gère les plannings depuis son softphone et l'appli. */
-export const USER_ROLES = { user: "Utilisateur", manager: "Responsable (gère les plannings)", console: "Accès console (restreint)" };
+export const USER_ROLES = { user: "Utilisateur", standard: "Standardiste (ouvre et ferme le standard)", manager: "Responsable (standard + plannings)", console: "Accès console (restreint)" };
 /** Responsable : modifie les plannings depuis son softphone ; « accès console » : en plus, se connecte à la console du PBX (accès restreint). */
 export const isManager = (u) => ["manager", "console"].includes(u?.options?.role) && !u.options.disabled;
+/** Standardiste : ouvre, ferme ou renvoie le standard (tout le PBX) depuis son téléphone, le softphone ou l'appli */
+export const isStandardist = (u) => ["standard", "manager", "console"].includes(u?.options?.role) && !u.options.disabled;
+/** Renvoi immédiat (tous les appels) : réglable par code, touche, softphone, appli ou console */
+export const ALWAYS_TYPES = { none: "Aucun", voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe" };
 
 export function defaultUser(id) {
   return {
@@ -26,6 +30,8 @@ export function defaultUser(id) {
     status: "available",
     forwarding: {
       timeout: 20,
+      always: { type: "none", target: "" },
+      always_last: { type: "voicemail", target: "" },
       no_answer: { type: "voicemail", target: "" },
       busy: { type: "voicemail", target: "" },
       away: { type: "voicemail", target: "" },
@@ -47,6 +53,8 @@ export function fromRow(row) {
     dids: row.dids || [], status: STATUSES[row.status] ? row.status : "available",
     forwarding: {
       timeout: Number(fw.timeout) || d.forwarding.timeout,
+      always: { ...d.forwarding.always, ...fw.always },
+      always_last: { ...d.forwarding.always_last, ...fw.always_last },
       no_answer: { ...d.forwarding.no_answer, ...fw.no_answer },
       busy: { ...d.forwarding.busy, ...fw.busy },
       away: { ...d.forwarding.away, ...fw.away },
@@ -150,10 +158,10 @@ export function validateUser(input, current, ctx) {
       if (!Number.isInteger(t) || t < 5 || t > 120) throw new UserError("Délai de non-réponse : 5 à 120 secondes.", "forwarding.timeout");
       u.forwarding.timeout = t;
     }
-    for (const rule of ["no_answer", "busy", "away", "dnd"]) {
+    for (const rule of ["always", "no_answer", "busy", "away", "dnd"]) {
       if (!fw[rule]) continue;
       const type = fw[rule].type;
-      if (!DEST_TYPES[type]) throw new UserError("Destination inconnue.", `forwarding.${rule}`);
+      if (rule === "always" ? !ALWAYS_TYPES[type] : !DEST_TYPES[type]) throw new UserError("Destination inconnue.", `forwarding.${rule}`);
       let target = "";
       if (type === "extension") {
         target = String(fw[rule].target || "").trim();
@@ -167,6 +175,8 @@ export function validateUser(input, current, ctx) {
         target = n;
       }
       u.forwarding[rule] = { type, target };
+      // Dernier renvoi immédiat utilisé : la touche « Renvoi » le réactive d'un appui
+      if (rule === "always" && type !== "none") u.forwarding.always_last = { type, target };
     }
   }
   if (u.options.ring_mobile && !u.mobile) throw new UserError("Renseigne le mobile pour le faire sonner en même temps.", "mobile");
@@ -188,6 +198,7 @@ export function describeDest(d, u) {
 export function forwardSummary(u) {
   const out = [];
   if (u.options.disabled) out.push({ level: "bad", text: "Utilisateur désactivé" });
+  if (u.forwarding.always?.type && u.forwarding.always.type !== "none") out.push({ level: "warn", text: `Renvoi immédiat : tout vers ${describeDest(u.forwarding.always, u)}` });
   if (u.status === "away") out.push({ level: "warn", text: `Absent : tout vers ${describeDest(u.forwarding.away, u)}` });
   if (u.status === "dnd") out.push({ level: "warn", text: `Ne pas déranger : tout vers ${describeDest(u.forwarding.dnd, u)}` });
   if (u.status === "available") {
@@ -226,6 +237,8 @@ export function buildUsersDialplan(users) {
     const add = (lines, label = "") => lines.forEach((l, i) => body.push([i === 0 ? label : "", l]));
     if (u.options.disabled) {
       add(["Playback(ss-noservice)", "Hangup()"]);
+    } else if (u.forwarding.always?.type && u.forwarding.always.type !== "none") {
+      add(destLines(u.forwarding.always, u, "busy"));
     } else if (u.status === "away" || u.status === "dnd") {
       add(destLines(u.forwarding[u.status], u, "busy"));
     } else {
@@ -243,6 +256,10 @@ export function buildUsersDialplan(users) {
   for (const u of users) L.push(`exten => ${u.id},hint,PJSIP/${u.id}&PJSIP/${u.id}-web`);
   // Touche « Statut » du téléphone : voyant allumé si l'utilisateur est Absent ou en Ne pas déranger
   for (const u of users) L.push(`exten => status${u.id},hint,Custom:dnd${u.id}`);
+  // Touche « Renvoi » : voyant allumé si un renvoi immédiat est actif
+  for (const u of users) L.push(`exten => fwd${u.id},hint,Custom:fwd${u.id}`);
+  L.push("", "; Postes autorisés à ouvrir / fermer le standard (rôle Standardiste, Responsable ou Accès console)", "[std-allow]");
+  for (const u of users) if (isStandardist(u)) L.push(`exten => ${u.id},1,Return()`);
   L.push("", "; SDA attribuées directement à un utilisateur", "[did-map]");
   for (const u of users) for (const d of u.dids) L.push(`exten => ${d},1,Goto(users,${u.id},1)`);
   L.push("", "; *97 : messagerie de son propre poste", "[vm-access]");

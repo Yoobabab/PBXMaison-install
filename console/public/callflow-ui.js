@@ -4,7 +4,7 @@ import { renderFlowEditor, flowSummary } from "./flow-editor.js";
 import { renderPlanning, planningSummary } from "./planning-ui.js";
 import { resolvePlan, localNow } from "./planning-core.js";
 let h = null;
-const TABS = [["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
+const TABS = [["standard", "Standard", ""], ["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
   ["svi", "SVI", "ivr"], ["messageries", "Messageries", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["depannage", "Dépannage", ""], ["traceur", "Traceur", ""], ["renvois", "Renvois actifs", ""], ["planning", "Planning", "planning"]];
 const HIDDEN_TABS = ["planning", "traceur", "renvois"]; // planning : ouvert depuis Routages ; traceur et renvois : dans Dépannage
 const DIAG_TABS = [["depannage", "Test d'appel"], ["traceur", "Traceur"], ["renvois", "Renvois actifs"]];
@@ -30,6 +30,7 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   const head = `<div class="bar"><div class="grow"><h1>Gestion d'appels</h1><p class="sub" style="margin:0">Où vont les appels entrants : routages par numéro (avec leurs horaires), groupes, files d'attente, SVI.</p></div></div>
     <nav class="tabs">${TABS.filter(([s]) => !HIDDEN_TABS.includes(s) && (s !== "regles" || tab === "regles" || objs("rule").length)).map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab || (s === "routages" && tab === "planning") || (s === "depannage" && DIAG_TABS.some(([k]) => k === tab)) ? "on" : ""}">${l}</a>`).join("")}</nav>
     ${DIAG_TABS.some(([k]) => k === tab) ? `<nav class="subtabs">${DIAG_TABS.map(([k, l]) => `<a href="#/gestion/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}`;
+  if (tab === "standard") return renderStandard(head);
   if (tab === "depannage") return renderDiag(head, id);
   if (tab === "traceur") return renderTracer(head, id);
   if (tab === "renvois") return renderForwards(head);
@@ -48,6 +49,52 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   if (id) return kind === "prompt" ? renderPromptForm(head, id) : renderForm(head, kind, id === "nouveau" ? null : id);
   if (kind === "schedule") return renderSchedules(head);
   return renderList(head, kind);
+}
+
+// ---------------------------------------------------------------- Standard : ouvert / fermé / renvoyé pour tout le PBX
+async function renderStandard(head) {
+  let st; try { st = await h.api("GET", "/api/standard"); } catch (e) { h.app.innerHTML = `${head}<div class="flash bad">${esc(e.message)}</div>`; return; }
+  const pill = st.state === "open" ? `<span class="pill ok">Ouvert</span>` : `<span class="pill bad">${st.state === "closed" ? "Fermé" : "Renvoyé"}</span>`;
+  const since = st.since ? ` depuis le ${new Date(st.since).toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}${st.by ? ` (${esc(st.by)})` : ""}` : "";
+  const dids = [...new Set((cf.trunk_dids || []).map((d) => d.did))];
+  const skip = new Set(st.skip_dids || []);
+  h.app.innerHTML = `${h.takeFlash()}${head}
+    <div class="panel std-state ${st.state}"><div class="ph"><h2>${esc(st.label)}</h2>${pill}</div>
+      <div class="pad stack">
+        <p style="margin:0">${st.state === "open" ? "Les appels arrivent normalement, selon les routages et leurs horaires." : st.state === "closed" ? "Tous les numéros du PBX vont vers la destination « fermé » ci-dessous." : `Tous les numéros du PBX sont renvoyés vers <strong>${esc(fmtP(st.target))}</strong>.`}<span class="hint">${since}</span></p>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          ${st.state !== "closed" ? `<button type="button" class="btn danger" data-st="closed">Fermer le standard</button>` : ""}
+          ${st.state !== "open" ? `<button type="button" class="btn" data-st="open">Rouvrir le standard</button>` : ""}
+          <span class="std-fwd"><input id="stdnum" inputmode="tel" placeholder="06 12 34 56 78" value="${st.state === "forward" ? esc(fmtP(st.target)) : ""}"><button type="button" class="btn ghost" data-st="forward">Renvoyer vers ce numéro</button></span></div>
+        <p class="hint" style="margin:0">Aussi depuis un téléphone : touche « Standard » (Utilisateurs › Téléphone IP › Touches), <strong>*80</strong> fermer, <strong>*81</strong> rouvrir, <strong>*82</strong> + numéro renvoyer ; ou dans le softphone et l'appli.
+          Réservé aux utilisateurs Standardiste, Responsable ou Accès console${st.standardists.length ? ` : ${st.standardists.map((u) => `${esc(u.id)} ${esc(u.name)}`).join(", ")}` : " (aucun pour l'instant : fiche utilisateur › Général › Rôle)"}.</p></div></div>
+    <div class="panel"><div class="ph"><h2>Quand le standard est fermé</h2></div>
+      <form id="stdf" class="pad stack" novalidate><div class="form-msg"></div>
+        ${destPicker("closed_dest", st.closed_dest, { label: "Les appels vont vers", withPrompt: true })}
+        <div><span class="dl">Numéros non concernés</span>
+          ${dids.length ? `<div class="dids">${dids.map((d) => `<button type="button" class="chip ${skip.has(d) ? "on" : ""}" data-skip="${esc(d)}">${esc(fmtP(d))}</button>`).join("")}</div>
+          <span class="hint">Les numéros cochés ne ferment jamais (ligne directe, fax…). Les SDA attribuées à un utilisateur ne sont jamais concernées.</span>` : `<span class="hint">Aucun numéro déclaré sur les trunks.</span>`}</div>
+        <div class="form-near"></div><div class="actions"><button class="btn">Enregistrer</button></div></form></div>`;
+  wireDests(h.app); wirePromptFields?.(h.app);
+  h.app.querySelectorAll("[data-skip]").forEach((b) => (b.onclick = () => b.classList.toggle("on")));
+  h.app.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => {
+    const state = b.dataset.st;
+    if (state === "closed" && !confirm("Fermer le standard ? Tous les numéros du PBX iront vers la destination « fermé ».")) return;
+    try { const r = await h.api("POST", "/api/standard/state", { state, target: state === "forward" ? h.$("#stdnum").value : "" }); h.setFlash({ text: r.label }); }
+    catch (e) { h.setFlash({ cls: "bad", text: e.message }); }
+    renderStandard(head);
+  }));
+  const f = h.$("#stdf");
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const raw = h.formData(f);
+    const d = raw.closed_dest || {};
+    try {
+      await h.api("PUT", "/api/standard", { closed_dest: { type: d.type, target: d.target || "", ...(d.prompt_on && d.prompt ? { prompt: d.prompt } : {}) },
+        skip_dids: [...f.querySelectorAll("[data-skip].on")].map((x) => x.dataset.skip) });
+      h.setFlash({ text: "Réglages du standard enregistrés." }); renderStandard(head);
+    } catch (err) { h.showFormError(f, err); }
+  };
 }
 
 // ---------------------------------------------------------------- Horaires : généraux du PBX + par numéro

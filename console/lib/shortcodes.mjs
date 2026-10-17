@@ -20,6 +20,12 @@ export const SHORTCODES = {
   st_available: ["Statut : disponible", "Statut", "*30", ""],
   st_away: ["Statut : absent", "Statut", "*31", ""],
   st_dnd: ["Statut : ne pas déranger", "Statut", "*32", ""],
+  fwd_number: ["Renvoyer tous ses appels vers un numéro", "Renvois", "*21", "numéro"],
+  fwd_vm: ["Renvoyer tous ses appels vers sa messagerie", "Renvois", "*22", ""],
+  fwd_off: ["Annuler son renvoi", "Renvois", "#21", ""],
+  std_close: ["Fermer le standard (rôle Standardiste)", "Standard", "*80", ""],
+  std_open: ["Rouvrir le standard (rôle Standardiste)", "Standard", "*81", ""],
+  std_forward: ["Renvoyer le standard vers un numéro (rôle Standardiste)", "Standard", "*82", "numéro"],
   q_login: ["Se connecter à toutes ses files d'attente", "Files d'attente", "*62", ""],
   q_logout: ["Se déconnecter de toutes ses files d'attente", "Files d'attente", "*63", ""],
 };
@@ -88,8 +94,33 @@ export function buildShortcodesDialplan(c) {
     " same => n,Set(DEVICE_STATE(Custom:dnd${EXTEN:6})=${IF($[\"${NEW}\" = \"available\"]?NOT_INUSE:INUSE)})",
     " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()",
     " same => n(deny),Playback(pbx-invalid)", " same => n,Hangup()");
+  // Renvoi immédiat : noté dans la base Asterisk, la console l'applique (renvois, voyant de la touche « Renvoi ») dans les secondes qui suivent
+  const fwd = (v) => [` same => n,Set(DB(callikoe_fwd/${SRC})=${v})`, " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()"];
+  L.push(`exten => _${lit(c.fwd_number)}0[1-79]XXXXXXXX,1,Answer()`, ...fwd(`num:\${EXTEN:${c.fwd_number.length}}`));
+  L.push(`exten => ${lit(c.fwd_vm)},1,Answer()`, ...fwd("vm"));
+  L.push(`exten => ${lit(c.fwd_off)},1,Answer()`, ...fwd("off"));
+  // Touche « Renvoi » (BLF sur fwd<poste>) : appui = active le dernier renvoi utilisé, ou l'annule
+  L.push("exten => _fwdX.,1,Answer()", ` same => n,GotoIf($["${SRC}" != "\${EXTEN:3}"]?deny)`,
+    " same => n,Set(DB(callikoe_fwd/${EXTEN:3})=toggle)",
+    " same => n,Set(DEVICE_STATE(Custom:fwd${EXTEN:3})=${IF($[\"${DEVICE_STATE(Custom:fwd${EXTEN:3})}\" = \"NOT_INUSE\"]?INUSE:NOT_INUSE)})",
+    " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()", " same => n(deny),Playback(pbx-invalid)", " same => n,Hangup()");
+  // Standard (tout le PBX) : réservé aux postes du contexte [std-allow] (rôle Standardiste, Responsable, Accès console)
+  L.push(`exten => ${lit(c.std_close)},1,Answer()`, " same => n,Gosub(std-set,s,1(closed))");
+  L.push(`exten => ${lit(c.std_open)},1,Answer()`, " same => n,Gosub(std-set,s,1(open))");
+  L.push(`exten => _${lit(c.std_forward)}0[1-79]XXXXXXXX,1,Answer()`, ` same => n,Gosub(std-set,s,1(fwd:\${EXTEN:${c.std_forward.length}}))`);
+  // Touche « Standard » (BLF sur « standard ») : voyant allumé si fermé ou renvoyé ; appui = ferme, ou rouvre
+  L.push("exten => standard,hint,Custom:cxstd",
+    'exten => standard,1,Answer()', ' same => n,Set(CUR=${DB(callikoe/standard)})',
+    ' same => n,Gosub(std-set,s,1(${IF($["${CUR}" = "" | "${CUR}" = "open"]?closed:open)}))');
   L.push(`exten => ${lit(c.q_login)},1,Answer()`, ` same => n,UnpauseQueueMember(,Local/${SRC}@queue-ring/n)`, " same => n,Playback(agent-loginok)", " same => n,Hangup()");
   L.push(`exten => ${lit(c.q_logout)},1,Answer()`, ` same => n,PauseQueueMember(,Local/${SRC}@queue-ring/n)`, " same => n,Playback(agent-loggedoff)", " same => n,Hangup()");
+  L.push("", "; Change l'état du standard (ARG1 = open | closed | fwd:<numéro>) si le poste y est autorisé", "[std-set]",
+    `exten => s,1,Set(LOCAL(ME)=${SRC})`,
+    " same => n,GotoIf(${DIALPLAN_EXISTS(std-allow,${ME},1)}?ok)",
+    " same => n,Playback(pbx-invalid)", " same => n,Hangup()",
+    " same => n(ok),Set(DB(callikoe/standard)=${ARG1})", " same => n,Set(DB(callikoe/standard_by)=${ME})",
+    ' same => n,Set(DEVICE_STATE(Custom:cxstd)=${IF($["${ARG1}" = "open"]?NOT_INUSE:INUSE)})',
+    " same => n,Wait(0.5)", " same => n,Playback(beep)", " same => n,Hangup()");
   L.push("");
   return L.join("\n");
 }

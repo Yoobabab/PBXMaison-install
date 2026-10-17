@@ -558,6 +558,8 @@ export function createAdminService({ db, ami, pbx }) {
   function start() {
     const tick = (fn, ms) => setInterval(() => { if (isConfigured()) fn().catch((e) => console.error(e.message)); }, ms).unref();
     tick(pollStatusCodes, 4000);
+    tick(() => pbx.pollForwardCodes(), 4000);
+    tick(() => pbx.pollStandard(), 3000);
     tick(monitor, 30_000);
     tick(async () => {
       const b = await backupSettings();

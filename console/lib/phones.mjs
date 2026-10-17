@@ -62,7 +62,10 @@ export const TRANSPORTS = { udp: ["UDP (5060)", 0, 5060], tcp: ["TCP (5060)", 1,
 /** Sonnerie selon le type d'appel (en-tête Alert-Info envoyé par le PBX) */
 export const RING_TYPES = { interne: "Appel interne (collègue)", externe: "Appel externe (client)", groupe: "Groupe d'appel", file: "File d'attente", svi: "Via le SVI (standard automatique)" };
 export const RINGERS = { "": "Sonnerie par défaut du téléphone", 1: "Sonnerie 1", 2: "Sonnerie 2", 3: "Sonnerie 3", 4: "Sonnerie 4", 5: "Sonnerie 5", 6: "Sonnerie 6", 7: "Sonnerie 7", 8: "Sonnerie 8" };
-export const KEY_TYPES = { line: "Ligne", blf: "BLF (supervision + interception)", status: "Statut Ne pas déranger (voyant + bascule)", speed: "Numérotation rapide", none: "Aucune" };
+export const KEY_TYPES = { line: "Ligne", blf: "BLF (supervision + interception)", status: "Statut Ne pas déranger (voyant + bascule)", fwd: "Renvoi (voyant + bascule)",
+  standard: "Standard ouvert / fermé (rôle Standardiste)", speed: "Numérotation rapide", none: "Aucune" };
+/** Libellé par défaut des touches à bascule */
+export const KEY_DEFAULT_LABEL = { status: "Ne pas déranger", fwd: "Renvoi", standard: "Standard" };
 
 /** Modules d'extension Yealink : touches par page, pages, téléphones compatibles (préfixe du modèle). */
 export const EXPANSIONS = {
@@ -127,7 +130,7 @@ function validKey(k, i, ctx, field, word) {
     if (!label) throw new PhoneError(`${word} ${i + 1} : indique un libellé.`, `${field}.${i}`);
     return { type, value: value.replace(/[\s.]/g, ""), label };
   }
-  if (type === "status") return { type, value: "", label: label || "Ne pas déranger" };
+  if (KEY_DEFAULT_LABEL[type]) return { type, value: "", label: label || KEY_DEFAULT_LABEL[type] };
   return { type, value: "", label: type === "line" ? label : "" };
     }
 
@@ -316,6 +319,10 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     if (k.type === "line") return [v(`${p}.type`, 15), v(`${p}.line`, 1), v(`${p}.value`, ""), v(`${p}.label`, k.label || "")];
     if (k.type === "blf") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label || names.get(k.value) || k.value)];
     if (k.type === "status") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `status${user.id}`), v(`${p}.label`, k.label || "Ne pas déranger")];
+    // Touche « Renvoi » : voyant = renvoi immédiat actif, appui = active le dernier renvoi ou l'annule
+    if (k.type === "fwd") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, `fwd${user.id}`), v(`${p}.label`, k.label || "Renvoi")];
+    // Touche « Standard » : voyant = standard fermé ou renvoyé, appui = ferme ou rouvre (refusé sans le rôle Standardiste)
+    if (k.type === "standard") return [v(`${p}.type`, 16), v(`${p}.line`, 1), v(`${p}.value`, "standard"), v(`${p}.label`, k.label || "Standard")];
     if (k.type === "speed") return [v(`${p}.type`, 13), v(`${p}.line`, 1), v(`${p}.value`, k.value), v(`${p}.label`, k.label)];
     return [v(`${p}.type`, 0), v(`${p}.value`, ""), v(`${p}.label`, "")];
   };

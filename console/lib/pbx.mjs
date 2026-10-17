@@ -21,6 +21,7 @@ import { defaultSecurity } from "./security.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
 import { sees, nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 import { readTheme, wallpaperName } from "./theme.mjs";
+import { defaultStandard, parseState, stateValue, validateState, validateConfig as validateStandardConfig, buildStandardDialplan, describeState } from "./standard.mjs";
 
 export const EMERGENCY = ["15", "17", "18", "112", "114", "115", "116000", "119", "191", "196", "197"];
 const FORMATS = ["national", "e164", "e164_plus"];
@@ -964,7 +965,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const model = { users: byId, objects, soundsDir: soundsDir(), tz: tz() };
     writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
     const contacts = await loadContacts();
-    writeAtomic(path.join(dir, "extensions_callflow.conf"), buildCallflowDialplan(model) + buildPhonebookDialplan(contacts) + (ext.dialplan || ""));
+    const std = await db.getSetting("standard", defaultStandard());
+    writeAtomic(path.join(dir, "extensions_callflow.conf"), buildCallflowDialplan(model) + buildStandardDialplan(std, model) + buildPhonebookDialplan(contacts) + (ext.dialplan || ""));
     writeAtomic(path.join(dir, "queues_callikoe.conf"), buildQueues(model));
     // Musiques d'attente des files : un dossier par file contenant un lien vers l'annonce choisie
     for (const c of mohClasses(model)) {
@@ -991,6 +993,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     }
     // Voyant de la touche « Statut » de chaque téléphone (rouge = ne pas déranger ou absent)
     for (const u of users) { try { await ami.command(`devstate change Custom:dnd${u.id} ${u.status === "available" ? "NOT_INUSE" : "INUSE"}`); } catch { /* Asterisk arrêté */ } }
+    // Voyant de la touche « Renvoi » (renvoi immédiat actif) et de la touche « Standard » (fermé ou renvoyé)
+    for (const u of users) { try { await ami.command(`devstate change Custom:fwd${u.id} ${u.forwarding.always?.type && u.forwarding.always.type !== "none" ? "INUSE" : "NOT_INUSE"}`); } catch { /* idem */ } }
+    try { await ami.command(`devstate change Custom:cxstd ${std.state === "open" ? "NOT_INUSE" : "INUSE"}`); } catch { /* idem */ }
     try { await ami.command("dialplan reload"); } catch { /* rechargé au démarrage d'Asterisk */ }
     try { await ami.command("module reload app_voicemail.so"); } catch { /* idem */ }
     try { await ami.command("moh reload"); } catch { /* idem */ }
@@ -1359,7 +1364,72 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     return "";
   }
 
+  // ------------------------------------------------------------------ Standard (ouvert / fermé / renvoyé) et renvois immédiats par code
+  const astdbGet = async (family, key) => {
+    try { const out = (await ami.command(`database get ${family} ${key}`)).join("\n"); return /Value:\s*(\S+)/.exec(out)?.[1] || ""; } catch { return null; }
+  };
+  async function getStandard() {
+    const std = await db.getSetting("standard", defaultStandard());
+    return { ...defaultStandard(), ...std, label: describeState(std) };
+  }
+  /** Change l'état du standard (console, softphone, appli) : appliqué tout de suite par Asterisk */
+  async function setStandardState(input, by) {
+    const st = validateState(input);
+    await ami.command(`database put callikoe standard ${stateValue(st)}`);
+    await ami.command(`database put callikoe standard_by console`);
+    try { await ami.command(`devstate change Custom:cxstd ${st.state === "open" ? "NOT_INUSE" : "INUSE"}`); } catch { /* voyant au prochain passage */ }
+    const cur = await db.getSetting("standard", defaultStandard());
+    const next = { ...defaultStandard(), ...cur, ...st, since: new Date().toISOString(), by: by || "" };
+    await db.setSetting("standard", next);
+    await db.query("INSERT INTO pbxmaison_audit (email, ip, action, ok, detail) VALUES ($1, '', $2, true, '')", [by || "", describeState(next)]).catch(() => {});
+    return getStandard();
+  }
+  async function setStandardConfig(input, by) {
+    const cur = await db.getSetting("standard", defaultStandard());
+    const next = validateStandardConfig(input || {}, cur, await cfContext(null));
+    await db.setSetting("standard", next);
+    await applyDialplan();
+    void by;
+    return getStandard();
+  }
+  /** État changé depuis un poste (touche « Standard », *80 / *81 / *82) : recopié dans la console (qui, depuis quand, journal) */
+  async function pollStandard() {
+    const v = await astdbGet("callikoe", "standard");
+    if (v === null) return;
+    const st = parseState(v);
+    const cur = await db.getSetting("standard", defaultStandard());
+    if (st.state === (cur.state || "open") && st.target === (cur.target || "")) return;
+    if (!v && (cur.state || "open") !== "open") {   // base Asterisk vide (réinstallation) : on remet l'état connu de la console
+      try { await ami.command(`database put callikoe standard ${stateValue(cur)}`); } catch { /* prochain passage */ }
+      return;
+    }
+    const who = await astdbGet("callikoe", "standard_by");
+    const by = who && who !== "console" ? `poste ${who}` : cur.by;
+    const next = { ...defaultStandard(), ...cur, ...st, since: new Date().toISOString(), by };
+    await db.setSetting("standard", next);
+    await db.query("INSERT INTO pbxmaison_audit (email, ip, action, ok, detail) VALUES ($1, '', $2, true, 'depuis le téléphone')", [by || "", describeState(next)]).catch(() => {});
+  }
+  /** Renvoi immédiat changé par code ou touche (*21, *22, #21, touche « Renvoi ») : appliqué comme depuis la console */
+  async function pollForwardCodes() {
+    let lines;
+    try { lines = await ami.command("database show callikoe_fwd"); } catch { return; }
+    const todo = [];
+    for (const l of lines) { const m = /^\/callikoe_fwd\/(\d{3})\s*:\s*(\S+)/.exec(l.trim()); if (m) todo.push([m[1], m[2]]); }
+    if (!todo.length) return;
+    try { await ami.command("database deltree callikoe_fwd"); } catch { /* prochain passage */ }
+    for (const [ext, v] of todo) {
+      try {
+        const u = await getUser(ext);
+        const on = u.forwarding.always?.type && u.forwarding.always.type !== "none";
+        const always = v.startsWith("num:") ? { type: "external", target: v.slice(4) } : v === "vm" ? { type: "voicemail", target: "" }
+          : v === "off" ? { type: "none", target: "" } : v === "toggle" ? (on ? { type: "none", target: "" } : (u.forwarding.always_last || { type: "voicemail", target: "" })) : null;
+        if (always) await updateUser(ext, { forwarding: { always } }, "code ou touche du téléphone");
+      } catch (e) { console.error(`Renvoi ${ext} :`, e.message); try { await applyDialplan(); } catch { /* voyant remis au prochain passage */ } }
+    }
+  }
+
   return {
+    getStandard, setStandardState, setStandardConfig, pollStandard, pollForwardCodes,
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, deleteImpact, findConsoleUser, consoleUserActive,

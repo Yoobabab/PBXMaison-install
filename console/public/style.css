@@ -590,7 +590,7 @@ body.no-side .shell{margin-left:0}
 .phv-k span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;padding:5px 8px;border-radius:6px;background:#3a5f8f22;border:1px solid transparent}
 .phv-k em{font-style:normal;color:#8c909b}
 .phv-k b{font-size:10px;color:#8c909b;font-weight:600}
-.phv-k.t-blf i{background:#2e9b55}.phv-k.t-status i{background:#c8372d}.phv-k.t-speed i{background:#3b74c4}.phv-k.t-line i{background:#a7aab3}
+.phv-k.t-blf i{background:#2e9b55}.phv-k.t-status i{background:#c8372d}.phv-k.t-fwd i{background:#e58a1f}.phv-k.t-standard i{background:#8b5cf6}.phv-k.t-speed i{background:#3b74c4}.phv-k.t-line i{background:#a7aab3}
 .phv-k.t-none span{background:none;border:1px dashed #50535c}
 .phv-k:hover span,.phv-k:focus-visible span{border-color:#9fb6d8}
 .phv-k.sel span{border-color:#fff;background:#ffffff26}
@@ -829,3 +829,10 @@ main h1::after,#app h1::after{content:"";display:block;width:44px;height:4px;bor
 .kpis>.kpi:first-child .cx-bar{background:rgba(255,255,255,.3)}.kpis>.kpi:first-child .cx-bar i{background:#fff}
 .kpi-ic{background:var(--accent-soft);color:var(--accent)}
 .ph h2::before{content:"";display:inline-block;width:4px;height:14px;border-radius:2px;background:var(--grad);margin-right:9px;vertical-align:-1px}
+
+/* Standard (Gestion d'appels › Standard) */
+.std-state.closed,.std-state.forward{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.15)}
+.std-fwd{display:inline-flex;gap:8px;flex-wrap:wrap}
+.std-fwd input{width:170px}
+.dids{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
+a.std-banner{display:block;text-decoration:none;color:inherit;margin-bottom:14px}

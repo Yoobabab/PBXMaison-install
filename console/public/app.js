@@ -452,6 +452,7 @@ async function renderDashboard() {
   const left = Math.floor((new Date(d.pbx.expires_at) - Date.now()) / 86400000);
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>${esc(d.pbx.name)}</h1>
     <p class="sub" style="margin:0">${esc(d.pbx.company)} · <span class="mono">${esc(d.pbx.fqdn)}</span></p></div></div>
+    ${d.standard && d.standard.state !== "open" ? `<a class="flash warn std-banner" href="#/gestion/standard"><strong>${esc(d.standard.label)}</strong>${d.standard.by ? ` · par ${esc(d.standard.by)}` : ""} — les appels n'arrivent pas normalement. Gérer ›</a>` : ""}
     <div class="cards dash-cards">
       <a class="card" href="#/trunks"><div class="k">Trunks enregistrés</div><div class="v">${d.trunks.registered}<small> / ${d.trunks.total}</small></div>
         <div class="s">${d.trunks.total === 0 ? "Aucun trunk : ajoute ton opérateur" : d.trunks.registered === d.trunks.total ? "Tous opérationnels" : "Au moins un trunk en défaut"}</div></a>
@@ -957,10 +958,10 @@ const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { dateS
 const optList = (obj, cur, labelOf = (v) => Array.isArray(v) ? v[0] : v) =>
   Object.entries(obj).map(([k, v]) => `<option value="${esc(k)}" ${String(k) === String(cur) ? "selected" : ""}>${esc(labelOf(v))}</option>`).join("");
 
-function destField(name, label, dest, users, selfId) {
+function destField(name, label, dest, users, selfId, labels = DEST_LABELS) {
   const others = users.filter((x) => x.id !== selfId);
   return `<div class="dest" data-dest="${name}"><span class="dl">${label}</span>
-    <div class="row"><select name="${name}.type">${Object.entries(DEST_LABELS).map(([k, l]) => `<option value="${k}" ${dest.type === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <div class="row"><select name="${name}.type">${Object.entries(labels).map(([k, l]) => `<option value="${k}" ${dest.type === k ? "selected" : ""}>${l}</option>`).join("")}</select>
     <select name="${name}.target" data-for="extension" ${dest.type === "extension" ? "" : "hidden disabled"}>
       <option value="">— Choisir —</option>${others.map((x) => `<option value="${esc(x.id)}" ${dest.type === "extension" && dest.target === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select>
     <input name="${name}.target" data-for="external" inputmode="tel" placeholder="06 12 34 56 78" value="${dest.type === "external" ? esc(fmtPhone(dest.target)) : ""}" ${dest.type === "external" ? "" : "hidden disabled"}></div></div>`;
@@ -1019,8 +1020,8 @@ async function renderUser(id, tab = "general") {
   if (tab === "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label>Numéro de poste<input value="${esc(u.id)}" readonly></label>
-      <label>Rôle<select name="options.role">${[["user", "Utilisateur"], ["manager", "Responsable"], ["console", "Accès console (client)"]].map(([k, l]) => `<option value="${k}" ${(u.options.role || "user") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-        <span class="hint">Responsable : modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
+      <label>Rôle<select name="options.role">${[["user", "Utilisateur"], ["standard", "Standardiste"], ["manager", "Responsable"], ["console", "Accès console (client)"]].map(([k, l]) => `<option value="${k}" ${(u.options.role || "user") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <span class="hint">Standardiste : ouvre, ferme ou renvoie le standard de tout le PBX (touche « Standard », softphone, appli, *80 / *81 / *82), même sans faire partie des groupes ou files. Responsable : en plus, modifie les plannings d'appels depuis son softphone et l'appli. Accès console : en plus, se connecte à la console de ce PBX (accès restreint : utilisateurs, téléphones, gestion d'appels, annuaire) avec l'e-mail de sa fiche et son mot de passe du softphone.</span></label>
       <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
@@ -1042,6 +1043,9 @@ async function renderUser(id, tab = "general") {
     body = `<form method="post" id="uf" novalidate class="pad stack"><div class="form-msg"></div>
       <div><span class="dl">Statut actuel</span><div class="seg">${Object.entries(STATUS_LABELS).map(([k, l]) => `<label class="${u.status === k ? "on" : ""}"><input type="radio" name="status" value="${k}" ${u.status === k ? "checked" : ""}>${l}</label>`).join("")}</div>
         <span class="hint">Le statut choisit les règles appliquées ci-dessous.</span></div>
+      <fieldset><legend>Renvoi immédiat ${fw.always?.type && fw.always.type !== "none" ? '<span class="pill wait">Actif</span>' : ""}</legend>
+        ${destField("forwarding.always", "Renvoyer tous les appels vers (quel que soit le statut)", fw.always || { type: "none", target: "" }, users, u.id, { none: "Aucun renvoi", voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe" })}
+        <span class="hint">Aussi depuis le poste : touche « Renvoi » (Téléphone IP › Touches), *21 + numéro, *22 vers la messagerie, #21 pour annuler ; et dans le softphone ou l'appli.</span></fieldset>
       <fieldset><legend>Disponible</legend>
         <label class="short">Délai de non-réponse<span class="suffix"><input name="forwarding.timeout" type="number" min="5" max="120" value="${esc(fw.timeout)}"><span>secondes</span></span></label>
         ${destField("forwarding.no_answer", "Si pas de réponse, transférer vers", fw.no_answer, users, u.id)}
@@ -1438,11 +1442,11 @@ function wireKeys(u, users) {
       ${k.type === "blf" ? `<label>Collègue supervisé<select data-pv="value"><option value="">— Choisir —</option>${others.map((x) => `<option value="${esc(x.id)}" ${k.value === x.id ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label>` : ""}
       ${k.type === "speed" ? `<label>Numéro<input data-pv="value" value="${esc(k.value)}" inputmode="tel" placeholder="06 12 34 56 78 ou 201"></label>` : ""}
       ${k.type === "none" ? "" : `<label>Libellé à l'écran<input data-pv="label" value="${esc(k.label)}" maxlength="24" placeholder="${k.type === "line" ? "facultatif" : ""}"></label>`}
-      <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
+      <p class="hint" style="margin:0">${{ blf: "S'allume quand le collègue est en ligne, clignote quand il sonne : un appui intercepte l'appel.", status: "Voyant allumé quand tu es Absent ou en Ne pas déranger (même changé depuis la console) ; un appui bascule le statut.", fwd: "Voyant allumé quand un renvoi immédiat est actif ; un appui réactive le dernier renvoi (portable, messagerie…) ou l'annule. Aussi par code : *21 + numéro, *22 messagerie, #21 annuler.", standard: "Voyant allumé quand le standard est fermé ou renvoyé ; un appui ferme ou rouvre le standard pour tout le PBX. Réservé aux rôles Standardiste, Responsable et Accès console (fiche › Général › Rôle).", speed: "Un appui compose le numéro.", line: "Affiche la ligne du poste.", none: "Touche libre." }[k.type] || ""}</p>
       <div class="row"><button type="button" class="btn ghost sm" data-clear>Vider la touche</button>
         <button type="button" class="btn ghost sm" data-multi title="Remplir les touches suivantes avec des BLF, à partir de celle-ci">Série de BLF</button></div>
       <div id="blfmulti"></div>`;
-    pnl.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { setKey(m, i, { type: b.dataset.t, value: "", label: b.dataset.t === "status" ? "Ne pas déranger" : "" }); drawAll(); });
+    pnl.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { setKey(m, i, { type: b.dataset.t, value: "", label: ({ status: "Ne pas déranger", fwd: "Renvoi", standard: "Standard" })[b.dataset.t] || "" }); drawAll(); });
     pnl.querySelectorAll("[data-pv]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
       const k2 = { ...K(m, i), [el.dataset.pv]: el.value };
       if (el.dataset.pv === "value" && k2.type === "blf") k2.label = others.find((x) => x.id === el.value)?.name || "";
@@ -1496,7 +1500,7 @@ function wireKeys(u, users) {
       row.querySelectorAll("[data-f]").forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
         keys[i][el.dataset.f] = el.value;
         if (el.dataset.f === "label") { drawVisual(); keepKeys(); }
-        if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = keys[i].type === "status" ? "Ne pas déranger" : ""; draw(); }
+        if (el.dataset.f === "type") { keys[i].value = ""; keys[i].label = ({ status: "Ne pas déranger", fwd: "Renvoi", standard: "Standard" })[keys[i].type] || ""; draw(); }
         if (el.dataset.f === "value" && keys[i].type === "blf") { keys[i].label = others.find((x) => x.id === el.value)?.name || ""; draw(); }
         keepKeys();
       }));

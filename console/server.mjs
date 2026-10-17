@@ -15,7 +15,7 @@ import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken,
   newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
-import { isManager } from "./lib/users.mjs";
+import { isManager, isStandardist } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
 import { migrateChat, createChat } from "./lib/chat.mjs";
@@ -394,6 +394,7 @@ export async function buildApp({ db, ami } = {}) {
       extensions: { total: exts.length, registered: exts.filter((e) => e.registered).length },
       calls: { available: calls.available, active: calls.calls.length },
       activation_code: activationCode(),
+      standard: await pbx.getStandard().then(({ state, target, since, by, label }) => ({ state, target, since, by, label })).catch(() => null),
     };
   });
 
@@ -590,7 +591,7 @@ export async function buildApp({ db, ami } = {}) {
     id: u.id, name: u.name, first_name: u.first_name, last_name: u.last_name, status: u.status, email: u.email,
     mobile: u.mobile, dids: u.dids, outbound_cid: u.outbound_cid,
     forwarding: u.forwarding, voicemail: { enabled: u.voicemail.enabled, pin: u.voicemail.pin, skip_pin: u.voicemail.skip_pin },
-    ring_mobile: u.options.ring_mobile, manager: isManager(u),
+    ring_mobile: u.options.ring_mobile, manager: isManager(u), standardist: isStandardist(u),
   });
   app.get("/api/u/me", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
@@ -608,7 +609,28 @@ export async function buildApp({ db, ami } = {}) {
       server: { host: sipServer().host, voicemail: "*97" },
       contacts: await team(u.id),
       rooms: (await pbx.listObjects("conf")).map((o) => ({ number: o.number, name: o.name, pin: !!o.data.pin })),
+      standard: isStandardist(u) ? await pbx.getStandard().then(({ state, target, since, by, label }) => ({ state, target, since, by, label })) : null,
     };
+  });
+  // Touches « Renvoi » et « Standard » du softphone / de l'appli : état actuel (peut changer depuis un poste avec *21, *80…)
+  app.get("/api/u/keys", { preHandler: requireWebUser }, async (req) => {
+    const u = await pbx.getUser(webUser(req).ext);
+    const std = isStandardist(u) ? await pbx.getStandard() : null;
+    return { forward: u.forwarding.always, standard: std && { state: std.state, target: std.target, since: std.since, by: std.by, label: std.label } };
+  });
+  // Standard (tout le PBX) : ouvert / fermé / renvoyé, par les utilisateurs Standardiste, Responsable ou Accès console
+  app.get("/api/u/standard", { preHandler: requireWebUser }, async (req) => {
+    const u = await pbx.getUser(webUser(req).ext);
+    if (!isStandardist(u)) throw Object.assign(new UserError("Réservé aux standardistes : demande à l'administrateur du PBX de te donner ce rôle."), { status: 403 });
+    const { state, target, since, by, label } = await pbx.getStandard();
+    return { state, target, since, by, label };
+  });
+  app.post("/api/u/standard", { preHandler: requireWebUser }, async (req) => {
+    const s = webUser(req);
+    const u = await pbx.getUser(s.ext);
+    if (!isStandardist(u)) throw Object.assign(new UserError("Réservé aux standardistes : demande à l'administrateur du PBX de te donner ce rôle."), { status: 403 });
+    const { state, target, since, by, label } = await pbx.setStandardState(req.body || {}, `poste ${s.ext} (${s.imp ? "incarnation" : "softphone / appli"})`);
+    return { state, target, since, by, label };
   });
   // Plannings d'appels : modifiables par les utilisateurs « Responsable » (fiche utilisateur › Général › Rôle)
   const PLAN_FIELDS = ["scenarios", "branches", "outside", "week", "week_b", "alternate", "ref_monday", "holidays_fr", "holiday_scenario", "days", "override"];
@@ -743,6 +765,13 @@ export async function buildApp({ db, ami } = {}) {
     ({ ok: true, impact: await pbx.deleteExtension(req.params.id, req.query?.force === "1", currentUser(req).email) }));
 
   // ---------------------------------------------------------------- Gestion d'appels
+  // Standard : état (ouvert / fermé / renvoyé) et réglages (destination quand fermé, numéros non concernés)
+  app.get("/api/standard", { preHandler: requireUser }, async () => {
+    const users = await pbx.loadUsers();
+    return { ...(await pbx.getStandard()), standardists: users.filter(isStandardist).map((u) => ({ id: u.id, name: `${u.first_name} ${u.last_name}`.trim() || `Poste ${u.id}`, role: u.options.role })) };
+  });
+  app.post("/api/standard/state", { preHandler: requireUser }, async (req) => pbx.setStandardState(req.body || {}, currentUser(req)?.email || "console"));
+  app.put("/api/standard", { preHandler: requireUser }, async (req) => pbx.setStandardConfig(req.body || {}, currentUser(req)?.email || ""));
   app.get("/api/callflow", { preHandler: requireUser }, async () => ({
     objects: await pbx.listObjects(), users: (await pbx.listExtensions()).map((u) => ({ id: u.id, name: u.name, status: u.status, disabled: u.disabled, registered: u.registered, voicemail: true, dids: u.dids || [] })),
     options: cfOptions, timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris",

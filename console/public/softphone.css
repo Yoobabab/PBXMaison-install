@@ -383,3 +383,29 @@ label.ck input{width:auto}
 .sp-dialpage .key{background:var(--panel);box-shadow:0 0 0 1px var(--line)}.sp-dialpage .key:hover{background:var(--accent-soft)}
 .ltabs,.stabs{overflow-y:hidden;scrollbar-width:none}
 .ltabs::-webkit-scrollbar,.stabs::-webkit-scrollbar{display:none}
+
+/* Touches « Renvoi » et « Standard » (comme les touches d'un téléphone de bureau : voyant allumé quand actif) */
+.sp-keys{display:flex;gap:10px;flex-wrap:wrap;padding:12px 24px 0}
+.sp-key{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:12px;padding:8px 14px 8px 10px;font:inherit;cursor:pointer;text-align:left;min-width:150px}
+.sp-key:hover{border-color:var(--accent)}
+.sp-key i{width:12px;height:12px;border-radius:50%;background:var(--p-off);flex:none;box-shadow:inset 0 0 0 2px rgba(0,0,0,.08)}
+.sp-key span{display:flex;flex-direction:column;line-height:1.2}
+.sp-key b{font-size:14px}
+.sp-key small{font-size:12px;color:var(--muted)}
+.sp-key.fwd.lit{border-color:#e58a1f;background:rgba(229,138,31,.10)}
+.sp-key.fwd.lit i{background:#e58a1f;box-shadow:0 0 0 4px rgba(229,138,31,.22)}
+.sp-key.std.lit{border-color:#8b5cf6;background:rgba(139,92,246,.10)}
+.sp-key.std.lit i{background:#8b5cf6;box-shadow:0 0 0 4px rgba(139,92,246,.22)}
+.sp-key.lit small{color:var(--ink);font-weight:600}
+.keymenu{top:140px;bottom:auto;left:calc(var(--rail) + 24px);width:300px}
+.km-l{display:flex;flex-direction:column;gap:2px}
+.km-l small{font-size:12px;font-weight:400;color:var(--muted)}
+.km-num{padding:8px 10px 4px;display:flex;flex-direction:column;gap:6px}
+.km-num .row-c{display:flex;gap:8px}
+.km-num input{flex:1;min-width:0}
+.km-code{margin:6px 10px 4px;font-size:12px}
+@media (max-width:760px){
+  .sp-keys{padding:10px 12px 0;gap:8px}
+  .sp-key{flex:1;min-width:0}
+  .keymenu{top:auto!important;bottom:70px;left:8px!important;right:8px;width:auto}
+}

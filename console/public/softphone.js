@@ -220,6 +220,7 @@ const setTitle = () => { document.title = `${me.user.id} · ${me.user.name} · S
 
 async function refreshTeam() {
   if (document.hidden) return;
+  refreshKeys();
   try { contacts = (await api("GET", "/api/u/team")).contacts; } catch (e) { if (e.status === 401) return renderLogin("Session expirée : reconnecte-toi."); return; }
   if (page === "equipe") drawTeam();
 }
@@ -271,6 +272,7 @@ function renderShell() {
         <span class="reg ${regState}" id="reg" title="Connexion au PBX">${regLabel()}</span>
         <button class="btn sp-dialbtn" id="opendial" title="Ouvrir le clavier">${I.keypad()}<span>Appeler</span></button>
       </header>
+      <div id="keys"></div>
       <div id="banner"></div>
       <main id="page"></main>
     </div>
@@ -286,6 +288,7 @@ function renderShell() {
   $("#scrim").onclick = () => openDrawer(false);
   $("#mebtn").onclick = (e) => { e.stopPropagation(); toggleMenu(); };
   renderBanner();
+  renderKeys();
   renderDrawer();
   badges();
 }
@@ -333,6 +336,66 @@ function toggleMenu(force) {
   if ($("#logout")) $("#logout").onclick = async () => { try { ua?.stop(); } catch { /* */ } ua = null; await api("POST", "/api/u/logout"); me.impersonated_by ? window.close() : renderLogin(); };
   setTimeout(() => document.addEventListener("click", () => toggleMenu(false), { once: true }));
 }
+// ------------------------------------------------------------------ Touches « Renvoi » (mon poste) et « Standard » (tout le PBX)
+// Même effet que les codes *21 / *22 / #21 et *80 / *81 / *82 tapés sur un poste, et que les touches du téléphone de bureau.
+const fwdOn = () => (me.user.forwarding.always?.type || "none") !== "none";
+function fwdLabel() {
+  const a = me.user.forwarding.always || {};
+  if (a.type === "voicemail") return "vers ma messagerie";
+  if (a.type === "external") return `vers ${fmtNum(a.target)}`;
+  if (a.type === "extension") return `vers ${nameOf(a.target) || a.target}`;
+  return "désactivé";
+}
+const stdOn = () => me.standard && me.standard.state !== "open";
+function renderKeys() {
+  const k = $("#keys"); if (!k || !me) return;
+  k.innerHTML = `<div class="sp-keys">
+    <button class="sp-key fwd ${fwdOn() ? "lit" : ""}" id="kfwd" title="Renvoyer tous mes appels (code *21 / *22, annuler #21)"><i></i><span><b>Renvoi</b><small>${esc(fwdLabel())}</small></span></button>
+    ${me.standard ? `<button class="sp-key std ${stdOn() ? "lit" : ""}" id="kstd" title="Ouvrir, fermer ou renvoyer le standard (codes *80 / *81 / *82)"><i></i><span><b>Standard</b><small>${esc(me.standard.state === "open" ? "ouvert" : me.standard.state === "closed" ? "fermé" : `renvoyé vers ${fmtNum(me.standard.target)}`)}</small></span></button>` : ""}
+  </div>`;
+  $("#kfwd").onclick = (e) => { e.stopPropagation(); keyMenu("fwd"); };
+  $("#kstd")?.addEventListener("click", (e) => { e.stopPropagation(); keyMenu("std"); });
+}
+async function refreshKeys() {
+  try { const r = await api("GET", "/api/u/keys"); me.user.forwarding.always = r.forward; me.standard = r.standard; } catch { return; }
+  renderKeys();
+}
+function keyMenu(kind) {
+  const m = $("#menu");
+  const isF = kind === "fwd";
+  const cur = isF ? (me.user.forwarding.always?.type || "none") : me.standard.state;
+  const last = me.user.forwarding.always_last || {};
+  const lastNum = isF ? (last.type === "external" ? last.target : (me.user.forwarding.always?.type === "external" ? me.user.forwarding.always.target : me.user.mobile || "")) : (me.standard.target || "");
+  const opt = (v, l, sub = "") => `<button class="pm-it ${cur === v ? "on" : ""}" data-kv="${v}"><span class="km-l">${l}${sub ? `<small>${esc(sub)}</small>` : ""}</span>${cur === v ? '<span class="ck">✓</span>' : ""}</button>`;
+  m.innerHTML = `<div class="pmenu panel keymenu">
+    <div class="pm-head"><div><strong>${isF ? "Renvoi de mes appels" : "Standard du PBX"}</strong><div class="s">${isF ? "Tous les appels vers mon poste" : "Tous les appels qui arrivent au standard"}</div></div></div>
+    ${isF ? opt("none", "Pas de renvoi") + (me.user.voicemail.enabled ? opt("voicemail", "Vers ma messagerie") : "") : opt("open", "Ouvert") + opt("closed", "Fermé", "message ou messagerie prévus par l'administrateur")}
+    <form class="km-num" id="kmnum"><label class="s">${isF ? "Vers un numéro" : "Renvoyer vers un numéro"}</label>
+      <div class="row-c"><input id="kmn" inputmode="tel" placeholder="06 12 34 56 78" value="${esc(fmtNum(lastNum))}"><button class="btn sm" type="submit">${cur === (isF ? "external" : "forward") ? "Changer" : "Renvoyer"}</button></div></form>
+    <p class="hint km-code">Depuis un poste : ${isF ? "<b>*21</b> + numéro, <b>*22</b> messagerie, <b>#21</b> annuler" : "<b>*80</b> fermer, <b>*81</b> ouvrir, <b>*82</b> + numéro renvoyer"}</p>
+  </div>`;
+  const pm = m.querySelector(".pmenu");
+  pm.onclick = (e) => e.stopPropagation();
+  const kr = $(isF ? "#kfwd" : "#kstd").getBoundingClientRect();   // sous la touche (sur mobile : en bas, voir softphone.css)
+  if (innerWidth > 760) Object.assign(pm.style, { top: `${kr.bottom + 8}px`, left: `${kr.left}px` });
+  const apply = async (v, num = "") => {
+    try {
+      if (isF) {
+        const r = await api("PUT", "/api/u/settings", { forwarding: { always: { type: v, target: v === "external" ? clean(num) : "" } } });
+        me.user = r.user; toast(fwdOn() ? `Renvoi activé ${fwdLabel()}` : "Renvoi désactivé");
+      } else {
+        me.standard = await api("POST", "/api/u/standard", { state: v, target: num });
+        toast(me.standard.label);
+      }
+      toggleMenu(false); renderKeys();
+      if (page === "reglages") renderPage();
+    } catch (err) { toast(err.message, "bad"); }
+  };
+  $$("[data-kv]", m).forEach((b) => b.onclick = () => apply(b.dataset.kv));
+  $("#kmnum").onsubmit = (e) => { e.preventDefault(); apply(isF ? "external" : "forward", $("#kmn").value); };
+  setTimeout(() => document.addEventListener("click", () => toggleMenu(false), { once: true }));
+}
+
 async function setStatus(st) {
   try { const r = await api("PUT", "/api/u/status", { status: st }); me.user.status = r.status; toast(`Statut : ${STATUS[r.status]}`); }
   catch (err) { toast(err.message, "bad"); }
