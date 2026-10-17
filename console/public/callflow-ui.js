@@ -64,8 +64,7 @@ export async function standardBox(helpers, u, codes, offer) {
   const since = st.since ? ` depuis le ${new Date(st.since).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "";
   const html = `<section class="fwcard std-card ${closed ? "closed" : ""}">
     <header><span class="oc-ic ${closed ? "closed" : "open"}"></span><div class="grow"><h3>Ouvert / Fermé</h3><p>Fermer d'un coup tous les numéros de l'entreprise</p></div>
-      <label class="switch big"><input type="checkbox" name="ui.std_can" ${can ? "checked" : ""} ${locked ? "disabled" : ""}><span></span><b>${locked ? "Inclus dans son rôle" : "Ce poste peut le faire"}</b></label>
-      <button type="button" class="info-i" data-rolesinfo="standard" title="Que peut faire chaque rôle ?">i</button></header>
+      <label class="switch big"><input type="checkbox" name="ui.std_can" ${can ? "checked" : ""} ${locked ? "disabled" : ""}><span></span><b>${locked ? "Inclus dans son rôle" : "Ce poste peut le faire"}</b></label></header>
     <div class="std-body" ${can ? "" : "hidden"}>
       <div class="std-now ${closed ? "closed" : "open"}"><span><b>${closed ? "Fermé" : "Ouvert"}</b> en ce moment<em class="hint">${since}${st.by ? ` · ${esc(st.by)}` : ""}</em></span>
         <button type="button" class="btn sm ${closed ? "" : "danger"}" data-st="${closed ? "open" : "closed"}">${closed ? "Ouvrir" : "Fermer"}</button></div>

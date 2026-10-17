@@ -73,6 +73,8 @@ export async function buildApp({ db, ami } = {}) {
   const ROLES = { admin: "Accès complet (administrateur)", tech: "Technicien (tout sauf les comptes)", client: "Accès restreint (utilisateurs, téléphones, routage, annuaire)", lecture: "Accès visuel (lecture seule)" };
   // Accès restreint (client) : pas de trunks, règles sortantes, sécurité, codes, sauvegardes, mises à jour, licence, alertes, passerelles, système, comptes
   const CLIENT_DENY = /^\/api\/(outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
+  // Rôles qu'un utilisateur du PBX connecté à la console peut donner
+  const PBX_USER_ROLES = ["user", "standard", "manager"];
   const requireUser = async (req, reply) => {
     const u = currentUser(req);
     if (!u) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
@@ -423,7 +425,8 @@ export async function buildApp({ db, ami } = {}) {
     server: sipServer(),
   }));
   app.post("/api/extensions", { preHandler: requireUser }, async (req) => {
-    if (req.role === "client" && req.body?.options?.role === "admin") throw Object.assign(new UserError("Seul l'installateur ou un Administrateur peut donner le rôle Administrateur."), { status: 403 });
+    if (currentUser(req)?.ext && req.body?.options?.role !== undefined && !PBX_USER_ROLES.includes(req.body.options.role))
+      throw Object.assign(new UserError("Seul l'installateur peut donner les rôles Gestionnaire et Administrateur.", "options.role"), { status: 403 });
     return pbx.createExtension(req.body || {}, currentUser(req).email);
   });
   app.get("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
@@ -431,10 +434,11 @@ export async function buildApp({ db, ami } = {}) {
     return { user, server: sipServer(), key_offer: { fwd: pbx.phoneKeyInfo(user, "fwd"), standard: pbx.phoneKeyInfo(user, "standard") } };
   });
   app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
-    // Un Gestionnaire (accès limité) ne peut ni donner ni retirer le rôle Administrateur
+    // Utilisateur du PBX connecté à la console (Gestionnaire, Administrateur) : donne seulement Utilisateur, Pilote ou Superviseur,
+    // et ne touche pas au rôle d'un Gestionnaire ou d'un Administrateur (réservé à l'installateur)
     const role = req.body?.options?.role;
-    if (req.role === "client" && role !== undefined && (role === "admin" || (await pbx.getUser(req.params.id)).options.role === "admin"))
-      throw Object.assign(new UserError("Seul l'installateur ou un Administrateur peut donner ou retirer le rôle Administrateur."), { status: 403 });
+    if (currentUser(req)?.ext && role !== undefined && (!PBX_USER_ROLES.includes(role) || !PBX_USER_ROLES.includes((await pbx.getUser(req.params.id)).options.role || "user")))
+      throw Object.assign(new UserError("Seul l'installateur peut donner ou retirer les rôles Gestionnaire et Administrateur.", "options.role"), { status: 403 });
     return pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email);
   });
   app.get("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.extensionSecret(req.params.id));

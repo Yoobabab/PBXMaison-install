@@ -903,16 +903,16 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .rm-x{border:0;background:var(--bg);color:var(--ink);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:15px;flex:none}
 .rm-roles{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:10px 22px}
 .rm-role{border:1.5px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:2px;position:relative}
-.rm-role .rm-n{width:22px;height:22px;border-radius:50%;background:var(--rc);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;margin-bottom:4px}
+.rm-role .rm-n{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;margin-bottom:4px}
 .rm-role b{font-size:14px}.rm-role small{font-size:12px;color:var(--muted)}
-.rm-role.on{border-color:var(--rc);box-shadow:0 0 0 3px color-mix(in srgb,var(--rc) 18%,transparent)}
+.rm-role.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .rm-scroll{overflow:auto;padding:0 22px}
 .rm-table{width:100%;border-collapse:collapse;font-size:14px}
-.rm-table th{font-size:12.5px;padding:8px 6px;text-align:center;color:var(--rc);position:sticky;top:0;background:var(--panel)}
+.rm-table th{font-size:12.5px;padding:8px 6px;text-align:center;color:var(--muted);position:sticky;top:0;background:var(--panel)}
 .rm-table td{padding:9px 6px;border-top:1px solid var(--line);text-align:center}
 .rm-table td:first-child{text-align:left;padding-right:14px}
-.rm-table .on{background:color-mix(in srgb,var(--accent) 6%,transparent)}
-.rm-y{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:color-mix(in srgb,var(--rc) 15%,transparent);color:var(--rc);font-weight:700;font-size:13px}
+.rm-table .on{background:var(--accent-soft)}.rm-table th.on{color:var(--accent)}
+.rm-y{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:13px}
 .rm-n0{color:var(--line)}
 .rm-foot{margin:0;padding:12px 22px 18px;font-size:12.5px;color:var(--muted)}
 .std-card header .info-i{margin-left:4px}

@@ -995,6 +995,22 @@ function wireDest(root) {
   });
 }
 
+/**
+ * Choix du rôle. Installateur (compte de la console) : les 5 rôles, avec le bouton « i ».
+ * Utilisateur du PBX connecté à la console (Gestionnaire, Administrateur) : seulement Utilisateur, Pilote, Superviseur ;
+ * il ne peut pas changer le rôle d'un Gestionnaire ou d'un Administrateur.
+ */
+function roleField(u) {
+  const cur = u.options.role || "user";
+  const installer = !state?.ext;
+  const allowed = installer ? ROLES : ROLES.filter((r) => ["user", "standard", "manager"].includes(r.id));
+  const locked = !installer && !allowed.some((r) => r.id === cur);
+  const list = locked ? ROLES.filter((r) => r.id === cur) : allowed;
+  return `<label>Rôle<span class="rolerow"><select name="options.role" ${locked ? "disabled" : ""}>${list.map((r) => `<option value="${r.id}" ${cur === r.id ? "selected" : ""}>${r.name} — ${r.short}</option>`).join("")}</select>
+      ${installer ? `<button type="button" class="info-i" data-rolesinfo title="Que peut faire chaque rôle ?">i</button>` : ""}</span>
+    <span class="hint">${locked ? "Ce rôle donne accès à la console : seul l'installateur peut le changer." : installer ? "Chaque rôle a tous les droits du précédent. Gestionnaire et Administrateur se connectent à la console de ce PBX avec l'e-mail de la fiche et le mot de passe du softphone." : "Pilote : ouvre et ferme tout le PBX, renvoie un collègue, enregistre les annonces. Superviseur : en plus, plannings et suivi de l'équipe."}</span></label>`;
+}
+
 // Fiche utilisateur : les modifications de tous les onglets sont gardées ici jusqu'au clic sur « Enregistrer »
 let userDraft = null;   // { id, data, keys?, mods? }
 let userPendingErr = null;
@@ -1041,9 +1057,7 @@ async function renderUser(id, tab = "general") {
   if (tab === "general") {
     body = `<form method="post" class="grid" id="uf" novalidate><div class="form-msg full"></div>
       <label>Numéro de poste<input value="${esc(u.id)}" readonly></label>
-      <label>Rôle<span class="rolerow"><select name="options.role">${ROLES.map((r) => `<option value="${r.id}" ${(u.options.role || "user") === r.id ? "selected" : ""}>${r.name} — ${r.short}</option>`).join("")}</select>
-        <button type="button" class="info-i" data-rolesinfo title="Que peut faire chaque rôle ?">i</button></span>
-        <span class="hint">Chaque rôle a tous les droits du précédent. Gestionnaire et Administrateur se connectent à la console de ce PBX avec l'e-mail de la fiche et le mot de passe du softphone.</span></label>
+      ${roleField(u)}
       <label>Prénom<input name="first_name" value="${esc(u.first_name)}" maxlength="40"></label>
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
@@ -1840,7 +1854,7 @@ async function route() {
     if (inv && !state.logged_in) return renderInvite(inv[1]);
     if (!state.logged_in) return renderLogin();
     if (!state.email || state.need_totp === undefined) {
-      const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; state.role = me.role;
+      const me = await api("GET", "/api/me"); state.email = me.email; state.need_totp = !me.mfa; state.role = me.role; state.ext = me.ext || "";
       Object.assign(state, { hub: !!me.hub, hub_url: me.hub_url || state.hub_url, pbx_list: me.pbx_list || [], current: me.current || "" });
     }
     if (state.need_totp) return renderTotpRequired();
