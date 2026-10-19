@@ -107,7 +107,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const [label, cls] = st ? (STATE_FR[st.state] || [st.state, "wait"]) : ["Moteur injoignable", "wait"];
       return {
         id: r.id, template: r.template, operator: tpl[r.template]?.label || r.template,
-        host: r.host, number: r.number, outbound_cid: r.outbound_cid, username: r.username,
+        host: r.host, number: r.number, outbound_cid: r.outbound_cid, username: r.username, port: Number(/:(\d+)(?:;|$)/.exec(r.server_uri || "")?.[1]) || null,
         proxy: CX_MODE === "tenant" ? (r.op_proxy || "") : r.outbound_proxy ? r.outbound_proxy.replace(/^sip:/, "").replace(/(;|\^3B)lr$/, "") : "",
         codecs: (r.allow || "").split(","), transport: (r.transport || "").replace("transport-", ""),
         cid_format: r.cid_format, dial_format: r.dial_format, caller_format: r.caller_format, dids: trunkDidList(r, countryCode()), extra_dids: r.dids || [],

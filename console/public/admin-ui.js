@@ -655,6 +655,116 @@ async function pageCapture() {
   if (d.running || d.files.some((f) => !f.ready)) H.poll(async () => { const x = await H.api("GET", "/api/capture"); if (!x.running && x.files.every((f) => f.ready)) { if (location.hash === "#/capture") pageCapture(); return true; } return false; }, 4000);
 }
 
+// ================================================================ Import / export
+const TX_ICON = {
+  users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14c2.6 0 4.4 1.6 5 4.5"/>',
+  contacts: '<rect x="4" y="3" width="15" height="18" rx="2"/><circle cx="11.5" cy="10" r="2.6"/><path d="M7.5 17c.6-2.2 2.1-3.3 4-3.3s3.4 1.1 4 3.3M19 7h2M19 12h2"/>',
+  trunks: '<path d="M4 12h16M4 6h16M4 18h16"/><circle cx="8" cy="6" r="1.4" fill="currentColor"/><circle cx="14" cy="12" r="1.4" fill="currentColor"/><circle cx="10" cy="18" r="1.4" fill="currentColor"/>',
+  inbound: '<path d="M14 4h6v6M20 4l-8 8"/><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6"/><path d="M4 4v4M4 12v8h8"/>',
+  outbound: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+};
+const TX_HINT = {
+  users: "Fiches, rôles, SDA, messagerie, téléphone (modèle et MAC).",
+  contacts: "Contacts de l'entreprise et leurs numéros.",
+  trunks: "Lignes opérateur. Les mots de passe ne sont jamais exportés.",
+  inbound: "SDA, horaires et destinations (ouvert, fermé, pause, fériés).",
+  outbound: "Préfixes, postes, trunks et numéro présenté.",
+};
+const TX_ACTION = { create: ["ok", "À créer"], update: ["wait", "À mettre à jour"], error: ["bad", "Erreur"] };
+/** Fichier CSV → texte (UTF-8, sinon Windows-1252 : CSV enregistré par Excel en français) */
+async function fileText(file) {
+  const buf = await file.arrayBuffer();
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { return new TextDecoder("windows-1252").decode(buf); }
+}
+function download(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+async function pageTransfer() {
+  H.setNav("transfer");
+  const { kinds } = await H.api("GET", "/api/transfer");
+  const lists = Object.fromEntries(await Promise.all(kinds.map(async (k) => [k.id, (await H.api("GET", `/api/transfer/${k.id}`)).items])));
+  const fmt = {};
+  const sel = Object.fromEntries(kinds.map((k) => [k.id, new Set()]));
+  H.app.innerHTML = `${head("Import / export", "Récupère tes réglages dans un fichier (s'ouvre dans Excel) ou importe-les d'un autre PBX. Les fichiers exportés par 3CX sont reconnus tout seuls.")}
+    <p class="hint tx-tip">Pour reprendre tout un PBX, importe dans l'ordre : utilisateurs, trunks, puis les règles (elles renvoient vers les postes et les trunks). Chaque import montre d'abord un aperçu : rien n'est enregistré avant ton accord.</p>
+    <div class="tx-grid">${kinds.map((k) => `<section class="tx-card" data-k="${k.id}">
+      <div class="tx-top"><span class="tx-ic">${ic(TX_ICON[k.id], 22)}</span><div class="grow"><h2>${H.esc(k.label)}</h2><p>${TX_HINT[k.id]}</p></div><span class="tx-n">${lists[k.id].length}</span></div>
+      <div class="tx-fmt"><span>Format</span><div class="seg sm">${k.formats.map((f, i) => `<label class="${i ? "" : "on"}"><input type="radio" name="f-${k.id}" value="${f}" ${i ? "" : "checked"}>${f === "3cx" ? "3CX" : "Callikoe (Excel)"}</label>`).join("")}</div>
+        ${k.formats.includes("3cx") ? "" : `<small>${k.import3cx ? "3CX : import accepté" : "3CX n'a pas d'export pour cette partie"}</small>`}</div>
+      <div class="tx-btns"><button type="button" class="btn sm" data-all ${lists[k.id].length ? "" : "disabled"}>${ic(I.dl, 16)} Tout exporter</button>
+        <button type="button" class="btn ghost sm" data-pick ${lists[k.id].length ? "" : "disabled"}>Choisir…</button>
+        <label class="btn ghost sm tx-file">${ic(I.up2, 16)} Importer<input type="file" accept=".csv,text/csv,text/plain" hidden></label></div>
+      <div class="tx-pick" hidden><input type="search" placeholder="Rechercher…"><div class="tx-list">${lists[k.id].map((x) => `<label class="tx-it"><input type="checkbox" value="${H.esc(x.id)}"><span><b>${H.esc(x.label)}</b>${x.sub ? `<small>${H.esc(x.sub)}</small>` : ""}</span></label>`).join("")}</div>
+        <div class="tx-pa"><button type="button" class="btn link" data-tog>Tout cocher</button><span class="grow"></span><button type="button" class="btn sm" data-sel disabled>Exporter la sélection</button></div></div>
+    </section>`).join("")}</div>
+    <div id="txprev"></div>`;
+  H.app.querySelectorAll(".tx-card").forEach((card) => {
+    const k = card.dataset.k;
+    fmt[k] = card.querySelector(".seg input:checked").value;
+    card.querySelectorAll(".seg input").forEach((r) => r.onchange = () => { fmt[k] = r.value; card.querySelectorAll(".seg label").forEach((l) => l.classList.toggle("on", l.contains(r))); });
+    const doExport = async (ids) => {
+      const r = await H.api("POST", `/api/transfer/${k}/export`, { format: fmt[k], ids });
+      download(r.filename, r.text);
+    };
+    card.querySelector("[data-all]").onclick = () => doExport([]).catch((e) => alert(e.message));
+    const pick = card.querySelector(".tx-pick");
+    const selBtn = card.querySelector("[data-sel]");
+    const upd = () => { selBtn.disabled = !sel[k].size; selBtn.textContent = sel[k].size ? `Exporter la sélection (${sel[k].size})` : "Exporter la sélection"; };
+    card.querySelector("[data-pick]").onclick = () => { pick.hidden = !pick.hidden; if (!pick.hidden) pick.querySelector("input[type=search]").focus(); };
+    pick.querySelector("input[type=search]").oninput = (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      pick.querySelectorAll(".tx-it").forEach((it) => { it.hidden = !!q && !it.textContent.toLowerCase().includes(q); });
+    };
+    pick.querySelectorAll(".tx-it input").forEach((c) => c.onchange = () => { c.checked ? sel[k].add(c.value) : sel[k].delete(c.value); c.closest(".tx-it").classList.toggle("on", c.checked); upd(); });
+    pick.querySelector("[data-tog]").onclick = () => {
+      const vis = [...pick.querySelectorAll(".tx-it:not([hidden]) input")];
+      const on = !vis.every((c) => c.checked);
+      vis.forEach((c) => { c.checked = on; on ? sel[k].add(c.value) : sel[k].delete(c.value); c.closest(".tx-it").classList.toggle("on", on); });
+      upd();
+    };
+    selBtn.onclick = () => doExport([...sel[k]]).catch((e) => alert(e.message));
+    const fileIn = card.querySelector("input[type=file]");
+    fileIn.onchange = async () => {
+      const f = fileIn.files[0]; fileIn.value = "";
+      if (!f) return;
+      const text = await fileText(f);
+      const box = H.app.querySelector("#txprev");
+      box.innerHTML = '<div class="panel pad"><span class="spin"></span> Lecture du fichier…</div>';
+      box.scrollIntoView({ behavior: "smooth", block: "start" });
+      try { showPreview(box, kinds.find((x) => x.id === k), f.name, text, await H.api("POST", `/api/transfer/${k}/import`, { text })); }
+      catch (e) { box.innerHTML = `<div class="panel pad"><div class="form-msg err" style="display:block">${H.esc(e.message)}</div></div>`; }
+    };
+  });
+}
+function showPreview(box, kind, name, text, r) {
+  const ready = r.counts.create + r.counts.update;
+  const rows = r.lines.map((l) => {
+    const [cls, txt] = r.applied ? (l.done ? ["ok", l.action === "update" ? "Mis à jour" : "Créé"] : ["bad", "Non importé"]) : TX_ACTION[l.action];
+    return `<tr class="${l.action === "error" || (r.applied && !l.done) ? "tx-err" : ""}"><td class="s">${l.line}</td><td><b>${H.esc(l.label)}</b></td><td><span class="pill ${cls}">${txt}</span></td>
+      <td>${l.error ? `<div class="tx-e">${H.esc(l.error)}</div>` : ""}${l.warnings.map((w) => `<div class="tx-w">${H.esc(w)}</div>`).join("")}${!l.error && !l.warnings.length ? '<span class="s">—</span>' : ""}</td></tr>`;
+  }).join("");
+  const done = r.lines.filter((l) => l.done).length;
+  box.innerHTML = `<div class="panel tx-prev"><div class="ph"><h2>${r.applied ? "Import terminé" : "Aperçu avant import"} · ${H.esc(kind.label)}</h2>
+      <span class="s">${H.esc(name)}${r.format === "3cx" ? ' · <span class="pill off">Fichier 3CX reconnu</span>' : ""}</span></div>
+    <div class="pad"><div class="tx-sum">${r.applied
+      ? `<span class="pill ok">${done} importé${done > 1 ? "s" : ""}</span>${r.lines.length - done ? `<span class="pill bad">${r.lines.length - done} non importé${r.lines.length - done > 1 ? "s" : ""}</span>` : ""}`
+      : `<span class="pill ok">${r.counts.create} à créer</span><span class="pill wait">${r.counts.update} à mettre à jour</span>${r.counts.error ? `<span class="pill bad">${r.counts.error} en erreur (ignoré${r.counts.error > 1 ? "s" : ""})</span>` : ""}`}</div>
+      ${r.applied ? "" : '<p class="hint" style="margin:8px 0 0">Rien n\'est encore enregistré. Les colonnes absentes du fichier ne changent pas les fiches existantes.</p>'}</div>
+    <div class="table-wrap"><table><thead><tr><th>Ligne</th><th>Élément</th><th>Action</th><th>Détails</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="s">Aucune ligne.</td></tr>'}</tbody></table></div>
+    <div class="actions pad">${r.applied ? '<button type="button" class="btn" data-close>Fermer</button>'
+      : `<button type="button" class="btn ghost" data-close>Annuler</button><button type="button" class="btn" data-go ${ready ? "" : "disabled"}>Importer ${ready} ligne${ready > 1 ? "s" : ""}</button>`}</div></div>`;
+  box.querySelector("[data-close]").onclick = () => (r.applied ? pageTransfer() : (box.innerHTML = ""));
+  const go = box.querySelector("[data-go]");
+  if (go) go.onclick = async () => {
+    go.disabled = true; go.innerHTML = '<span class="spin"></span> Import en cours…';
+    try { showPreview(box, kind, name, text, await H.api("POST", `/api/transfer/${kind.id}/import`, { text, apply: true })); }
+    catch (e) { go.disabled = false; go.textContent = "Réessayer"; alert(e.message); }
+  };
+}
+
 export async function renderAdmin(helpers, page, sub) {
   H = helpers;
   switch (page) {
@@ -669,5 +779,6 @@ export async function renderAdmin(helpers, page, sub) {
     case "passerelles": return pageGateways(sub);
     case "comptes": return pageAccounts();
     case "capture": return pageCapture();
+    case "import-export": return pageTransfer();
   }
 }

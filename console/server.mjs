@@ -22,6 +22,7 @@ import { migrateChat, createChat } from "./lib/chat.mjs";
 import { scheduleState, KINDS, DEST_TYPES as CF_DEST, GROUP_STRATEGIES, QUEUE_STRATEGIES, DAYS, STEP_TYPES, TERMINAL_STEPS, BRANCHES } from "./lib/callflow.mjs";
 const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_STRATEGIES, queue_strategies: QUEUE_STRATEGIES, days: DAYS, step_types: STEP_TYPES, terminal_steps: TERMINAL_STEPS, branches: BRANCHES };
 import { createAdminService } from "./lib/admin.mjs";
+import { createTransfer, KINDS as TRANSFER_KINDS, INSTALLER_KINDS } from "./lib/transfer.mjs";
 import { parseQueueShow, queueStats } from "./lib/supervision.mjs";
 import { CX_MODE, CX_TENANT } from "./lib/config.mjs";
 import { registerThemeRoutes } from "./lib/theme.mjs";
@@ -38,6 +39,7 @@ export async function buildApp({ db, ami } = {}) {
   const pbx = createPbxService({ db, ami, templatesFile: TEMPLATES_FILE, routesFile: routesPath(VAR), env: pbxEnv });
   const chat = createChat(db, { users: () => pbx.loadUsers() });
   const admin = createAdminService({ db, ami, pbx });
+  const transfer = createTransfer({ pbx, admin });
   await admin.migrate();
   pbx.setExtraDialplan(() => admin.dialplanParts());
 
@@ -921,6 +923,28 @@ export async function buildApp({ db, ami } = {}) {
     pbx.importContacts(req.body?.rows || parseCsv(req.body?.csv), !!req.body?.replace, currentUser(req).email));
   app.get("/api/contacts.csv", { preHandler: requireUser }, async (req, reply) =>
     reply.type("text/csv; charset=utf-8").header("content-disposition", 'attachment; filename="annuaire.csv"').send(await pbx.contactsCsv()));
+  // Import / export (CSV Callikoe ou 3CX) : trunks et règles sortantes réservés à l'installateur, comme leurs pages
+  const transferGuard = (req) => {
+    if (!TRANSFER_KINDS[req.params.kind]) throw Object.assign(new UserError("Type inconnu."), { status: 404 });
+    if (req.role === "client" && INSTALLER_KINDS.includes(req.params.kind)) throw Object.assign(new UserError("Accès restreint : cette partie est réservée à l'installateur."), { status: 403 });
+  };
+  app.get("/api/transfer", { preHandler: requireUser }, async (req) => ({
+    kinds: Object.entries(TRANSFER_KINDS).filter(([k]) => req.role !== "client" || !INSTALLER_KINDS.includes(k)).map(([id, k]) => ({ id, ...k })) }));
+  app.get("/api/transfer/:kind", { preHandler: requireUser }, async (req) => { transferGuard(req); return { items: await transfer.items(req.params.kind) }; });
+  app.post("/api/transfer/:kind/export", { preHandler: requireUser }, async (req) => {
+    transferGuard(req);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const r = await transfer.exportKind(req.params.kind, { format: req.body?.format === "3cx" ? "3cx" : "callikoe", ids });
+    audit(req, `export ${req.params.kind}`, true, `${r.count} ligne(s)`);
+    return r;
+  });
+  app.post("/api/transfer/:kind/import", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
+    transferGuard(req);
+    const apply = !!req.body?.apply;
+    const r = await transfer.importKind(req.params.kind, String(req.body?.text || ""), { apply, consoleRoles: !currentUser(req)?.ext, by: currentUser(req).email });
+    if (apply) audit(req, `import ${req.params.kind}`, true, `${r.lines.filter((l) => l.done).length} ligne(s) importée(s), ${r.counts.error} erreur(s)`);
+    return r;
+  });
   app.get("/api/trace", { preHandler: requireUser }, async (req) => pbx.trace(req.query?.n));
   app.get("/api/forwards", { preHandler: requireUser }, async () => ({ forwards: await pbx.forwardsReport() }));
   // Dépannage : tests d'appel (journalisés comme toute action de la console)
