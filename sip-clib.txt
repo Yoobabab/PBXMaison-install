@@ -1,0 +1,400 @@
+Contact: <sip:201@127.0.0.12:5080>
+Call-ID: 10d58b1c-b94c-4cb1-a2c2-7ac6b3734c2d
+CSeq: 25824 INVITE
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub, histinfo
+Session-Expires: 1800
+Min-SE: 90
+Max-Forwards: 69
+User-Agent: Asterisk PBX 22.11.0
+Authorization: Digest username="ZW0JcfHHyt", realm="asterisk", nonce="1792590294/ff970d4d1aafe90552b485faab384e11", uri="sip:0412345678@b.e2e.invalid", response="3c96872f55c4eee1dbbf9b50259aeeca", algorithm=MD5, cnonce="03e215538c1b4b08b7b8fce832656291", opaque="4eb701fb5cbfc80e", qop=auth, nc=00000001
+Content-Type: application/sdp
+Content-Length:   257
+
+v=0
+o=- 1825427382 1825427382 IN IP4 127.0.0.12
+s=Asterisk
+c=IN IP4 127.0.0.12
+t=0 0
+m=audio 31120 RTP/AVP 0 8 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+[2026-10-21 13:44:54] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP response (643 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.2;rport=5060;received=127.0.0.2;branch=z9hG4bK79eb.d6d9f8ef0499c740508976e817fdb269.0
+Via: SIP/2.0/UDP 127.0.0.12:5080;rport=5080;received=127.0.0.12;branch=z9hG4bKPjcd69f49b-9684-4e3f-85fa-0dd8baf65cd9
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b>
+Record-Route: <sip:10.1.0.247;lr;r2=on;ftag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b>
+Call-ID: 10d58b1c-b94c-4cb1-a2c2-7ac6b3734c2d
+From: "Anonymous" <sip:201@b.e2e.invalid>;tag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b
+To: <sip:0412345678@b.e2e.invalid>
+CSeq: 25824 INVITE
+Server: PBXMaison
+Content-Length:  0
+
+
+[2026-10-21 13:44:54] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (1022 bytes) to UDP:127.0.0.2:5060 --->
+INVITE sip:0412345678@127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPjed0b11c2-1e1c-4825-80e8-03ae2a56a7bd
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>
+Contact: <sip:asterisk@10.1.0.247:5060>
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+CSeq: 7799 INVITE
+Route: <sip:127.0.0.2:5060;lr>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub, histinfo
+Session-Expires: 1800
+Min-SE: 90
+P-Asserted-Identity: "Accueil" <sip:0465001550@127.0.0.50>
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Type: application/sdp
+Content-Length:   257
+
+v=0
+o=- 1064018552 1064018552 IN IP4 10.1.0.247
+s=Asterisk
+c=IN IP4 10.1.0.247
+t=0 0
+m=audio 10276 RTP/AVP 8 0 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+[2026-10-21 13:44:54] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (393 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 100 trying -- your call is important to us
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;branch=z9hG4bKPjed0b11c2-1e1c-4825-80e8-03ae2a56a7bd;received=127.0.0.1
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+CSeq: 7799 INVITE
+Server: Callikoe
+Content-Length: 0
+
+
+[2026-10-21 13:44:54] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (741 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPjed0b11c2-1e1c-4825-80e8-03ae2a56a7bd
+Record-Route: <sip:10.1.0.247;lr;r2=on;ftag=e65d071d-a857-4206-ac69-2f1c7410e9a6>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=e65d071d-a857-4206-ac69-2f1c7410e9a6>
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>;tag=z9hG4bK8c2.d47acbc25bce35dbca22919ed719dd3c.0
+CSeq: 7799 INVITE
+WWW-Authenticate: Digest realm="asterisk",nonce="1792590294/bec265d19ac9f5f456e300eb9ba53f0c",opaque="6c21fdd41be03080",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-21 13:44:54] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (464 bytes) to UDP:127.0.0.2:5060 --->
+ACK sip:0412345678@127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPjed0b11c2-1e1c-4825-80e8-03ae2a56a7bd
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>;tag=z9hG4bK8c2.d47acbc25bce35dbca22919ed719dd3c.0
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+CSeq: 7799 ACK
+Route: <sip:127.0.0.2:5060;lr>
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-21 13:44:54] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (1324 bytes) to UDP:127.0.0.2:5060 --->
+INVITE sip:0412345678@127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPj6d6af085-94ce-4efe-9482-3fd1e56dcb69
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>
+Contact: <sip:asterisk@10.1.0.247:5060>
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+CSeq: 7800 INVITE
+Route: <sip:127.0.0.2:5060;lr>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub, histinfo
+Session-Expires: 1800
+Min-SE: 90
+Max-Forwards: 70
+User-Agent: PBXMaison
+Authorization: Digest username="acctb", realm="asterisk", nonce="1792590294/bec265d19ac9f5f456e300eb9ba53f0c", uri="sip:0412345678@127.0.0.50:5070", response="baa1a7f75f1cb32b399da06cb009ca02", algorithm=MD5, cnonce="8e74865d5c4a4089b14422fc37cc4f85", opaque="6c21fdd41be03080", qop=auth, nc=00000001
+P-Asserted-Identity: "Accueil" <sip:0465001550@127.0.0.50>
+Content-Type: application/sdp
+Content-Length:   257
+
+v=0
+o=- 1064018552 1064018552 IN IP4 10.1.0.247
+s=Asterisk
+c=IN IP4 10.1.0.247
+t=0 0
+m=audio 10276 RTP/AVP 8 0 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+[2026-10-21 13:44:54] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (393 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 100 trying -- your call is important to us
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;branch=z9hG4bKPj6d6af085-94ce-4efe-9482-3fd1e56dcb69;received=127.0.0.1
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+CSeq: 7800 INVITE
+Server: Callikoe
+Content-Length: 0
+
+
+[2026-10-21 13:44:54] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (1117 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPj6d6af085-94ce-4efe-9482-3fd1e56dcb69
+Record-Route: <sip:10.1.0.247;lr;r2=on;ftag=e65d071d-a857-4206-ac69-2f1c7410e9a6>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=e65d071d-a857-4206-ac69-2f1c7410e9a6>
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>;tag=853fc68b-fa8f-4b80-b05e-c88cd994c1f0
+CSeq: 7800 INVITE
+Server: Asterisk PBX 22.11.0
+Contact: <sip:127.0.0.50:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Session-Expires: 1800;refresher=uac
+Require: timer
+Content-Type: application/sdp
+Content-Length:   257
+
+v=0
+o=- 1064018552 1064018554 IN IP4 127.0.0.50
+s=Asterisk
+c=IN IP4 127.0.0.50
+t=0 0
+m=audio 30048 RTP/AVP 0 8 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+[2026-10-21 13:44:54] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (568 bytes) to UDP:127.0.0.2:5060 --->
+ACK sip:127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPj9a11fc7d-2a23-4d29-b340-5898ecefa681
+From: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+To: <sip:0412345678@127.0.0.50>;tag=853fc68b-fa8f-4b80-b05e-c88cd994c1f0
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+CSeq: 7800 ACK
+Route: <sip:127.0.0.2:5060;lr;r2=on;ftag=e65d071d-a857-4206-ac69-2f1c7410e9a6>
+Route: <sip:10.1.0.247;lr;r2=on;ftag=e65d071d-a857-4206-ac69-2f1c7410e9a6>
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-21 13:44:54] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP response (1221 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.2;rport=5060;received=127.0.0.2;branch=z9hG4bK79eb.d6d9f8ef0499c740508976e817fdb269.0
+Via: SIP/2.0/UDP 127.0.0.12:5080;rport=5080;received=127.0.0.12;branch=z9hG4bKPjcd69f49b-9684-4e3f-85fa-0dd8baf65cd9
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b>
+Record-Route: <sip:10.1.0.247;lr;r2=on;ftag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b>
+Call-ID: 10d58b1c-b94c-4cb1-a2c2-7ac6b3734c2d
+From: "Anonymous" <sip:201@b.e2e.invalid>;tag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b
+To: <sip:0412345678@b.e2e.invalid>;tag=a54a241d-293d-4db0-9666-f784f22e6880
+CSeq: 25824 INVITE
+Server: PBXMaison
+Contact: <sip:10.1.0.247:5060>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Session-Expires: 1800;refresher=uac
+Require: timer
+Content-Type: application/sdp
+Content-Length:   257
+
+v=0
+o=- 1825427382 1825427384 IN IP4 10.1.0.247
+s=Asterisk
+c=IN IP4 10.1.0.247
+t=0 0
+m=audio 10244 RTP/AVP 8 0 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:0 PCMU/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+[2026-10-21 13:44:54] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP request (531 bytes) from UDP:127.0.0.2:5060 --->
+ACK sip:127.0.0.1:6002 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.2;branch=z9hG4bK79eb.3c71aaaf883908bbae97e373b894435c.0
+Via: SIP/2.0/UDP 127.0.0.12:5080;received=127.0.0.12;rport=5080;branch=z9hG4bKPj2bfe6c8e-8dce-47a1-b563-5e19b63b875c
+From: "Anonymous" <sip:201@b.e2e.invalid>;tag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b
+To: <sip:0412345678@b.e2e.invalid>;tag=a54a241d-293d-4db0-9666-f784f22e6880
+Call-ID: 10d58b1c-b94c-4cb1-a2c2-7ac6b3734c2d
+CSeq: 25824 ACK
+Max-Forwards: 69
+User-Agent: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-21 13:44:55] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (468 bytes) to UDP:127.0.0.2:5060 --->
+OPTIONS sip:201@127.0.0.12:5080 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPj79f76cc0-d5ae-44af-9fd5-d88b43db26fe
+From: <sip:201@127.0.0.1>;tag=75361347-8a17-4c66-9198-54f4652f1f7e
+To: <sip:201@127.0.0.12>
+Contact: <sip:201@10.1.0.247:5060>
+Call-ID: 5123a6fb-f642-46a9-b9bb-caaa7c35939e
+CSeq: 48658 OPTIONS
+Supported: path
+Route: <sip:127.0.0.2;lr;received=sip:127.0.0.12:5080>
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-21 13:44:55] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (1054 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPj79f76cc0-d5ae-44af-9fd5-d88b43db26fe
+Record-Route: <sip:10.1.0.247;lr;r2=on;ftag=75361347-8a17-4c66-9198-54f4652f1f7e>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=75361347-8a17-4c66-9198-54f4652f1f7e>
+Call-ID: 5123a6fb-f642-46a9-b9bb-caaa7c35939e
+From: <sip:201@127.0.0.1>;tag=75361347-8a17-4c66-9198-54f4652f1f7e
+To: <sip:201@127.0.0.12>;tag=z9hG4bK56ad.c1feab9ccd29b20972fa6669ea895cf1.0
+CSeq: 48658 OPTIONS
+Accept: application/sdp, application/dialog-info+xml, application/simple-message-summary, application/xpidf+xml, application/cpim-pidf+xml, application/pidf+xml, application/simple-message-summary, application/pidf+xml, application/dialog-info+xml, message/sipfrag;version=2.0
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Accept-Encoding: identity
+Accept-Language: en
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-21 13:44:57] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP request (563 bytes) from UDP:127.0.0.2:5060 --->
+BYE sip:asterisk@127.0.0.1:6002 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.2;branch=z9hG4bK74da.50e44bacf61a8361fc480d0b9184fded.0
+Via: SIP/2.0/UDP 127.0.0.50:5070;received=127.0.0.50;rport=5070;branch=z9hG4bKPj1313cf96-3038-41ef-a184-38959ec7aeec
+From: <sip:0412345678@127.0.0.50>;tag=853fc68b-fa8f-4b80-b05e-c88cd994c1f0
+To: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+CSeq: 14084 BYE
+Reason: Q.850;cause=16
+Max-Forwards: 69
+User-Agent: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-21 13:44:57] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP response (511 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.2;rport=5060;received=127.0.0.2;branch=z9hG4bK74da.50e44bacf61a8361fc480d0b9184fded.0
+Via: SIP/2.0/UDP 127.0.0.50:5070;rport=5070;received=127.0.0.50;branch=z9hG4bKPj1313cf96-3038-41ef-a184-38959ec7aeec
+Call-ID: 3d57462e-9f50-4c4b-948a-a8071470f74f
+From: <sip:0412345678@127.0.0.50>;tag=853fc68b-fa8f-4b80-b05e-c88cd994c1f0
+To: "Accueil" <sip:0465001550@127.0.0.50>;tag=e65d071d-a857-4206-ac69-2f1c7410e9a6
+CSeq: 14084 BYE
+Server: PBXMaison
+Content-Length:  0
+
+
+[2026-10-21 13:44:57] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (610 bytes) to UDP:127.0.0.2:5060 --->
+BYE sip:201@127.0.0.12:5080 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPj920224f6-9e5d-4f2d-b4f7-7e0d2330ab0b
+From: <sip:0412345678@b.e2e.invalid>;tag=a54a241d-293d-4db0-9666-f784f22e6880
+To: "Anonymous" <sip:201@b.e2e.invalid>;tag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b
+Call-ID: 10d58b1c-b94c-4cb1-a2c2-7ac6b3734c2d
+CSeq: 21721 BYE
+Route: <sip:127.0.0.2;lr;r2=on;ftag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b>
+Route: <sip:10.1.0.247;lr;r2=on;ftag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b>
+Reason: Q.850;cause=16
+Supported: path
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-21 13:44:57] ERROR[14058] cdr_csv.c: Unable to open file /var/log/callikoe/clib//cdr-csv//Master.csv : No such file or directory
+[2026-10-21 13:44:57] WARNING[14058] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clib//cdr-csv//Master.csv' : No such file or directory
+[2026-10-21 13:44:57] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (410 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPj920224f6-9e5d-4f2d-b4f7-7e0d2330ab0b
+Call-ID: 10d58b1c-b94c-4cb1-a2c2-7ac6b3734c2d
+From: <sip:0412345678@b.e2e.invalid>;tag=a54a241d-293d-4db0-9666-f784f22e6880
+To: "Anonymous" <sip:201@b.e2e.invalid>;tag=dba4dd06-f563-4c3e-8d01-8186eaa71b9b
+CSeq: 21721 BYE
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-21 13:45:02] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (470 bytes) to UDP:127.0.0.2:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPj962e1489-c000-47e6-ad77-d7951bdad733
+Route: <sip:127.0.0.2:5060;lr>
+From: <sip:acctb@127.0.0.50>;tag=85ee8083-883a-4896-bd35-874bc743bbff
+To: <sip:acctb@127.0.0.50>
+Call-ID: bab505e5-870d-450e-bb7d-1f6c4fba286a
+CSeq: 40961 REGISTER
+Contact: <sip:cx9d3ca776a2ea94a6@10.1.0.247:5060;line=kgtduyb>
+Expires: 0
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-21 13:45:02] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (725 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPj962e1489-c000-47e6-ad77-d7951bdad733
+Record-Route: <sip:10.1.0.247;lr;r2=on;ftag=85ee8083-883a-4896-bd35-874bc743bbff>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=85ee8083-883a-4896-bd35-874bc743bbff>
+Call-ID: bab505e5-870d-450e-bb7d-1f6c4fba286a
+From: <sip:acctb@127.0.0.50>;tag=85ee8083-883a-4896-bd35-874bc743bbff
+To: <sip:acctb@127.0.0.50>;tag=z9hG4bK28ad.c544e631c4a7b24be36a91806fec9b1b.0
+CSeq: 40961 REGISTER
+WWW-Authenticate: Digest realm="asterisk",nonce="1792590302/536d1549ca952838a0759cdd7ba80c28",opaque="06d706254f281841",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-21 13:45:02] VERBOSE[14065] res_pjsip_logger.c: <--- Transmitting SIP request (761 bytes) to UDP:127.0.0.2:5060 --->
+REGISTER sip:127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport;branch=z9hG4bKPje646c00d-0cc9-4e5a-95f4-75729b39ed82
+Route: <sip:127.0.0.2:5060;lr>
+From: <sip:acctb@127.0.0.50>;tag=85ee8083-883a-4896-bd35-874bc743bbff
+To: <sip:acctb@127.0.0.50>
+Call-ID: bab505e5-870d-450e-bb7d-1f6c4fba286a
+CSeq: 40962 REGISTER
+Contact: <sip:cx9d3ca776a2ea94a6@10.1.0.247:5060;line=kgtduyb>
+Expires: 0
+Max-Forwards: 70
+User-Agent: PBXMaison
+Authorization: Digest username="acctb", realm="asterisk", nonce="1792590302/536d1549ca952838a0759cdd7ba80c28", uri="sip:127.0.0.50:5070", response="a95b966718c25318a295f08b7c2ef1b2", algorithm=MD5, cnonce="2a2216a72fbc4e2391c2fdb8082c1f82", opaque="06d706254f281841", qop=auth, nc=00000001
+Content-Length:  0
+
+
+[2026-10-21 13:45:02] VERBOSE[14070] res_pjsip_logger.c: <--- Received SIP response (618 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.0.247:5060;rport=6002;received=127.0.0.1;branch=z9hG4bKPje646c00d-0cc9-4e5a-95f4-75729b39ed82
+Record-Route: <sip:10.1.0.247;lr;r2=on;ftag=85ee8083-883a-4896-bd35-874bc743bbff>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=85ee8083-883a-4896-bd35-874bc743bbff>
+Call-ID: bab505e5-870d-450e-bb7d-1f6c4fba286a
+From: <sip:acctb@127.0.0.50>;tag=85ee8083-883a-4896-bd35-874bc743bbff
+To: <sip:acctb@127.0.0.50>;tag=z9hG4bKf7ad.f06febc8135f6046012f798d1dcfc293.0
+CSeq: 40962 REGISTER
+Date: Wed, 21 Oct 2026 13:45:02 GMT
+Expires: 0
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-21 13:45:02] VERBOSE[16450] asterisk.c: Some modules could not be unloaded, switching to fast shutdown
+[2026-10-21 13:45:02] VERBOSE[16450] asterisk.c: Asterisk cleanly ending (0).
+[2026-10-21 13:45:02] VERBOSE[16450] asterisk.c: Executing last minute cleanups

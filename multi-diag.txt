@@ -1,0 +1,53 @@
+== Pendant l'appel entrant A (PBX cli a)
+PJSIP/201-00000001!from-internal!!1!Up!AppDial!(Outgoing Line)!201!!!3!4!9eb17af7-64f5-4f15-b32b-fca799c10543!1792590252.1
+PJSIP/op-00000000!inbound!s!20!Up!Dial!PJSIP/201&PJSIP/201-web,45,tb(pickup-mark^s^1)!anonymous!!!3!4!9eb17af7-64f5-4f15-b32b-fca799c10543!1792590252.0
+Bridge-ID                            Name                                 Chans Type            Technology      Duration
+9eb17af7-64f5-4f15-b32b-fca799c10543 <unknown>                                2 basic           simple_bridge   00:00:04
+
+                                             ...........Receive......... .........Transmit..........
+ BridgeId ChannelId ........ UpTime.. Codec.   Count    Lost Pct  Jitter   Count    Lost Pct  Jitter RTT....
+ ===========================================================================================================
+
+ 9eb17af7 201-00000001       00:00:04 alaw        0       0    0   0.000    200       0    0   0.000   0.000
+ 9eb17af7 op-00000000        00:00:04 alaw      200       0    0   0.000      0       0    0   0.000   0.000
+
+Objects found: 2
+
+          State: Up (6)
+  NativeFormats: (alaw)
+    WriteFormat: ulaw
+     ReadFormat: alaw
+ WriteTranscode: Yes (ulaw@8000)->(alaw@8000)
+  ReadTranscode: No 
+      Bridge ID: 9eb17af7-64f5-4f15-b32b-fca799c10543
+    Application: AppDial
+           Data: (Outgoing Line)
+BRIDGEPVTCALLID=2accb99b-d2ec-464f-8e7b-9338b917bd1e
+BRIDGEPEER=PJSIP/op-00000000
+level 1: lastdata=(Outgoing Line)
+    State: sendrecv
+    Metadata:
+          State: Up (6)
+  NativeFormats: (ulaw)
+    WriteFormat: alaw
+     ReadFormat: ulaw
+ WriteTranscode: Yes (alaw@8000)->(ulaw@8000)
+  ReadTranscode: Yes (alaw@8000)->(ulaw@8000)
+      Bridge ID: 9eb17af7-64f5-4f15-b32b-fca799c10543
+    Application: Dial
+           Data: PJSIP/201&PJSIP/201-web,45,tb(pickup-mark^s^1)
+BRIDGEPVTCALLID=18f56c03-b642-453d-b19f-8c1d65f92274
+BRIDGEPEER=PJSIP/201-00000001
+level 1: lastdata=PJSIP/201&PJSIP/201-web,45,tb(pickup-mark^s^1)
+    State: sendrecv
+    Metadata:
+== Poste pa
+PJSIP/pbx-00000000!answer!201!3!Up!Wait!4!anonymous!!!3!4!!1792590252.0
+== RTP pendant l'appel entrant A (flux : nombre de paquets)
+    205 127.0.0.50.30070 > 10.1.0.247.10170:
+    205 127.0.0.1.10086 > 127.0.0.11.31064:
+      2 10.1.0.247.10170 > 74.125.250.129.19302:
+      2 10.1.0.247.10086 > 74.125.250.129.19302:
+      1 74.125.250.129.19302 > 10.1.0.247.10170:
+      1 74.125.250.129.19302 > 10.1.0.247.10086:
+      1   
