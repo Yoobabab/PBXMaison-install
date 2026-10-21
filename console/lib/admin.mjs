@@ -742,7 +742,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
   }
 
   return {
-    migrate, start, dialplanParts, testMail, vmKey, reportSettings, setReportSettings, buildMonthlyReport, sendMonthlyReport, consoleAllowed, refreshAllow,
+    migrate, start, dialplanParts, testMail, sendMail, vmKey, reportSettings, setReportSettings, buildMonthlyReport, sendMonthlyReport, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
     getSecurity, setSecurity, banIp,
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,

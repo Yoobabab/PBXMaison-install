@@ -958,3 +958,7 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .ai-ah{display:flex;align-items:center;gap:8px;margin-bottom:8px}.ai-ah .btn{margin-left:auto}
 .ai-txt{line-height:1.55}
 .ivr-sp{align-items:flex-start;gap:8px;margin:4px 0 10px}.ivr-kw input{width:100%;min-width:160px;box-sizing:border-box}
+.rc-trs{display:flex;flex-direction:column;gap:8px;margin:6px 0 8px}
+.rc-tr{display:grid;grid-template-columns:26px minmax(120px,1fr) minmax(160px,1.4fr) minmax(160px,1.2fr) 32px;gap:8px;align-items:center}
+.rc-n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:12px}
+@media (max-width:760px){.rc-tr{grid-template-columns:26px 1fr 32px}.rc-tr input[data-f=description],.rc-tr select{grid-column:2/3}}

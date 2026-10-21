@@ -87,6 +87,14 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
     catch (e) { if (e.code !== 401) throw e; token = (await register(s)).token; return raw(s, p, body, token); }
   }
 
+  /** Adresse WebSocket de la voix en direct (standardiste IA), jeton du PBX compris */
+  async function realtimeUrl() {
+    const s = await settings();
+    if (!s.enabled) throw new AiError("IA désactivée.", 403);
+    let token = await db.getSetting("ai_token", "");
+    if (!token) token = (await register(s)).token;
+    return `${relayUrl(s).replace(/^http/, "ws")}/v1/ai/realtime?t=${encodeURIComponent(token)}`;
+  }
   const status = async () => {
     const s = await settings();
     try { return { settings: s, relay: (await call("/v1/ai/status", undefined, { force: true })).status, error: "" }; }
@@ -119,5 +127,5 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
     if (next.enabled && !s.enabled) { try { await register(next); } catch { /* le statut affichera l'erreur */ } }
     return status();
   }
-  return { settings, saveSettings, status, transcribe, text, speech, voicemailInsight, insights, AiError };
+  return { settings, saveSettings, status, transcribe, text, speech, voicemailInsight, insights, realtimeUrl, AiError };
 }

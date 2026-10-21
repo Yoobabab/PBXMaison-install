@@ -20,6 +20,8 @@ const P = {
   groupvm: '<path d="M3 13l2.5-7h13L21 13v6H3z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
   conf: '<rect x="3" y="6.5" width="12.5" height="11" rx="2"/><path d="m15.5 10.5 5.5-3v9l-5.5-3"/>',
   external: '<path d="M7 17 17 7M9 7h8v8"/>',
+  ai: '<path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/><path d="M18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
+  ai_msg: '<path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/><path d="M4 18h9"/>',
   hangup: '<path d="M3.5 13.5c4.7-4 12.3-4 17 0l-2 2.5-3-1.2v-2.3a10 10 0 0 0-7 0v2.3l-3 1.2z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>', grip: '<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="2.8"/>',
   arrow: '<path d="M4 12h15M14 6l6 6-6 6"/>', spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
@@ -33,6 +35,7 @@ const STEPS = [
 const ENDS = [
   ["user_vm", "Boîte vocale", "Messagerie d'un utilisateur"], ["groupvm", "Boîte de groupe", "Messagerie partagée"],
   ["user", "Utilisateur", "Avec ses propres renvois"], ["conf", "Réunion", "Salle de réunion"], ["external", "Numéro externe", "Renvoi vers un mobile…"], ["hangup", "Fin de l'appel", "Raccrocher"],
+  ["ai", "Standardiste IA", "Répond, renseigne, transfère"], ["ai_msg", "Standardiste IA (message)", "Prend un message"],
 ];
 const LABEL = Object.fromEntries([...STEPS, ...ENDS].map(([k, l]) => [k, l]));
 const TERMINAL = [...ENDS.map(([k]) => k), "ivr"]; // le SVI termine le routage : ce sont ses touches qui envoient l'appel ailleurs
@@ -222,7 +225,7 @@ function wireChain(c) {
 }
 function addStep(type, at) {
   const list = flow.branches[tab];
-  const st = { type, ...(type === "ring" ? { users: [], strategy: "all", time: 20 } : type === "group" ? { target: objs("group")[0]?.id || "", time: null } : type === "hangup" ? {} : { target: "" }) };
+  const st = { type, ...(type === "ring" ? { users: [], strategy: "all", time: 20 } : type === "group" ? { target: objs("group")[0]?.id || "", time: null } : ["hangup", "ai", "ai_msg"].includes(type) ? {} : { target: "" }) };
   if (["queue", "ivr", "prompt", "groupvm", "conf"].includes(type) && objs(type).length === 1) st.target = objs(type)[0].id;
   list.splice(at ?? list.length, 0, st);
   adding = null; errAt = null; sel = null;
@@ -231,7 +234,7 @@ function addStep(type, at) {
 function valid(st) {
   switch (st.type) {
     case "ring": return st.users?.length > 0;
-    case "hangup": return true;
+    case "hangup": case "ai": case "ai_msg": return true;
     case "external": return /^0[1-9]\d{8}$/.test(String(st.target || "").replace(/\D/g, ""));
     default: return !!st.target;
   }
@@ -245,6 +248,8 @@ function describe(st) {
     case "user": case "user_vm": return st.target ? `${st.target} · ${userName(st.target)}` : "Choisis l'utilisateur";
     case "external": return st.target ? fmtP(st.target) : "Saisis le numéro";
     case "hangup": return "L'appel est raccroché";
+    case "ai": return "La voix IA répond, renseigne et transfère";
+    case "ai_msg": return "La voix IA prend un message";
     default: return num(o(st.type, st.target)) || "À choisir";
   }
 }
@@ -307,6 +312,9 @@ function panel() {
       <p class="hint" style="margin:0">${st.type === "user" ? "L'appel suit ensuite les renvois de sa fiche." : "L'appelant laisse un message dans sa boîte vocale."}</p>`;
   } else if (st.type === "external") {
     body = `<label>Numéro<input data-f="target" inputmode="tel" placeholder="06 12 34 56 78" value="${esc(fmtP(st.target))}"></label>`;
+  } else if (st.type === "ai" || st.type === "ai_msg") {
+    body = `<p class="hint" style="margin:0">${st.type === "ai" ? "Une voix IA répond à l'appelant, le renseigne (horaires, adresse…), le transfère vers le bon service ou prend un message." : "Une voix IA prend le message de l'appelant (nom, numéro, motif) : il arrive par e-mail et dans « À rappeler »."}
+      Réglages (nom de l'entreprise, informations, transferts) : <a href="#/ia">Administration › IA</a>.</p>`;
   } else body = '<p class="hint" style="margin:0">L\'appel est raccroché.</p>';
   side.innerHTML = `<div class="fx-ph"><span class="fx-ci">${icon(st.type)}</span><strong>${esc(LABEL[st.type])}</strong><button type="button" class="fx-x" id="pclose2" aria-label="Fermer">${icon("x", 16)}</button></div>
     <form class="fx-pb stack" id="fxform" novalidate>${body}<div class="fx-perr" id="perr"></div></form>

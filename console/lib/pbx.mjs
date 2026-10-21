@@ -991,7 +991,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const objects = await loadObjects();
     const model = { users: byId, objects, soundsDir: soundsDir(), tz: tz(),
       // SVI qui comprend la parole : la phrase enregistrée est envoyée à la console (IA), qui répond la touche choisie
-      speech: { dir: REC_DIR(), url: `http://127.0.0.1:${CX_SETTINGS.port}/internal/ivr-speech?k=${speechKey()}` } };
+      speech: { dir: REC_DIR(), url: `http://127.0.0.1:${CX_SETTINGS.port}/internal/ivr-speech?k=${speechKey()}`,
+        aiUrl: `http://127.0.0.1:${CX_SETTINGS.port}/internal/ai-call?k=${speechKey()}`, audiosocket: `127.0.0.1:${audioSocketPort()}` },
+      receptionist: await db.getSetting("receptionist", null) };
     writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
     const contacts = await loadContacts();
     const std = await db.getSetting("standard", defaultStandard());
@@ -1224,6 +1226,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       trunkDids: new Set(trunks.rows.flatMap((r) => trunkDidList(r, countryCode()))), legacyInbound: routes.inbound, cc: countryCode(), tz: tz(), now: new Date() };
   }
   /** Clé des appels du moteur téléphonique vers la console (SVI parlé) : dérivée du secret de session, jamais exposée */
+  /** Port du pont audio du standardiste IA (AudioSocket), propre à chaque PBX : port de la console + 20000 */
+  function audioSocketPort() { return Number(process.env.PBXM_AUDIOSOCKET_PORT) || CX_SETTINGS.port + 20000; }
   function speechKey() { return crypto.createHmac("sha256", String(CX_SETTINGS.sessionSecret || "cx")).update("ivr-speech").digest("hex").slice(0, 32); }
   async function parseFlow(text) {
     const [users, objects, trunks] = await Promise.all([loadUsers(), loadObjects(), db.query("SELECT number, dids FROM pbxmaison_trunks")]);
@@ -1487,7 +1491,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
-    speechKey, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
+    speechKey, audioSocketPort, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }
 

@@ -656,12 +656,22 @@ async function pageCapture() {
 }
 
 // ================================================================ IA
+/** Destinations proposées au standardiste IA : collègues, groupes, files, SVI, messageries */
+function rcDests(rc, cur, fallback = false) {
+  const v = cur?.type ? `${cur.type}:${cur.target || ""}` : "";
+  const opt = (val, l) => `<option value="${H.esc(val)}" ${val === v ? "selected" : ""}>${H.esc(l)}</option>`;
+  const K = { group: "Groupe", queue: "File", ivr: "SVI", groupvm: "Messagerie de groupe" };
+  return (fallback ? opt("hangup:", "Raccrocher") : opt("", "— Choisir —"))
+    + `<optgroup label="Collègues">${rc.users.map((u) => opt(`user:${u.id}`, `${u.id} · ${u.name}`)).join("")}</optgroup>`
+    + `<optgroup label="Groupes, files, SVI">${rc.objects.filter((o) => o.kind !== "groupvm").map((o) => opt(`${o.kind}:${o.id}`, `${K[o.kind]} ${o.number || ""} · ${o.name}`)).join("")}</optgroup>`
+    + `<optgroup label="Messageries">${rc.users.filter((u) => u.vm).map((u) => opt(`user_vm:${u.id}`, `Messagerie de ${u.name}`)).join("")}${rc.objects.filter((o) => o.kind === "groupvm").map((o) => opt(`groupvm:${o.id}`, `Messagerie de groupe ${o.name}`)).join("")}</optgroup>`;
+}
 async function pageAi() {
   H.setNav("ai");
-  const [d, rep] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report")]);
+  const [d, rep, rc] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report"), H.api("GET", "/api/ai-settings/receptionist")]);
   const r = d.relay, on = d.settings.enabled;
   const euro = (n) => `${(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-  const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce", report: "bilans et rapports" };
+  const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce", report: "bilans et rapports", flow: "routages écrits en français", ivr: "choix du SVI parlé", standardiste: "appels du standardiste IA", standardiste_min: "minutes de standardiste IA" };
   const state = !on ? ["off", "Désactivée"] : d.error ? ["bad", "Problème"] : r?.fake ? ["wait", "Mode test"] : r?.ready ? ["ok", "Active"] : ["wait", "En attente de la clé IRT"];
   H.app.innerHTML = head("IA", "Fonctions d'intelligence artificielle du PBX. La clé OpenAI d'IRT reste dans le portail pro : le PBX n'y a jamais accès.") + `
     <div class="cards">
@@ -673,6 +683,16 @@ async function pageAi() {
       ${sw("enabled", on, "Activer l'IA sur ce PBX", "Annonces en voix IA, diagnostic dans Gestion d'appels › Dépannage, et les options ci-dessous.")}
       ${sw("voicemail", d.settings.voicemail, "Transcrire et résumer les messages vocaux", "Chaque nouveau message est écrit en texte avec un résumé d'une phrase : dans l'e-mail, le softphone et l'appli. Environ 0,3 centime la minute.")}
       <div class="note">À prévoir côté client (RGPD) : informer les appelants que les messages sont transcrits automatiquement, par exemple dans l'annonce du répondeur. Les messages passent par le relais Callikoe puis OpenAI, sans y être conservés au-delà du traitement.</div>
+      <div class="actions"><button class="btn">Enregistrer</button></div></form></div>
+    <div class="panel"><div class="ph"><h2><span class="ai-badge">IA</span> Standardiste IA</h2></div><form id="rcf" class="pad stack" novalidate><div class="form-msg"></div>
+      <p class="hint" style="margin:0">Une voix IA répond au téléphone : elle renseigne l'appelant, le transfère vers le bon service ou prend un message. Pour l'utiliser, choisis la destination <b>« Standardiste IA »</b> dans une règle entrante, un routage ou un SVI (par exemple quand c'est fermé ou quand personne ne répond). Environ 5 à 10 centimes la minute d'appel.</p>
+      <div class="grid2"><label>Nom de l'entreprise<input name="company" value="${H.esc(rc.settings.company)}" maxlength="80" placeholder="Boulangerie Martin"></label>
+        <label>Voix<select name="voice">${Object.entries(rc.voices).map(([k, l]) => `<option value="${k}" ${rc.settings.voice === k ? "selected" : ""}>${H.esc(l)}</option>`).join("")}</select></label></div>
+      <label>Phrase d'accueil (facultatif)<input name="greeting" value="${H.esc(rc.settings.greeting)}" maxlength="200" placeholder="Boulangerie Martin, bonjour ! Que puis-je pour vous ?"></label>
+      <label>Ce que l'IA peut répondre<textarea name="info" rows="5" maxlength="3000" placeholder="Horaires : du mardi au samedi, 7 h – 19 h 30, dimanche 7 h – 13 h.\nAdresse : 12 rue de la Gare, Rennes. Parking devant.\nCommandes de gâteaux : 48 h à l'avance.">${H.esc(rc.settings.info)}</textarea><span class="hint">Horaires, adresse, réponses aux questions fréquentes. L'IA n'invente rien d'autre.</span></label>
+      <div><span class="dl">Transferts possibles</span><div id="rctr" class="rc-trs"></div><button type="button" class="btn ghost sm" id="rcadd">+ Ajouter un transfert</button></div>
+      <div class="grid2"><label>Messages envoyés à<input name="message_to" value="${H.esc(rc.settings.message_to.join(", "))}" placeholder="accueil@client.fr"><span class="hint">Chaque message pris par l'IA arrive par e-mail et dans « À rappeler » du softphone.</span></label>
+        <label>Si l'IA est indisponible<select name="fallback">${rcDests(rc, rc.settings.fallback, true)}</select></label></div>
       <div class="actions"><button class="btn">Enregistrer</button></div></form></div>
     <div class="panel"><div class="ph"><h2>Rapport mensuel au client</h2></div><form id="rpf" class="pad stack" novalidate><div class="form-msg"></div>
       <p class="hint" style="margin:0">Le 1er de chaque mois, le client reçoit par e-mail le bilan du mois écoulé : appels reçus, pris, manqués, attente, jours et heures chargés, appels par personne${on ? ", avec l'analyse et les conseils de l'IA" : ""}. Aux couleurs et au logo du serveur (option Marque blanche), sinon aux couleurs Callikoe.</p>
@@ -686,6 +706,26 @@ async function pageAi() {
       <div class="row"><input id="aitry" class="grow" value="On est fermés lundi pour inventaire" maxlength="300"><button type="button" class="btn ghost" id="aitryb" ${on ? "" : "disabled"}>Rédiger une annonce</button></div>
       <div id="aitryr"></div></div></div>`;
   onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
+  // Standardiste IA : transferts (nom, description, destination)
+  let trs = rc.settings.transfers.map((t) => ({ ...t }));
+  const drawTr = () => {
+    H.$("#rctr").innerHTML = trs.map((t, i) => `<div class="rc-tr" data-i="${i}"><span class="rc-n">${i + 1}</span>
+      <input data-f="label" value="${H.esc(t.label)}" placeholder="Nom (ex. Commandes)" maxlength="60">
+      <input data-f="description" value="${H.esc(t.description || "")}" placeholder="Quand ? (ex. gâteaux, traiteur, livraisons)" maxlength="200">
+      <select data-f="dest">${rcDests(rc, t.dest)}</select><button type="button" class="ic" data-rm title="Retirer">✕</button></div>`).join("") || '<p class="s" style="margin:0 0 8px">Aucun transfert : l\'IA ne fera que renseigner et prendre des messages.</p>';
+    H.$("#rctr").querySelectorAll(".rc-tr").forEach((row) => {
+      const t = trs[Number(row.dataset.i)];
+      row.querySelectorAll("[data-f]").forEach((el) => el.oninput = el.onchange = () => { if (el.dataset.f === "dest") { const [type, target] = el.value.split(":"); t.dest = { type, target }; } else t[el.dataset.f] = el.value; });
+      row.querySelector("[data-rm]").onclick = () => { trs.splice(Number(row.dataset.i), 1); drawTr(); };
+    });
+  };
+  drawTr();
+  H.$("#rcadd").onclick = () => { trs.push({ label: "", description: "", dest: { type: "", target: "" } }); drawTr(); };
+  onSubmit(H.$("#rcf"), async (f) => {
+    const [ft, fg] = String(f.fallback || "hangup:").split(":");
+    await H.api("PUT", "/api/ai-settings/receptionist", { company: f.company, voice: f.voice, greeting: f.greeting, info: f.info, message_to: f.message_to, transfers: trs, fallback: { type: ft, target: fg || "" } });
+    ok("Standardiste IA enregistré."); pageAi();
+  });
   onSubmit(H.$("#rpf"), async (f) => { await H.api("PUT", "/api/ai-settings/report", { enabled: f.enabled, ai: f.ai, recipients: f.recipients, signature: f.signature }); ok("Rapport mensuel enregistré."); pageAi(); });
   H.$("#rptest").onclick = async (e) => {
     const to = prompt("Envoyer un essai du rapport (mois dernier) à :", H.state?.email || "");

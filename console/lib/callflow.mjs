@@ -20,9 +20,10 @@ export const STEP_TYPES = {
   ring: "Faire sonner des utilisateurs", group: "Groupe d'appel", queue: "File d'attente", prompt: "Lire une annonce",
   ivr: "Répondeur numérique (SVI)", user: "Utilisateur (avec ses renvois)", user_vm: "Boîte vocale d'un utilisateur",
   groupvm: "Boîte vocale de groupe", conf: "Salle de réunion", external: "Numéro externe", hangup: "Terminer l'appel",
+  ai: "Standardiste IA (répond, renseigne, transfère)", ai_msg: "Standardiste IA (prend un message)",
 };
 /** Étapes après lesquelles rien ne peut suivre (l'appel ne revient pas). */
-export const TERMINAL_STEPS = ["ivr", "user", "user_vm", "groupvm", "conf", "external", "hangup"];
+export const TERMINAL_STEPS = ["ivr", "user", "user_vm", "groupvm", "conf", "external", "hangup", "ai", "ai_msg"];
 export const BRANCHES = { open: "Heures d'ouverture", closed: "Bureau fermé", break: "Pause", holiday: "Jour férié / congés" };
 /** Objets qui ont un numéro interne (composable depuis un poste). */
 export const NUMBERED = ["group", "queue", "ivr", "groupvm", "conf"];
@@ -30,6 +31,7 @@ export const DEST_TYPES = {
   hangup: "Terminer l'appel", user: "Utilisateur", user_vm: "Boîte vocale d'un utilisateur", group: "Groupe d'appel",
   ivr: "Répondeur numérique (SVI)", queue: "File d'attente", groupvm: "Boîte vocale de groupe",
   external: "Transférer vers un numéro externe", prompt: "Lire une annonce puis raccrocher",
+  ai: "Standardiste IA (répond, renseigne, transfère)", ai_msg: "Standardiste IA (prend un message)",
 };
 export const GROUP_STRATEGIES = {
   hunt: "1 à 1 dans l'ordre", all: "Sonne tous", rotate: "1 à 1 en tournant (on commence par le suivant à chaque appel)",
@@ -96,7 +98,7 @@ export function validateDest(d, ctx, field, { allowNull = false } = {}) {
     const { prompt, ...rest } = d;
     return { ...validateDest(rest, ctx, field), prompt };
   }
-  if (type === "hangup") return { type, target: "" };
+  if (type === "hangup" || type === "ai" || type === "ai_msg") return { type, target: "" };
   if (type === "user" || type === "user_vm") {
     if (!ctx.users.has(target)) throw new UserError("Choisis l'utilisateur.", field);
     if (type === "user_vm" && !ctx.users.get(target).voicemail.enabled) throw new UserError(`La messagerie de ${target} est désactivée.`, field);
@@ -546,6 +548,8 @@ export function destApps(d, m) {
       return p?.data?.file ? ["Answer()", `Playback(${promptPath(m.soundsDir, p)})`, "Hangup()"] : ["Hangup()"];
     }
     case "hangup": return ["Hangup()"];
+    case "ai": return ["Goto(cx-ai,s,1)"];
+    case "ai_msg": return ["Goto(cx-ai,msg,1)"];
     default: {
       const o = find(m.objects, d.type, d.target);
       return o ? [`Goto(callflow,${o.number},1)`] : ["Hangup()"];
@@ -682,6 +686,20 @@ export function buildCallflowDialplan(m) {
       L.push(` same => n,GotoIf($[\${TRIES} <= ${d.retries}]?s,menu)`);
       pushApps(L, destApps(d.invalid, m));
     }
+  }
+
+  // Standardiste IA : la console (IA) répond en direct par AudioSocket ; transferts vers les destinations réglées (cx-ai-out)
+  if (m.speech) {
+    const r = m.receptionist || {};
+    const reg = (mode) => `Set(CXAI=\${CURL(${m.speech.aiUrl}&mode=${mode}&from=\${URIENCODE(\${CALLERID(num)})}&name=\${URIENCODE(\${CALLERID(name)})}&chan=\${URIENCODE(\${CHANNEL})}&did=\${URIENCODE(\${CDR(did)})})})`;
+    L.push("", "[cx-ai]");
+    for (const [ex, mode] of [["s", "full"], ["msg", "msg"]]) {
+      L.push(`exten => ${ex},1,Answer()`, " same => n,Set(CDR(dest_kind)=ai)", " same => n,Set(CURLOPT(httptimeout)=8)", ` same => n,${reg(mode)}`,
+        ` same => n,GotoIf($["\${CXAI}" = ""]?off)`, ` same => n,AudioSocket(\${CXAI},${m.speech.audiosocket})`, " same => n,Hangup()");
+      pushApps(L, destApps(r.fallback || { type: "hangup", target: "" }, m), "off");
+    }
+    L.push("", "[cx-ai-out]");
+    (r.transfers || []).forEach((t, i) => { L.push(`exten => ${i + 1},1,NoOp(Standardiste IA : ${clean(t.label, 40)})`); pushApps(L, destApps(t.dest, m)); });
   }
 
   // Interphone : demande aux postes (et au softphone web) de décrocher tout seuls
@@ -1081,6 +1099,7 @@ function expand(dest, m, path, depth) {
   const p = [...path, key];
   switch (dest.type) {
     case "hangup": return node("hangup", "Raccroche", { status: "warn" });
+    case "ai": case "ai_msg": return node("prompt", dest.type === "ai" ? "Standardiste IA (répond, renseigne, transfère)" : "Standardiste IA (prend un message)", { status: "ok", detail: ["Réglages : Administration › IA. Si l'IA est indisponible : destination de secours."] });
     case "external": {
       const nd = node("external", `Numéro externe ${fmt(dest.target)}`, { detail: [] });
       if (!m.outboundTrunk) { nd.status = "bad"; nd.detail.push("Aucun trunk sortant (Routes) : le renvoi échoue."); }

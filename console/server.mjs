@@ -29,6 +29,7 @@ import { createAi, diagnosisInput, VOICES as AI_VOICES } from "./lib/ai.mjs";
 import { missedCallers, sameNumberKey } from "./lib/callback.mjs";
 import { periodOf, periodStats, reportInput } from "./lib/report.mjs";
 import { ivrOptions, localMatch } from "./lib/ivrspeech.mjs";
+import { createReceptionist, validateReceptionist, RT_VOICES } from "./lib/receptionist.mjs";
 import { REC_DIR } from "./lib/recording.mjs";
 import { registerThemeRoutes } from "./lib/theme.mjs";
 import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
@@ -1029,6 +1030,9 @@ export async function buildApp({ db, ami } = {}) {
       db.query("SELECT key, at FROM pbxmaison_callback_done WHERE at > now() - interval '4 days'").then((r) => new Map(r.rows.map((x) => [x.key, new Date(x.at).toISOString()]))).catch(() => new Map()),
       pbx.listContacts().catch(() => []),
     ]);
+    const aiMsgs = await db.query("SELECT caller AS caller_number, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS') AS at, 'Standardiste IA : ' || message AS summary, urgent FROM pbxmaison_ai_messages WHERE at > now() - interval '4 days'")
+      .then((r) => r.rows).catch(() => []);
+    vms.push(...aiMsgs);
     const names = new Map();
     for (const c of contacts) for (const p of c.phones) names.set(sameNumberKey(p.number), c.name);
     return missedCallers(log.calls, { done, voicemails: vms, contacts: names, tz: pbxEnv().PBX_TIMEZONE || "Europe/Paris" });
@@ -1043,6 +1047,33 @@ export async function buildApp({ db, ami } = {}) {
   app.post("/api/callbacks/done", { preHandler: requireUser }, async (req) => markDone(req.body?.number, currentUser(req).email));
   app.get("/api/u/callbacks", { preHandler: requireWebUser }, async (req) => { await pilotOf(req); return { callbacks: await callbacks() }; });
   app.post("/api/u/callbacks/done", { preHandler: requireWebUser }, async (req) => { const me = await pilotOf(req); return markDone(req.body?.number, `Pilote ${me.id} ${me.name}`); });
+
+  // ---------------------------------------------------------------- Standardiste IA
+  const receptionist = createReceptionist({ db, ami, ai, sendMail: (to, mail) => admin.sendMail(to, mail), tz: () => pbxEnv().PBX_TIMEZONE || "Europe/Paris", log: app.log });
+  receptionist.listen(pbx.audioSocketPort());
+  const localKeyOk = (req) => {
+    const ipOk = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress) && !req.headers["x-forwarded-for"] && !req.headers["x-real-ip"];
+    const k = String(req.query?.k || ""), want = pbx.speechKey();
+    return ipOk && k.length === want.length && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want));
+  };
+  app.get("/internal/ai-call", async (req, reply) => {
+    reply.type("text/plain; charset=utf-8");
+    if (!localKeyOk(req)) return reply.code(403).send("");
+    const q = req.query || {};
+    try { return await receptionist.register({ from: q.from, name: q.name, chan: q.chan, did: q.did, mode: q.mode }); } catch { return ""; }
+  });
+  app.get("/api/ai-settings/receptionist", { preHandler: requireUser }, async () => {
+    const [cfg, cf] = await Promise.all([receptionist.settings(), pbx.listObjects()]);
+    const users = (await pbx.listExtensions()).map((u) => ({ id: u.id, name: u.name, vm: u.vm }));
+    return { settings: cfg, voices: RT_VOICES, users, objects: cf.filter((o) => ["group", "queue", "ivr", "groupvm"].includes(o.kind)).map((o) => ({ kind: o.kind, id: o.id, number: o.number, name: o.name })) };
+  });
+  app.put("/api/ai-settings/receptionist", { preHandler: requireUser }, async (req) => {
+    let next;
+    try { next = validateReceptionist(req.body || {}, await receptionist.settings()); } catch (e) { throw new UserError(e.message, e.field); }
+    await db.setSetting("receptionist", next);
+    await pbx.applyDialplan();
+    return { settings: next };
+  });
 
   // ---------------------------------------------------------------- SVI parlé : appelé par le moteur téléphonique (CURL du dialplan), jamais depuis l'extérieur
   app.get("/internal/ivr-speech", async (req, reply) => {
