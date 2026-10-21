@@ -957,3 +957,4 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .ai-answer{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:14px 16px;background:var(--panel)}
 .ai-ah{display:flex;align-items:center;gap:8px;margin-bottom:8px}.ai-ah .btn{margin-left:auto}
 .ai-txt{line-height:1.55}
+.ivr-sp{align-items:flex-start;gap:8px;margin:4px 0 10px}.ivr-kw input{width:100%;min-width:160px;box-sizing:border-box}

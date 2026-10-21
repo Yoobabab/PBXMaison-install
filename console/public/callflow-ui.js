@@ -465,8 +465,11 @@ function renderForm(head, kind, id) {
     body = `${didChips(d, id)}
       ${promptField("prompt", d.prompt, "Directive (annonce du menu)", "« Pour le service commercial, tapez 1… ». Fichier converti automatiquement (WAV 8 kHz, 16 bits, mono).")}
       <h3 class="cf-h">Menu</h3>
-      <table class="ivrkeys"><thead><tr><th>Touche</th><th>Action et destination</th></tr></thead><tbody>
-      ${IVR_KEYS.map((k) => `<tr><td><span class="kbadge">${esc(k)}</span></td><td>${destPicker(`options.${k}`, d.options[k], { selfId: id, allowNone: true, noneLabel: "Rien", withPrompt: false, keyLabels: true })}</td></tr>`).join("")}</tbody></table>
+      <label class="check ivr-sp"><input type="checkbox" name="speech" ${d.speech ? "checked" : ""}> <span><span class="ai-badge">IA</span> <strong>Comprendre la parole</strong> : l'appelant peut aussi dire ce qu'il veut (« la compta », « je veux parler à Sophie »)
+        <span class="hint" style="display:block">Si l'IA est activée (Administration › IA). Le service de chaque touche est reconnu tout seul ; ajoute des mots-clés si besoin. Environ 1 à 2 centimes par appel. Pense à le dire dans l'annonce : « … ou dites simplement le service souhaité ».</span></span></label>
+      <table class="ivrkeys"><thead><tr><th>Touche</th><th>Action et destination</th><th class="ivr-kwh" ${d.speech ? "" : "hidden"}>Mots-clés (parole)</th></tr></thead><tbody>
+      ${IVR_KEYS.map((k) => `<tr><td><span class="kbadge">${esc(k)}</span></td><td>${destPicker(`options.${k}`, d.options[k], { selfId: id, allowNone: true, noneLabel: "Rien", withPrompt: false, keyLabels: true })}</td>
+        <td class="ivr-kw" ${d.speech ? "" : "hidden"}><input name="keywords.${esc(k)}" value="${esc(d.keywords?.[k] || "")}" maxlength="120" placeholder="ex. factures, paiement"></td></tr>`).join("")}</tbody></table>
       <h3 class="cf-h">Options</h3>
       <div class="grid2">${num("timeout", "Délai pour choisir (secondes)", d.timeout, 1, 30)}
       ${num("retries", "Répéter le menu", d.retries, 0, 5, "fois, si aucun choix ou erreur")}
@@ -497,6 +500,8 @@ function renderForm(head, kind, id) {
     </form></div>`;
   const form = h.$("#cff");
   wireDests(form); wireMembers(form); wirePromptFields(form); wireOffice(form);
+  const sp = form.querySelector("[name=speech]");
+  if (sp) sp.onchange = () => form.querySelectorAll(".ivr-kw, .ivr-kwh").forEach((x) => { x.hidden = !sp.checked; });
   form.querySelectorAll("[data-did]").forEach((b) => { if (!b.onclick) b.onclick = () => b.classList.toggle("on"); });
   if (kind === "queue") wirePeriodic(form);
   if (kind === "schedule") wireSchedule(form, d);

@@ -62,7 +62,7 @@ export function defaultObject(kind) {
     case "group": return { name: "", number: "", strategy: "all", members: [], ring_time: 20, cid_prefix: "", greeting: "", no_answer: hang, ...OFFICE };
     case "queue": return { name: "", number: "", strategy: "ringall", members: [], member_timeout: 15, max_wait: 300, wrapup: 5,
       announce_position: true, announce_holdtime: false, greeting: "", moh: "", periodic: [], periodic_freq: 30, no_answer: hang, ...OFFICE };
-    case "ivr": return { name: "", number: "", prompt: "", timeout: 5, retries: 2, direct_dial: true, options: {}, invalid: hang, ...OFFICE };
+    case "ivr": return { name: "", number: "", prompt: "", timeout: 5, retries: 2, direct_dial: true, options: {}, invalid: hang, speech: false, keywords: {}, ...OFFICE };
     case "groupvm": return { name: "", number: "", pin: "", members: [] };
     case "conf": return { name: "", number: "", pin: "", max_members: 20, video: true };
     case "schedule": return { name: "", week: Object.fromEntries(DAYS.map(([d]) => [d, ["mon", "tue", "wed", "thu", "fri"].includes(d) ? [["09:00", "12:00"], ["14:00", "18:00"]] : []])),
@@ -205,6 +205,13 @@ export function validateObject(kind, input, current, ctx) {
       d.options = opts;
     }
     if (input.invalid !== undefined) d.invalid = validateDest(input.invalid, ctx, "invalid");
+    // SVI qui comprend la parole (IA) : mots-clés facultatifs par touche (« compta, factures »)
+    if (input.speech !== undefined) d.speech = !!input.speech;
+    if (input.keywords !== undefined) {
+      const kw = {};
+      for (const [k, v] of Object.entries(input.keywords || {})) { const t = clean(v, 120); if (IVR_KEYS.includes(k) && t) kw[k] = t; }
+      d.keywords = kw;
+    }
   } else if (kind === "conf") {
     if (input.pin !== undefined) {
       const pin = String(input.pin).trim();
@@ -652,7 +659,15 @@ export function buildCallflowDialplan(m) {
     const d = o.data;
     const p = d.prompt && find(m.objects, "prompt", d.prompt);
     L.push("", `[ivr-${o.number}]`, "exten => s,1,Answer()", " same => n,Set(CDR(dest_kind)=ivr)", " same => n,Set(__RINGTYPE=svi)", " same => n,Set(TRIES=0)", " same => n,Set(TIMEOUT(digit)=2)");
-    L.push(` same => n(menu),${p?.data?.file ? `Background(${promptPath(m.soundsDir, p)})` : "Wait(1)"}`, ` same => n,WaitExten(${d.timeout})`);
+    if (d.speech && m.speech) {
+      // L'appelant peut taper une touche pendant l'annonce, ou parler : sa phrase est enregistrée (fin après 2 s de silence, 7 s au plus)
+      // puis la console (IA) choisit la touche correspondante ; sinon, retour au fonctionnement normal
+      L.push(` same => n(menu),${p?.data?.file ? `Background(${promptPath(m.soundsDir, p)})` : "Wait(1)"}`, " same => n,WaitExten(1)",
+        ` same => n,Record(${m.speech.dir}/svi-\${UNIQUEID}-\${TRIES}.wav,2,7,q)`,
+        " same => n,Set(CURLOPT(httptimeout)=15)",
+        ` same => n,Set(SVI_CHOICE=\${CURL(${m.speech.url}&ivr=${o.id}&u=\${UNIQUEID}-\${TRIES})})`,
+        " same => n,GotoIf($[\"${SVI_CHOICE}\" != \"\"]?${SVI_CHOICE},1)", ` same => n,WaitExten(${Math.max(1, d.timeout - 1)})`);
+    } else L.push(` same => n(menu),${p?.data?.file ? `Background(${promptPath(m.soundsDir, p)})` : "Wait(1)"}`, ` same => n,WaitExten(${d.timeout})`);
     for (const [k, dest] of Object.entries(d.options)) {
       L.push(`exten => ${k},1,NoOp(SVI ${o.number} : touche ${k})`);
       pushApps(L, destApps(dest, m));

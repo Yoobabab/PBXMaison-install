@@ -28,6 +28,8 @@ import { CX_MODE, CX_TENANT, ETC } from "./lib/config.mjs";
 import { createAi, diagnosisInput, VOICES as AI_VOICES } from "./lib/ai.mjs";
 import { missedCallers, sameNumberKey } from "./lib/callback.mjs";
 import { periodOf, periodStats, reportInput } from "./lib/report.mjs";
+import { ivrOptions, localMatch } from "./lib/ivrspeech.mjs";
+import { REC_DIR } from "./lib/recording.mjs";
 import { registerThemeRoutes } from "./lib/theme.mjs";
 import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
@@ -1041,6 +1043,35 @@ export async function buildApp({ db, ami } = {}) {
   app.post("/api/callbacks/done", { preHandler: requireUser }, async (req) => markDone(req.body?.number, currentUser(req).email));
   app.get("/api/u/callbacks", { preHandler: requireWebUser }, async (req) => { await pilotOf(req); return { callbacks: await callbacks() }; });
   app.post("/api/u/callbacks/done", { preHandler: requireWebUser }, async (req) => { const me = await pilotOf(req); return markDone(req.body?.number, `Pilote ${me.id} ${me.name}`); });
+
+  // ---------------------------------------------------------------- SVI parlé : appelé par le moteur téléphonique (CURL du dialplan), jamais depuis l'extérieur
+  app.get("/internal/ivr-speech", async (req, reply) => {
+    reply.type("text/plain; charset=utf-8");
+    // Seulement en direct depuis le serveur : une requête relayée par Nginx (venue d'Internet) porte ses en-têtes de relais
+    const ipOk = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress) && !req.headers["x-forwarded-for"] && !req.headers["x-real-ip"];
+    const k = String(req.query?.k || ""), want = pbx.speechKey();
+    if (!ipOk || k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return reply.code(403).send("");
+    const u = String(req.query?.u || ""), id = String(req.query?.ivr || "");
+    if (!/^[\w.-]{1,80}$/.test(u)) return "";
+    const file = path.join(REC_DIR(), `svi-${u}.wav`);
+    try {
+      if (!fs.existsSync(file) || fs.statSync(file).size < 44 + 8000 * 2 * 0.4) return "";   // moins de 0,4 s : l'appelant n'a rien dit
+      if (!(await ai.settings()).enabled) return "";
+      const o = (await pbx.listObjects("ivr")).find((x) => x.id === id);
+      if (!o?.data.speech) return "";
+      const users = new Map((await pbx.loadUsers()).map((x) => [x.id, x]));
+      const options = ivrOptions(o.data, { objects: await pbx.loadObjects(), users });
+      const said = (await ai.transcribe(file)).trim();
+      let key = localMatch(said, options);
+      if (!key && said) {
+        const a = String(await ai.text("ivr", JSON.stringify({ phrase: said, choix: options.map((x) => ({ touche: x.key, service: x.label, mots_cles: x.keywords })) }))).trim();
+        key = options.find((x) => x.key === a.replace(/[^0-9*#]/g, "").slice(0, 1))?.key || "";
+      }
+      app.log.info({ ivr: o.number, said, key }, "SVI parlé");
+      return key;
+    } catch (e) { app.log.warn({ err: e.message }, "SVI parlé : échec"); return ""; }
+    finally { fs.rm(file, { force: true }, () => {}); }
+  });
 
   // ---------------------------------------------------------------- IA (relais du portail pro : la clé OpenAI n'est jamais sur le PBX)
   app.get("/api/ai-settings", { preHandler: requireUser }, async () => ({ ...(await ai.status()), voices: AI_VOICES }));

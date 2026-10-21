@@ -7,7 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { formatNumber, validateTemplate } from "../../pbx/lib/trunk-templates.mjs";
-import { CX_MODE, KAMAILIO_URI, VAR as CX_VAR } from "./config.mjs";
+import { CX_MODE, KAMAILIO_URI, VAR as CX_VAR, settings as CX_SETTINGS } from "./config.mjs";
+import { REC_DIR } from "./recording.mjs";
 import { numberRisk, deviceCategory, CATEGORY_LABELS } from "./watch.mjs";
 import { runConfigure } from "./admin.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
@@ -988,7 +989,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     ].join("\n"));
     const dir = path.dirname(routesFile);
     const objects = await loadObjects();
-    const model = { users: byId, objects, soundsDir: soundsDir(), tz: tz() };
+    const model = { users: byId, objects, soundsDir: soundsDir(), tz: tz(),
+      // SVI qui comprend la parole : la phrase enregistrée est envoyée à la console (IA), qui répond la touche choisie
+      speech: { dir: REC_DIR(), url: `http://127.0.0.1:${CX_SETTINGS.port}/internal/ivr-speech?k=${speechKey()}` } };
     writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
     const contacts = await loadContacts();
     const std = await db.getSetting("standard", defaultStandard());
@@ -1220,6 +1223,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     return { users: new Map(users.map((u) => [u.id, u])), objects, registered, outboundTrunk: routes.outbound_trunk,
       trunkDids: new Set(trunks.rows.flatMap((r) => trunkDidList(r, countryCode()))), legacyInbound: routes.inbound, cc: countryCode(), tz: tz(), now: new Date() };
   }
+  /** Clé des appels du moteur téléphonique vers la console (SVI parlé) : dérivée du secret de session, jamais exposée */
+  function speechKey() { return crypto.createHmac("sha256", String(CX_SETTINGS.sessionSecret || "cx")).update("ivr-speech").digest("hex").slice(0, 32); }
   async function parseFlow(text) {
     const [users, objects, trunks] = await Promise.all([loadUsers(), loadObjects(), db.query("SELECT number, dids FROM pbxmaison_trunks")]);
     return parseRouting(text, {
@@ -1482,7 +1487,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
-    loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
+    speechKey, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }
 
