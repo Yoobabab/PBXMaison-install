@@ -661,7 +661,7 @@ async function pageAi() {
   const d = await H.api("GET", "/api/ai-settings");
   const r = d.relay, on = d.settings.enabled;
   const euro = (n) => `${(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-  const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce" };
+  const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce", report: "bilans et rapports" };
   const state = !on ? ["off", "Désactivée"] : d.error ? ["bad", "Problème"] : r?.fake ? ["wait", "Mode test"] : r?.ready ? ["ok", "Active"] : ["wait", "En attente de la clé IRT"];
   H.app.innerHTML = head("IA", "Fonctions d'intelligence artificielle du PBX. La clé OpenAI d'IRT reste dans le portail pro : le PBX n'y a jamais accès.") + `
     <div class="cards">

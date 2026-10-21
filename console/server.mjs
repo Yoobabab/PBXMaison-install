@@ -27,6 +27,7 @@ import { parseQueueShow, queueStats } from "./lib/supervision.mjs";
 import { CX_MODE, CX_TENANT, ETC } from "./lib/config.mjs";
 import { createAi, diagnosisInput, VOICES as AI_VOICES } from "./lib/ai.mjs";
 import { missedCallers, sameNumberKey } from "./lib/callback.mjs";
+import { periodOf, periodStats, reportInput } from "./lib/report.mjs";
 import { registerThemeRoutes } from "./lib/theme.mjs";
 import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
@@ -682,6 +683,32 @@ export async function buildApp({ db, ami } = {}) {
     const days = [1, 7, 30].includes(Number(req.query?.days)) ? Number(req.query.days) : 1;
     const { calls, total } = await pbx.callLog({ days, q: String(req.query?.q || "").slice(0, 40), limit: 300 });
     return { calls: calls.reverse(), total };
+  });
+  // Bilan de la semaine / du mois (chiffres + synthèse IA à la demande, gardée pour les périodes terminées)
+  async function periodReport(kind, previous) {
+    const k = kind === "month" ? "month" : "week";
+    const cur = periodOf(k, Date.now(), { previous }), prev = periodOf(k, Date.parse(cur.from) - 1000);
+    const { calls } = await pbx.callLog({ days: k === "month" ? 75 : 22, limit: 5000 });
+    const names = new Map((await pbx.listExtensions()).map((u) => [u.id, u.name]));
+    const tz = pbxEnv().PBX_TIMEZONE || "Europe/Paris";
+    const stats = periodStats(calls, { from: cur.from, to: cur.to, tz, names }), before = periodStats(calls, { from: prev.from, to: prev.to, tz, names });
+    const key = `${k}:${cur.from}`;
+    const saved = (await db.query("SELECT text, at FROM pbxmaison_ai_reports WHERE key = $1", [key]).catch(() => ({ rows: [] }))).rows[0];
+    return { kind: k, label: cur.label, from: cur.from, to: cur.to, done: Date.parse(cur.to) <= Date.now(), stats, previous: before, previous_label: prev.label,
+      ai: (await ai.settings()).enabled, synthesis: saved?.text || "", synthesis_at: saved?.at || null, key };
+  }
+  async function reportSynthesis(r) {
+    const vms = (await db.query("SELECT summary FROM pbxmaison_vm_ai WHERE msg_at >= $1 AND msg_at < $2 AND summary <> ''", [r.from.slice(0, 19), r.to.slice(0, 19)]).catch(() => ({ rows: [] }))).rows.map((x) => x.summary);
+    const text = await ai.text("report", reportInput(r.kind, r.label, r.stats, r.previous, vms));
+    await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_ai_reports (key text PRIMARY KEY, text text NOT NULL, at timestamptz NOT NULL DEFAULT now())`);
+    if (r.done) await db.query("INSERT INTO pbxmaison_ai_reports (key, text) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET text = $2, at = now()", [r.key, text]);
+    return text;
+  }
+  app.get("/api/u/supervision/report", { preHandler: requireWebUser }, async (req) => { await supervisorOf(req); return periodReport(req.query?.kind, req.query?.previous === "1"); });
+  app.post("/api/u/supervision/report/ai", { preHandler: requireWebUser }, async (req) => {
+    await supervisorOf(req);
+    const r = await periodReport(req.body?.kind, !!req.body?.previous);
+    return { synthesis: await reportSynthesis(r) };
   });
   app.get("/api/u/recordings/file", { preHandler: requireWebUser }, async (req, reply) => {
     await supervisorOf(req);

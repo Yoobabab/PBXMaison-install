@@ -603,13 +603,14 @@ let supTab = "live", supDays = 1, supTimer = null;
 const ST_TXT = { answered: ["ok", "Répondu"], missed: ["bad", "Manqué"], voicemail: ["wait", "Messagerie"], busy: ["wait", "Occupé"], failed: ["bad", "Échec"] };
 async function pageSupervision(el) {
   clearInterval(supTimer);
-  el.innerHTML = `<section class="panel suppage"><div class="ltabs suptabs">${[["live", "En ce moment"], ["log", "Journal"], ["queues", "Files d'attente"]].map(([k, l]) => `<button class="${supTab === k ? "on" : ""}" data-st="${k}">${l}</button>`).join("")}</div><div id="supbody" class="pad"><div class="s">Chargement…</div></div></section>`;
+  el.innerHTML = `<section class="panel suppage"><div class="ltabs suptabs">${[["live", "En ce moment"], ["log", "Journal"], ["queues", "Files d'attente"], ["report", "Bilan"]].map(([k, l]) => `<button class="${supTab === k ? "on" : ""}" data-st="${k}">${l}</button>`).join("")}</div><div id="supbody" class="pad"><div class="s">Chargement…</div></div></section>`;
   $$("[data-st]", el).forEach((b) => b.onclick = () => { supTab = b.dataset.st; pageSupervision(el); });
   const body = $("#supbody", el);
   const draw = async () => {
     if (page !== "supervision") return clearInterval(supTimer);
     try {
       if (supTab === "log") return drawLog(body);
+      if (supTab === "report") return drawReport(body);
       const d = await api("GET", "/api/u/supervision");
       if (supTab === "live") body.innerHTML = d.calls.length ? `<div class="sup-live">${d.calls.map((c) => `<div class="sup-call"><span class="sup-dir ${c.direction}">${c.direction === "entrant" ? "↙" : c.direction === "sortant" ? "↗" : "↔"}</span>
           <div class="grow"><span><b>${esc(nameOf(c.from) || fmtNum(c.from) || c.from)}</b> → <b>${esc(nameOf(c.to) || fmtNum(c.to) || c.to)}</b></span><small>${esc(c.state)}</small></div><span class="sup-dur">${fmtDur(c.duration)}</span></div>`).join("")}</div>`
@@ -623,7 +624,39 @@ async function pageSupervision(el) {
     } catch (e) { body.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; }
   };
   await draw();
-  if (supTab !== "log") supTimer = setInterval(() => { if (!document.hidden) draw(); }, 5000);
+  if (!["log", "report"].includes(supTab)) supTimer = setInterval(() => { if (!document.hidden) draw(); }, 5000);
+}
+let repKind = "week", repPrev = true;
+async function drawReport(body) {
+  body.innerHTML = '<div class="s">Chargement…</div>';
+  let r;
+  try { r = await api("GET", `/api/u/supervision/report?kind=${repKind}&previous=${repPrev ? 1 : 0}`); } catch (e) { body.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
+  const s = r.stats, p = r.previous;
+  const dl = (cur, prev, opts = {}) => { if (!prev && !(opts.points && p.inbound)) return ""; const d = opts.points ? cur - prev : prev ? Math.round(((cur - prev) / prev) * 100) : null;
+    if (d === null) return ""; if (!d) return '<small class="rp-d">=</small>'; const good = opts.lowerBetter ? d < 0 : d > 0;
+    return `<small class="rp-d ${good ? "up" : "down"}">${d > 0 ? "+" : "−"}${Math.abs(d)}${opts.points ? " pt" : " %"}</small>`; };
+  const maxH = Math.max(1, ...s.hours.map((h) => h.calls));
+  const hrs = s.hours.map((h, i) => ({ ...h, i })).filter((h) => h.i >= 7 && h.i <= 20);
+  body.innerHTML = `<div class="rp-bar"><div class="chips-f">${[["week", true, "Semaine dernière"], ["week", false, "Cette semaine"], ["month", true, "Mois dernier"], ["month", false, "Ce mois-ci"]].map(([k, pv, l]) => `<button class="chipf ${repKind === k && repPrev === pv ? "on" : ""}" data-k="${k}" data-p="${pv ? 1 : 0}">${l}</button>`).join("")}</div></div>
+    <h3 class="rp-t">Bilan · ${esc(r.label)}</h3>
+    <div class="sup-kpis rp-kpis"><div><b>${s.inbound}</b><small>appels reçus ${dl(s.inbound, p.inbound)}</small></div>
+      <div class="${s.answer_rate < 80 && s.inbound ? "hot" : ""}"><b>${s.answer_rate} %</b><small>pris ${dl(s.answer_rate, p.answer_rate, { points: true })}</small></div>
+      <div><b>${s.missed}</b><small>manqués${s.voicemail ? `, dont ${s.voicemail} message${s.voicemail > 1 ? "s" : ""}` : ""} ${dl(s.missed, p.missed, { lowerBetter: true })}</small></div>
+      <div><b>${fmtDur(s.avg_wait)}</b><small>attente avant réponse ${dl(s.avg_wait, p.avg_wait, { lowerBetter: true })}</small></div>
+      <div class="${s.not_called_back ? "hot" : ""}"><b>${s.not_called_back}</b><small>pas encore rappelés</small></div></div>
+    <div class="rp-hours" title="Appels reçus par heure (rouge : manqués)">${hrs.map((h) => `<div class="rp-h"><span class="rp-col"><i style="height:${Math.round((h.calls / maxH) * 100)}%"><em style="height:${h.calls ? Math.round((h.missed / h.calls) * 100) : 0}%"></em></i></span><small>${h.i}h</small></div>`).join("")}</div>
+    <p class="s rp-leg"><span class="rp-sw"></span> appels reçus · <span class="rp-sw m"></span> manqués${s.worst_hour ? ` · on perd le plus d'appels vers <b>${s.worst_hour.hour} h</b> (${s.worst_hour.rate} %)` : ""}</p>
+    ${s.agents.length ? `<div class="rp-ag">${s.agents.map((a) => `<span class="sup-ag"><i></i>${esc(a.name || a.ext)} <small>${a.answered} appel${a.answered > 1 ? "s" : ""} pris · ${fmtDur(a.talk)}</small></span>`).join("")}</div>` : ""}
+    <div class="rp-ai">${r.synthesis ? `<div class="rp-syn"><div class="rp-sh"><span class="ai-badge">IA</span><b>Synthèse et conseils</b></div>${esc(r.synthesis).replace(/\n/g, "<br>")}</div>`
+      : r.ai ? `<button class="btn" id="rpai">✨ Synthèse et conseils par l'IA</button>` : `<p class="s">Synthèse par l'IA : à activer par l'installateur (Administration › IA).</p>`}</div>`;
+  $$("[data-k]", body).forEach((b) => b.onclick = () => { repKind = b.dataset.k; repPrev = b.dataset.p === "1"; drawReport(body); });
+  const go = $("#rpai", body);
+  if (go) go.onclick = async () => {
+    go.disabled = true; go.textContent = "Analyse en cours…";
+    try { const x = await api("POST", "/api/u/supervision/report/ai", { kind: repKind, previous: repPrev });
+      $(".rp-ai", body).innerHTML = `<div class="rp-syn"><div class="rp-sh"><span class="ai-badge">IA</span><b>Synthèse et conseils</b></div>${esc(x.synthesis).replace(/\n/g, "<br>")}</div>`; }
+    catch (e) { toast(e.message, "bad"); go.disabled = false; go.textContent = "✨ Synthèse et conseils par l'IA"; }
+  };
 }
 async function drawLog(body) {
   body.innerHTML = `<div class="sup-logbar"><div class="chips-f">${[[1, "Aujourd'hui"], [7, "7 jours"], [30, "30 jours"]].map(([d, l]) => `<button class="chipf ${supDays === d ? "on" : ""}" data-days="${d}">${l}</button>`).join("")}</div>

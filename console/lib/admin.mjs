@@ -64,6 +64,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_vm_ai (key text PRIMARY KEY, box text NOT NULL, text text NOT NULL DEFAULT '', summary text NOT NULL DEFAULT '',
       caller_name text NOT NULL DEFAULT '', callback text NOT NULL DEFAULT '', urgent boolean NOT NULL DEFAULT false, at timestamptz NOT NULL DEFAULT now())`);
     await db.query("ALTER TABLE pbxmaison_vm_ai ADD COLUMN IF NOT EXISTS caller_number text NOT NULL DEFAULT '', ADD COLUMN IF NOT EXISTS msg_at text NOT NULL DEFAULT ''");
+    await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_ai_reports (key text PRIMARY KEY, text text NOT NULL, at timestamptz NOT NULL DEFAULT now())`);
     // Appels perdus marqués « traité » (numéro comparable → date)
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_callback_done (key text PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), by_who text NOT NULL DEFAULT '')`);
   }
