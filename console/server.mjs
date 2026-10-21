@@ -26,6 +26,7 @@ import { createTransfer, KINDS as TRANSFER_KINDS, INSTALLER_KINDS } from "./lib/
 import { parseQueueShow, queueStats } from "./lib/supervision.mjs";
 import { CX_MODE, CX_TENANT, ETC } from "./lib/config.mjs";
 import { createAi, diagnosisInput, VOICES as AI_VOICES } from "./lib/ai.mjs";
+import { missedCallers, sameNumberKey } from "./lib/callback.mjs";
 import { registerThemeRoutes } from "./lib/theme.mjs";
 import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
@@ -956,6 +957,29 @@ export async function buildApp({ db, ami } = {}) {
     if (apply) audit(req, `import ${req.params.kind}`, true, `${r.lines.filter((l) => l.done).length} ligne(s) importée(s), ${r.counts.error} erreur(s)`);
     return r;
   });
+  // ---------------------------------------------------------------- Appels perdus à rappeler (classés par priorité)
+  async function callbacks() {
+    const [log, vms, done, contacts] = await Promise.all([
+      pbx.callLog({ days: 3, limit: 5000 }),
+      db.query("SELECT box, caller_number, msg_at AS at, summary, urgent FROM pbxmaison_vm_ai WHERE at > now() - interval '4 days'").then((r) => r.rows).catch(() => []),
+      db.query("SELECT key, at FROM pbxmaison_callback_done WHERE at > now() - interval '4 days'").then((r) => new Map(r.rows.map((x) => [x.key, new Date(x.at).toISOString()]))).catch(() => new Map()),
+      pbx.listContacts().catch(() => []),
+    ]);
+    const names = new Map();
+    for (const c of contacts) for (const p of c.phones) names.set(sameNumberKey(p.number), c.name);
+    return missedCallers(log.calls, { done, voicemails: vms, contacts: names, tz: pbxEnv().PBX_TIMEZONE || "Europe/Paris" });
+  }
+  const markDone = async (number, by) => {
+    const key = sameNumberKey(number);
+    if (key.length < 9) throw new UserError("Numéro invalide.");
+    await db.query("INSERT INTO pbxmaison_callback_done (key, at, by_who) VALUES ($1, now(), $2) ON CONFLICT (key) DO UPDATE SET at = now(), by_who = $2", [key, by]);
+    return { ok: true };
+  };
+  app.get("/api/callbacks", { preHandler: requireUser }, async () => ({ callbacks: await callbacks() }));
+  app.post("/api/callbacks/done", { preHandler: requireUser }, async (req) => markDone(req.body?.number, currentUser(req).email));
+  app.get("/api/u/callbacks", { preHandler: requireWebUser }, async (req) => { await pilotOf(req); return { callbacks: await callbacks() }; });
+  app.post("/api/u/callbacks/done", { preHandler: requireWebUser }, async (req) => { const me = await pilotOf(req); return markDone(req.body?.number, `Pilote ${me.id} ${me.name}`); });
+
   // ---------------------------------------------------------------- IA (relais du portail pro : la clé OpenAI n'est jamais sur le PBX)
   app.get("/api/ai-settings", { preHandler: requireUser }, async () => ({ ...(await ai.status()), voices: AI_VOICES }));
   app.put("/api/ai-settings", { preHandler: requireUser }, async (req) => ({ ...(await ai.saveSettings(req.body || {})), voices: AI_VOICES }));

@@ -62,6 +62,9 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     // IA : transcription et résumé de chaque message vocal (une seule fois par message)
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_vm_ai (key text PRIMARY KEY, box text NOT NULL, text text NOT NULL DEFAULT '', summary text NOT NULL DEFAULT '',
       caller_name text NOT NULL DEFAULT '', callback text NOT NULL DEFAULT '', urgent boolean NOT NULL DEFAULT false, at timestamptz NOT NULL DEFAULT now())`);
+    await db.query("ALTER TABLE pbxmaison_vm_ai ADD COLUMN IF NOT EXISTS caller_number text NOT NULL DEFAULT '', ADD COLUMN IF NOT EXISTS msg_at text NOT NULL DEFAULT ''");
+    // Appels perdus marqués « traité » (numéro comparable → date)
+    await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_callback_done (key text PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), by_who text NOT NULL DEFAULT '')`);
   }
 
   // ---------------------------------------------------------------- Règles sortantes
@@ -460,7 +463,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
       for (const m of todo) {
         const key = vmKey(u.id, m);
         if (known.has(key) || budget-- <= 0) continue;
-        try { await ai.voicemailInsight(u.id, key, vmbox.audioPath(u.id, m.id).file); }
+        try { await ai.voicemailInsight(u.id, key, vmbox.audioPath(u.id, m.id).file, m); }
         catch (e) { if (e.status === 429 || e.status === 403 || e.status === 502) return; }   // plafond, IA coupée, relais injoignable : on réessaie plus tard
       }
     }
@@ -481,7 +484,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
       for (const m of todo) {
         // IA : transcription et résumé dans l'e-mail (si le relais ne répond pas, l'e-mail part quand même, sans)
         let insight = null;
-        if (aiOn) { try { insight = await ai.voicemailInsight(u.id, m.key, vmbox.audioPath(u.id, m.id).file); } catch { /* sans résumé */ } }
+        if (aiOn) { try { insight = await ai.voicemailInsight(u.id, m.key, vmbox.audioPath(u.id, m.id).file, m); } catch { /* sans résumé */ } }
         const mail = voicemailMail({ box: u.id, boxName: displayName(u), caller: m.caller_number, callerName: m.caller_name, at: m.at, duration: m.duration, pbxName: pbxName(), tz: tzName(), attach: u.voicemail.email_attach, insight });
         let attachments = [];
         if (u.voicemail.email_attach) {

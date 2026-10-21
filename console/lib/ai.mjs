@@ -97,13 +97,13 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
   const speech = async (t, voice) => toPbxWav(Buffer.from((await call("/v1/ai/speech", { text: t, voice })).audio, "base64"));
 
   /** Message vocal → transcription + résumé (gardés en base : une seule fois par message) */
-  async function voicemailInsight(box, msgKey, file) {
+  async function voicemailInsight(box, msgKey, file, meta = {}) {
     const old = (await db.query("SELECT text, summary, caller_name, callback, urgent FROM pbxmaison_vm_ai WHERE key = $1", [msgKey])).rows[0];
     if (old) return old;
     const t = await transcribe(file);
     const sum = t.trim() ? parseVoicemailSummary(await text("voicemail", t)) : { summary: "Message sans parole (silence ou bruit).", caller_name: "", callback: "", urgent: false };
-    await db.query(`INSERT INTO pbxmaison_vm_ai (key, box, text, summary, caller_name, callback, urgent) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (key) DO NOTHING`,
-      [msgKey, box, t, sum.summary, sum.caller_name, sum.callback, sum.urgent]);
+    await db.query(`INSERT INTO pbxmaison_vm_ai (key, box, text, summary, caller_name, callback, urgent, caller_number, msg_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (key) DO NOTHING`,
+      [msgKey, box, t, sum.summary, sum.caller_name, sum.callback, sum.urgent, String(meta.caller_number || ""), String(meta.at || "")]);
     return { text: t, ...sum };
   }
   async function insights(box) {

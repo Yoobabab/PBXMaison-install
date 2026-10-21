@@ -252,14 +252,14 @@ if (IN_APP) document.documentElement.classList.add("in-app");
 const NAV = IN_APP
   ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
   : [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { renvoi: "Renvoi", annonces: "Annonces", supervision: "Supervision", clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
+const TITLES = { rappeler: "À rappeler", renvoi: "Renvoi", annonces: "Annonces", supervision: "Supervision", clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
 // Responsable : onglet Plannings (dans le menu de l'appli, où la barre du bas est déjà pleine)
 // Renvoi : menu à part (barre de gauche ; dans l'appli : menu du profil, en haut à droite)
 // Pilote : Annonces ; Superviseur : Supervision et Plannings (dans l'appli : menu du profil, la barre du bas est déjà pleine)
 const navItems = () => {
   if (IN_APP) return NAV;
   const extra = [["renvoi", "Renvoi", I.fwd],
-    ...(me?.user?.standardist ? [["annonces", "Annonces", I.mega]] : []),
+    ...(me?.user?.standardist ? [["rappeler", "À rappeler", I.calls], ["annonces", "Annonces", I.mega]] : []),
     ...(me?.user?.manager ? [["supervision", "Supervision", I.eye], ["planning", "Plannings", I.cal]] : [])];
   return [...NAV.slice(0, -1), ...extra, NAV.at(-1)];
 };
@@ -342,7 +342,7 @@ function toggleMenu(force) {
     <hr>
     <a class="pm-it" href="#/renvoi">${I.fwd(18)}Renvoi de mes appels${fwdOn() ? '<span class="pm-on">activé</span>' : ""}</a>
     <a class="pm-it" href="#/reglages/transfert">Renvois par statut…</a>
-    ${me.user.standardist ? `<a class="pm-it" href="#/annonces">${I.mega(18)}Annonces…</a>` : ""}
+    ${me.user.standardist ? `<a class="pm-it" href="#/rappeler">${I.calls(18)}À rappeler…</a><a class="pm-it" href="#/annonces">${I.mega(18)}Annonces…</a>` : ""}
     ${me.user.manager ? `<a class="pm-it" href="#/supervision">${I.eye(18)}Supervision…</a><a class="pm-it" href="#/planning">${I.cal()}Plannings d'appels…</a>` : ""}
     ${IN_APP ? `<button class="pm-it" id="appaccounts">${I.team()}Comptes…</button>` : `<button class="pm-it" id="logout">${I.logout()}${me.impersonated_by ? "Quitter l'incarnation" : "Se déconnecter"}</button>`}
   </div>`;
@@ -704,7 +704,7 @@ function refreshPresence() {
 // ------------------------------------------------------------------ Navigation
 function route() {
   const [p, s] = location.hash.replace(/^#\/?/, "").split("/");
-  page = TITLES[p] && (!["planning", "supervision"].includes(p) || me.user.manager) && (p !== "annonces" || me.user.standardist) && (p !== "clavier" || IN_APP) ? p : "equipe"; sub = s || "";
+  page = TITLES[p] && (!["planning", "supervision"].includes(p) || me.user.manager) && (!["annonces", "rappeler"].includes(p) || me.user.standardist) && (p !== "clavier" || IN_APP) ? p : "equipe"; sub = s || "";
   $$(".rail [data-r]").forEach((a) => a.classList.toggle("on", a.dataset.r === page));
   $("#title").textContent = TITLES[page];
   if (page === "appels") store.set(`callikoe_seen_${me.user.id}`, new Date().toISOString());
@@ -715,7 +715,30 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, renvoi: pageRenvoi, annonces: pageAnnonces, supervision: pageSupervision, clavier: (x) => renderDialer(x, true) })[page](el);
+  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, renvoi: pageRenvoi, annonces: pageAnnonces, rappeler: pageCallbacks, supervision: pageSupervision, clavier: (x) => renderDialer(x, true) })[page](el);
+}
+
+// ------------------------------------------------------------------ À rappeler (Pilote) : appels perdus classés par priorité
+const CB_LEVEL = { high: ["bad", "À rappeler vite"], mid: ["wait", "À rappeler"], low: ["off", "Peut attendre"] };
+async function pageCallbacks(el) {
+  el.innerHTML = '<div class="sp-loading">Chargement…</div>';
+  let list;
+  try { list = (await api("GET", "/api/u/callbacks")).callbacks; } catch (e) { el.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
+  el.innerHTML = `<section class="panel listp cbpage">
+    <div class="vm-head"><div><strong>${list.length ? `${list.length} appelant${list.length > 1 ? "s" : ""} à rappeler` : "Personne à rappeler"}</strong><span class="s cb-sub">Appels sans réponse des 3 derniers jours, les plus importants d'abord. Ils disparaissent dès que quelqu'un a rappelé.</span></div>
+      <button class="btn ghost sm" id="cbref">Actualiser</button></div>
+    <ul class="rows">${list.map((c) => { const [cls, lab] = CB_LEVEL[c.level]; return `<li class="cbrow ${c.level}">
+      <span class="cb-dot ${cls}" title="${esc(lab)}"></span>
+      <span class="grow"><strong>${esc(c.name || fmtNum(c.number))}</strong><span class="s">${c.name ? esc(fmtNum(c.number)) + " · " : ""}${esc(c.why)}</span>
+        ${c.voicemail?.summary ? `<span class="cb-vm"><span class="ai-badge">${c.voicemail.urgent ? "Urgent" : "IA"}</span>${esc(c.voicemail.summary)}</span>` : ""}</span>
+      <span class="pill ${cls} cb-lv">${esc(lab)}</span>
+      <button class="cbtn sm" data-call="${esc(c.number)}" title="Rappeler">${I.phone(16)}</button>
+      <button class="btn ghost sm" data-done="${esc(c.number)}" title="Personne n'a besoin de rappeler (déjà réglé autrement)">Traité</button></li>`; }).join("") || '<li class="empty-st">Tous les appelants ont été rappelés. 👍</li>'}</ul></section>`;
+  wireCalls(el);
+  $("#cbref", el).onclick = () => pageCallbacks(el);
+  $$("[data-done]", el).forEach((b) => b.onclick = async () => {
+    try { await api("POST", "/api/u/callbacks/done", { number: b.dataset.done }); toast("Marqué traité"); pageCallbacks(el); } catch (e) { toast(e.message, "bad"); }
+  });
 }
 
 // ------------------------------------------------------------------ Plannings d'appels (responsables)

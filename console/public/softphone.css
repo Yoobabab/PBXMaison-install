@@ -568,3 +568,11 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .rec-ai-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}.rec-ai-row select{flex:1;min-width:120px}
 .vm-ai{flex-basis:100%}.vm-cb{background:none;border:0;padding:0;color:var(--accent,#d8141c);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline}
 .rows .vm-ai .grow{display:block;text-align:left;min-width:0}.vm-ai .vm-cb{display:inline}.vm-ai.urgent .ai-badge{background:rgba(216,20,28,.14);color:#c0121a}.vm-ai b{font-weight:600}
+/* À rappeler */
+.cb-sub{display:block;margin-top:2px}
+.cbrow{align-items:flex-start!important}
+.cb-dot{width:10px;height:10px;border-radius:50%;flex:none;margin-top:6px;background:#9aa0aa}
+.cb-dot.bad{background:#d8141c}.cb-dot.wait{background:#e89a0c}
+.cb-vm{display:flex!important;gap:6px;align-items:flex-start;margin-top:4px;font-size:13px}
+.cbrow .cb-lv{align-self:center}
+@media (max-width:560px){.cbrow .cb-lv{display:none}}
