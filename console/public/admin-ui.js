@@ -655,6 +655,37 @@ async function pageCapture() {
   if (d.running || d.files.some((f) => !f.ready)) H.poll(async () => { const x = await H.api("GET", "/api/capture"); if (!x.running && x.files.every((f) => f.ready)) { if (location.hash === "#/capture") pageCapture(); return true; } return false; }, 4000);
 }
 
+// ================================================================ IA
+async function pageAi() {
+  H.setNav("ai");
+  const d = await H.api("GET", "/api/ai-settings");
+  const r = d.relay, on = d.settings.enabled;
+  const euro = (n) => `${(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce" };
+  const state = !on ? ["off", "Désactivée"] : d.error ? ["bad", "Problème"] : r?.fake ? ["wait", "Mode test"] : r?.ready ? ["ok", "Active"] : ["wait", "En attente de la clé IRT"];
+  H.app.innerHTML = head("IA", "Fonctions d'intelligence artificielle du PBX. La clé OpenAI d'IRT reste dans le portail pro : le PBX n'y a jamais accès.") + `
+    <div class="cards">
+      ${kpi("check", "État", `<span class="pill ${state[0]}">${state[1]}</span>`, on && d.error ? H.esc(d.error) : on && r && !r.ready ? "Le relais du portail attend la clé OpenAI d'IRT." : on && r?.fake ? "Réponses de démonstration, rien n'est consommé." : "")}
+      ${kpi("clock", "Ce mois-ci", r ? euro(r.used_eur) : "—", r ? `plafond ${euro(r.cap_eur)} / mois` : "")}
+      ${kpi("mail", "Utilisations du mois", r ? String(Object.values(r.ops || {}).reduce((a, n) => a + n, 0)) : "—", r ? Object.entries(r.ops || {}).map(([k, n]) => `${n} ${OPS[k] || k}`).join(" · ") : "")}
+    </div>
+    <div class="panel"><div class="ph"><h2>Réglages</h2></div><form id="aif" class="pad stack">
+      ${sw("enabled", on, "Activer l'IA sur ce PBX", "Annonces en voix IA, diagnostic dans Gestion d'appels › Dépannage, et les options ci-dessous.")}
+      ${sw("voicemail", d.settings.voicemail, "Transcrire et résumer les messages vocaux", "Chaque nouveau message est écrit en texte avec un résumé d'une phrase : dans l'e-mail, le softphone et l'appli. Environ 0,3 centime la minute.")}
+      <div class="note">À prévoir côté client (RGPD) : informer les appelants que les messages sont transcrits automatiquement, par exemple dans l'annonce du répondeur. Les messages passent par le relais Callikoe puis OpenAI, sans y être conservés au-delà du traitement.</div>
+      <div class="actions"><button class="btn">Enregistrer</button></div></form></div>
+    <div class="panel"><div class="ph"><h2>Essayer</h2></div><div class="pad stack">
+      <div class="row"><input id="aitry" class="grow" value="On est fermés lundi pour inventaire" maxlength="300"><button type="button" class="btn ghost" id="aitryb" ${on ? "" : "disabled"}>Rédiger une annonce</button></div>
+      <div id="aitryr"></div></div></div>`;
+  onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
+  H.$("#aitryb").onclick = async (e) => {
+    e.target.disabled = true; H.$("#aitryr").innerHTML = '<span class="spin"></span>';
+    try { const x = await H.api("POST", "/api/ai/announce-text", { idea: H.$("#aitry").value }); H.$("#aitryr").innerHTML = `<div class="note">« ${H.esc(x.text)} »</div>`; }
+    catch (err) { H.$("#aitryr").innerHTML = `<div class="flash bad">${H.esc(err.message)}</div>`; }
+    e.target.disabled = false;
+  };
+}
+
 // ================================================================ Import / export
 const TX_ICON = {
   users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14c2.6 0 4.4 1.6 5 4.5"/>',
@@ -780,5 +811,6 @@ export async function renderAdmin(helpers, page, sub) {
     case "comptes": return pageAccounts();
     case "capture": return pageCapture();
     case "import-export": return pageTransfer();
+    case "ia": return pageAi();
   }
 }

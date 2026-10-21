@@ -648,6 +648,12 @@ function renderPromptForm(head, id) {
       <div class="cf-sec"><span class="dl">${o ? "Remplacer par un fichier" : "Envoyer un fichier audio"}</span><input type="file" id="pfile" accept="audio/*,.wav,.mp3,.m4a,.ogg"><p class="hint">MP3, WAV, M4A, OGG… converti automatiquement au format téléphone.</p></div>
       <div class="cf-sec"><span class="dl">Ou l'enregistrer avec le micro</span><button type="button" class="btn ghost" id="prec">● Enregistrer</button> <span id="precst" class="hint"></span></div>
     </div>
+    <div class="cf-sec ai-sec" id="paisec" hidden><span class="dl"><span class="ai-badge">IA</span> Ou la faire lire par une voix IA</span>
+      <textarea id="paitext" rows="3" maxlength="1500" placeholder="Tape le texte à lire : « Bonjour, notre magasin est exceptionnellement fermé ce lundi. Nous vous retrouvons mardi à 9 heures. »"></textarea>
+      <div class="row ai-row"><select id="paivoice"></select>
+        <button type="button" class="btn ghost sm" id="paibetter" title="L'IA reformule ton idée en annonce polie et claire">✨ Améliorer le texte</button>
+        <button type="button" class="btn sm" id="paigo">Générer la voix</button><span id="paist" class="hint"></span></div>
+      <p class="hint" style="margin:0">La voix est créée en quelques secondes ; écoute-la ci-dessous avant d'enregistrer.</p></div>
     <div id="ppreview"></div>
     <div class="form-msg"></div>
     <div class="actions">${o ? '<button type="button" class="btn ghost" id="cfdel">Supprimer</button>' : ""}<button class="btn" type="submit">${o ? "Enregistrer" : "Ajouter"}</button></div>
@@ -685,6 +691,29 @@ function renderPromptForm(head, id) {
       const tick = setInterval(() => { if (!rec) return clearInterval(tick); h.$("#precst").textContent = `Enregistrement… ${Math.round((Date.now() - t0) / 1000)} s`; }, 300);
     } catch (err) { h.$("#precst").textContent = `Micro refusé : ${err.message}`; }
   };
+  // Voix IA (si l'IA est activée dans Administration › IA)
+  h.api("GET", "/api/ai").then((x) => {
+    if (!x.enabled) return;
+    h.$("#paisec").hidden = false;
+    h.$("#paivoice").innerHTML = Object.entries(x.voices).map(([k, l]) => `<option value="${esc(k)}">Voix ${esc(l.toLowerCase())}</option>`).join("");
+    const st = h.$("#paist");
+    h.$("#paibetter").onclick = async (ev) => {
+      const t = h.$("#paitext").value.trim(); if (!t) { h.$("#paitext").focus(); return; }
+      ev.target.disabled = true; st.textContent = "Rédaction…";
+      try { h.$("#paitext").value = (await h.api("POST", "/api/ai/announce-text", { idea: t })).text; st.textContent = ""; } catch (err) { st.textContent = err.message; }
+      ev.target.disabled = false;
+    };
+    h.$("#paigo").onclick = async (ev) => {
+      const t = h.$("#paitext").value.trim(); if (!t) { h.$("#paitext").focus(); return; }
+      ev.target.disabled = true; st.textContent = "Création de la voix…";
+      try {
+        const r = await h.api("POST", "/api/ai/speech", { text: t, voice: h.$("#paivoice").value });
+        setWav(Uint8Array.from(atob(r.wav), (c) => c.charCodeAt(0)), r.seconds); st.textContent = "";
+        if (h.$("[name=name]").value === "Annonce") h.$("[name=name]").value = t.replace(/[^\p{L}\p{N} ']/gu, " ").trim().split(/\s+/).slice(0, 5).join(" ").slice(0, 50) || "Annonce";
+      } catch (err) { st.textContent = err.message; }
+      ev.target.disabled = false;
+    };
+  }).catch(() => {});
   h.$("#pf").onsubmit = async (e) => {
     e.preventDefault();
     const name = h.$("[name=name]").value;
@@ -748,10 +777,11 @@ function treeNode(n, label, current) {
 const DEV_KIND = { phone: "☎", web: "🖥", mobile: "📱" };
 async function renderDiag(head, arg) {
   if (arg) sessionStorage.setItem("cf_diag_mode", "in");
-  const mode = sessionStorage.getItem("cf_diag_mode") === "out" ? "out" : "in";
+  const mode = ["out", "ai"].includes(sessionStorage.getItem("cf_diag_mode")) ? sessionStorage.getItem("cf_diag_mode") : "in";
+  if (mode === "ai") return renderDiagAi(head);
   const users = cf.users;
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed"><div class="pad stack">
-    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant depuis un poste"]].map(([k, l]) => `<label class="${mode === k ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${mode === k ? "checked" : ""}>${l}</label>`).join("")}</div>
+    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant depuis un poste"], ["ai", "✨ Demander à l'IA"]].map(([k, l]) => `<label class="${mode === k ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${mode === k ? "checked" : ""}>${l}</label>`).join("")}</div>
     <form id="dgf" class="dg-form" novalidate>
       ${mode === "in" ? `<label class="grow">Numéro appelé<input id="dgnum" placeholder="SDA du client (04 12 34 56 78) ou numéro interne (201, 600…)" value="${esc(arg && mode === "in" ? decodeURIComponent(arg) : sessionStorage.getItem("cf_diag_in") || "")}" autocomplete="off"></label>`
         : `<label>Depuis le poste<select id="dgext">${users.map((u) => `<option value="${esc(u.id)}" ${sessionStorage.getItem("cf_diag_ext") === u.id ? "selected" : ""}>${esc(u.id)} · ${esc(u.name)}</option>`).join("")}</select></label>
@@ -805,6 +835,36 @@ async function renderDiag(head, arg) {
     btn.disabled = false;
   };
   if (arg && mode === "in") h.$("#dgf").requestSubmit();
+}
+
+/** Diagnostic IA : une question en français, l'IA lit l'état du PBX et explique */
+async function renderDiagAi(head) {
+  const st = await h.api("GET", "/api/ai").catch(() => ({ enabled: false }));
+  const q0 = sessionStorage.getItem("cf_diag_ai") || "";
+  h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed"><div class="pad stack">
+    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant depuis un poste"], ["ai", "✨ Demander à l'IA"]].map(([k, l]) => `<label class="${k === "ai" ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${k === "ai" ? "checked" : ""}>${l}</label>`).join("")}</div>
+    ${st.enabled ? `<form id="daif" class="stack" novalidate>
+      <label>Décris le problème<textarea id="daiq" rows="3" maxlength="1000" placeholder="Ex. : le poste 203 ne sonne pas quand on appelle le 04 65 00 15 40 · les appels sortants ne passent plus depuis ce matin · le client entend un message de fermeture à 10 h">${esc(q0)}</textarea></label>
+      <div class="row"><button class="btn">Analyser</button><span class="hint">L'IA lit l'état du PBX (postes, trunks, renvois, Ouvert / Fermé, traceur des numéros cités, dernières alertes), jamais les mots de passe.</span></div>
+    </form><div id="daires"></div>`
+      : `<div class="note">L'IA n'est pas activée sur ce PBX. ${h.isInstaller?.() !== false ? 'Active-la dans <a href="#/ia">Administration › IA</a>.' : "Demande à l'installateur de l'activer."}</div>`}
+  </div></div>`;
+  h.app.querySelectorAll("[name=dgm]").forEach((r) => r.onchange = () => { sessionStorage.setItem("cf_diag_mode", r.value); renderDiag(head); });
+  const f = h.$("#daif"); if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const q = h.$("#daiq").value.trim(); sessionStorage.setItem("cf_diag_ai", q);
+    const res = h.$("#daires"), b = f.querySelector("button"); b.disabled = true;
+    res.innerHTML = '<p class="hint"><span class="spin"></span> L\'IA analyse le PBX…</p>';
+    try {
+      const r = await h.api("POST", "/api/ai/diagnose", { question: q });
+      res.innerHTML = `<div class="ai-answer"><div class="ai-ah"><span class="ai-badge">IA</span><strong>Analyse</strong><button type="button" class="btn ghost sm" id="daicp">Copier</button></div>
+        <div class="ai-txt">${esc(r.answer).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</div>
+        <p class="s" style="margin:8px 0 0">Données lues : ${r.used.map(esc).join(", ")}. Réponse automatique : vérifie avant de modifier un réglage.</p></div>`;
+      h.$("#daicp").onclick = (ev) => { navigator.clipboard?.writeText(r.answer); ev.target.textContent = "Copié ✓"; };
+    } catch (err) { res.innerHTML = `<div class="flash bad">${esc(err.message)}</div>`; }
+    b.disabled = false;
+  };
 }
 
 // ---------------------------------------------------------------- Renvois actifs

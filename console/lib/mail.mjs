@@ -32,11 +32,13 @@ export function smtpError(e) {
 }
 
 /** E-mail d'un nouveau message vocal */
-export function voicemailMail({ box, boxName, caller, callerName, at, duration, pbxName, tz = "Europe/Paris", attach = true }) {
+export function voicemailMail({ box, boxName, caller, callerName, at, duration, pbxName, tz = "Europe/Paris", attach = true, insight = null }) {
   const who = callerName && caller ? `${callerName} (${fmtNum(caller)})` : callerName || fmtNum(caller) || "Numéro masqué";
   const when = at ? new Date(at).toLocaleString("fr-FR", { timeZone: tz, weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "";
-  const subject = `Message vocal de ${who}${duration ? ` (${fmtDur(duration)})` : ""}`;
+  const ins = insight && (insight.summary || insight.text) ? insight : null;
+  const subject = `${ins?.urgent ? "[Urgent] " : ""}Message vocal de ${who}${duration ? ` (${fmtDur(duration)})` : ""}${ins?.summary ? ` : ${ins.summary.slice(0, 90)}` : ""}`;
   const text = [`Nouveau message vocal pour ${boxName} (poste ${box}).`, "", `De : ${who}`, when ? `Le : ${when}` : "", duration ? `Durée : ${fmtDur(duration)}` : "",
+    ...(ins ? ["", `Résumé (IA) : ${ins.summary}`, ins.callback ? `À rappeler : ${fmtNum(ins.callback)}` : "", ins.text ? `Transcription : « ${ins.text} »` : ""] : []),
     "", attach ? "Le message est en pièce jointe." : "Écoute-le depuis ton téléphone (*97), le softphone ou l'appli.", "", `— ${pbxName || "Callikoe"}`].filter((l) => l !== null).join("\n");
   const html = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#1b1d24;max-width:520px">
   <p style="margin:0 0 14px">Nouveau message vocal pour <b>${esc(boxName)}</b> (poste ${esc(box)}).</p>
@@ -45,6 +47,11 @@ export function voicemailMail({ box, boxName, caller, callerName, at, duration, 
     ${when ? `<tr><td style="padding:4px 14px 4px 0;color:#626977">Le</td><td style="padding:4px 0">${esc(when)}</td></tr>` : ""}
     ${duration ? `<tr><td style="padding:4px 14px 4px 0;color:#626977">Durée</td><td style="padding:4px 0">${esc(fmtDur(duration))}</td></tr>` : ""}
   </table>
+  ${ins ? `<div style="margin:16px 0 0;padding:12px 14px;border-radius:10px;background:#f4f5f8;border-left:4px solid ${ins.urgent ? "#d8141c" : "#626977"}">
+    ${ins.summary ? `<p style="margin:0 0 6px"><b>${ins.urgent ? "Urgent · " : ""}Résumé :</b> ${esc(ins.summary)}</p>` : ""}
+    ${ins.callback ? `<p style="margin:0 0 6px"><b>À rappeler :</b> ${esc(fmtNum(ins.callback))}</p>` : ""}
+    ${ins.text ? `<p style="margin:0;color:#626977;font-size:14px">« ${esc(ins.text)} »</p>` : ""}
+    <p style="margin:8px 0 0;color:#8a90a0;font-size:12px">Transcription automatique (IA), elle peut contenir des erreurs.</p></div>` : ""}
   <p style="margin:16px 0 0">${attach ? "Le message est en pièce jointe." : "Écoute-le depuis ton téléphone (*97), le softphone ou l'appli."}</p>
   <p style="margin:22px 0 0;color:#626977;font-size:13px">${esc(pbxName || "Callikoe")}</p></div>`;
   return { subject, text, html };

@@ -950,3 +950,10 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .ptable tr.dev-off .devcell strong,.ptable tr.dev-off td a{opacity:.7}
 .ptable tr.dev-off .dev{filter:grayscale(1);opacity:.55}
 .ptable tr.dev-never .dev{opacity:.45}
+/* IA */
+.ai-badge{display:inline-flex;align-items:center;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:.04em;background:var(--accent-soft);color:var(--accent);margin-right:6px;vertical-align:1px}
+.ai-sec textarea{width:100%;box-sizing:border-box;margin:6px 0 8px}
+.ai-row{gap:8px;flex-wrap:wrap;align-items:center}
+.ai-answer{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:14px 16px;background:var(--panel)}
+.ai-ah{display:flex;align-items:center;gap:8px;margin-bottom:8px}.ai-ah .btn{margin-left:auto}
+.ai-txt{line-height:1.55}

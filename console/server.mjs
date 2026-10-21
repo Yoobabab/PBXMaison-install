@@ -24,7 +24,8 @@ const cfOptions = { kinds: KINDS, dest_types: CF_DEST, group_strategies: GROUP_S
 import { createAdminService } from "./lib/admin.mjs";
 import { createTransfer, KINDS as TRANSFER_KINDS, INSTALLER_KINDS } from "./lib/transfer.mjs";
 import { parseQueueShow, queueStats } from "./lib/supervision.mjs";
-import { CX_MODE, CX_TENANT } from "./lib/config.mjs";
+import { CX_MODE, CX_TENANT, ETC } from "./lib/config.mjs";
+import { createAi, diagnosisInput, VOICES as AI_VOICES } from "./lib/ai.mjs";
 import { registerThemeRoutes } from "./lib/theme.mjs";
 import { verifyTicket, hubRole, hubInfo, tenantList, readHubPublicKey, HUB_TO_PBX_ROLE } from "./lib/sso.mjs";
 import { tokenValid, consumeToken, checkSetupConfig, startApply, applyStatus, setupToken, etcFile } from "./lib/setup.mjs";
@@ -38,7 +39,8 @@ export async function buildApp({ db, ami } = {}) {
   await migrateChat(db);
   const pbx = createPbxService({ db, ami, templatesFile: TEMPLATES_FILE, routesFile: routesPath(VAR), env: pbxEnv });
   const chat = createChat(db, { users: () => pbx.loadUsers() });
-  const admin = createAdminService({ db, ami, pbx });
+  const ai = createAi({ db, etcDir: ETC });
+  const admin = createAdminService({ db, ami, pbx, ai });
   const transfer = createTransfer({ pbx, admin });
   await admin.migrate();
   pbx.setExtraDialplan(() => admin.dialplanParts());
@@ -74,7 +76,7 @@ export async function buildApp({ db, ami } = {}) {
   // Console : session valide ET double authentification faite (sinon seule la mise en place de la double authentification est permise)
   const ROLES = { admin: "Accès complet (administrateur)", tech: "Technicien (tout sauf les comptes)", client: "Accès restreint (utilisateurs, téléphones, routage, annuaire)", lecture: "Accès visuel (lecture seule)" };
   // Accès restreint (client) : pas de trunks, règles sortantes, sécurité, codes, sauvegardes, mises à jour, licence, alertes, passerelles, système, comptes
-  const CLIENT_DENY = /^\/api\/(outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
+  const CLIENT_DENY = /^\/api\/(ai-settings|outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
   // Rôles qu'un utilisateur du PBX connecté à la console peut donner
   const PBX_USER_ROLES = ["user", "standard", "manager"];
   const requireUser = async (req, reply) => {
@@ -702,7 +704,7 @@ export async function buildApp({ db, ami } = {}) {
   // Pilote : annonces (écouter, remplacer ou créer au micro)
   app.get("/api/u/prompts", { preHandler: requireWebUser }, async (req) => {
     await pilotOf(req);
-    return { prompts: (await pbx.listObjects("prompt")).map((o) => ({ id: o.id, name: o.name, duration: o.data.duration || 0, updated_at: o.updated_at, updated_by: o.updated_by })) };
+    return { ai: (await ai.settings()).enabled, voices: AI_VOICES, prompts: (await pbx.listObjects("prompt")).map((o) => ({ id: o.id, name: o.name, duration: o.data.duration || 0, updated_at: o.updated_at, updated_by: o.updated_by })) };
   });
   app.get("/api/u/prompts/:id/audio", { preHandler: requireWebUser }, async (req, reply) => {
     await pilotOf(req);
@@ -712,6 +714,12 @@ export async function buildApp({ db, ami } = {}) {
     const me = await pilotOf(req);
     return pbx.savePrompt(null, req.body?.name, wavOf(req.body), `Pilote ${me.id} ${me.name}`);
   });
+  app.post("/api/u/ai/speech", { preHandler: requireWebUser }, async (req) => {
+    await pilotOf(req);
+    const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice);
+    return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / 16000) * 10) / 10 };
+  });
+  app.post("/api/u/ai/announce-text", { preHandler: requireWebUser }, async (req) => { await pilotOf(req); return { text: await ai.text("announce", String(req.body?.idea || "").slice(0, 1000)) }; });
   app.put("/api/u/prompts/:id", { preHandler: requireWebUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
     const me = await pilotOf(req);
     const cur = await pbx.getObject("prompt", req.params.id);
@@ -820,7 +828,9 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/u/voicemail", { preHandler: requireWebUser }, async (req) => {
     const ext = webUser(req).ext;
     const u = await pbx.getUser(ext);
-    return { enabled: u.voicemail.enabled, messages: u.voicemail.enabled ? vm.listMessages(ext) : [] };
+    if (!u.voicemail.enabled) return { enabled: false, messages: [] };
+    const known = await ai.insights(ext).catch(() => new Map());
+    return { enabled: true, messages: vm.listMessages(ext).map((m) => ({ ...m, ai: known.get(admin.vmKey(ext, m)) || null })) };
   });
   app.get("/api/u/voicemail/:folder/:num/audio", { preHandler: requireWebUser }, async (req, reply) => {
     const { file, type } = vm.audioPath(webUser(req).ext, `${req.params.folder}/${req.params.num}`);
@@ -946,6 +956,41 @@ export async function buildApp({ db, ami } = {}) {
     if (apply) audit(req, `import ${req.params.kind}`, true, `${r.lines.filter((l) => l.done).length} ligne(s) importée(s), ${r.counts.error} erreur(s)`);
     return r;
   });
+  // ---------------------------------------------------------------- IA (relais du portail pro : la clé OpenAI n'est jamais sur le PBX)
+  app.get("/api/ai-settings", { preHandler: requireUser }, async () => ({ ...(await ai.status()), voices: AI_VOICES }));
+  app.put("/api/ai-settings", { preHandler: requireUser }, async (req) => ({ ...(await ai.saveSettings(req.body || {})), voices: AI_VOICES }));
+  app.get("/api/ai", { preHandler: requireUser }, async () => { const s = await ai.settings(); return { enabled: s.enabled, voices: AI_VOICES }; });
+  app.post("/api/ai/speech", { preHandler: requireUser }, async (req) => {
+    const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice);
+    return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / 16000) * 10) / 10 };
+  });
+  app.post("/api/ai/announce-text", { preHandler: requireUser }, async (req) => ({ text: await ai.text("announce", String(req.body?.idea || "").slice(0, 1000)) }));
+  app.post("/api/ai/diagnose", { preHandler: requireUser }, async (req) => {
+    const question = String(req.body?.question || "").trim();
+    if (question.length < 5) throw new UserError("Décris le problème en une phrase (ex. « le poste 203 ne sonne pas quand on appelle le standard »).", "question");
+    const facts = await diagnosisFacts(question);
+    const answer = await ai.text("diagnose", diagnosisInput(question, facts));
+    audit(req, "diagnostic IA", true, question.slice(0, 200));
+    return { answer, used: Object.keys(facts).filter((k) => facts[k] != null) };
+  });
+  /** État du PBX utile au diagnostic : postes, trunks, Ouvert / Fermé, renvois, traceur des numéros cités, dernières alertes */
+  async function diagnosisFacts(question) {
+    const safe = (p) => p.catch(() => null);
+    const nums = [...new Set((question.match(/\+?\d[\d .]{1,16}\d/g) || []).map((x) => x.replace(/[\s.]/g, "")))].slice(0, 3);
+    const [ext, trunks, std, fw, alerts, routes] = await Promise.all([safe(pbx.listExtensions()), safe(pbx.listTrunks()), safe(pbx.getStandard()), safe(pbx.forwardsReport()),
+      safe(admin.getAlerts()), safe(pbx.getRoutes())]);
+    const traces = {};
+    for (const n of nums) traces[n] = await safe(pbx.trace(n));
+    return {
+      "Postes (utilisateurs)": ext?.map((u) => ({ poste: u.id, nom: u.name, connecte: u.registered, appareils: u.contacts?.map((c) => c.device?.label), statut: u.status_label, desactive: u.disabled, renvois: u.forwards?.map((f) => f.text), role: u.role })),
+      "Trunks (lignes opérateur)": trunks?.map((t) => ({ nom: t.id, operateur: t.operator, numero: t.number, etat: t.status?.label, sda: t.dids })),
+      "Trunk des appels sortants": routes?.outbound_trunk || "aucun",
+      "Ouvert / Fermé": std,
+      "Renvois actifs": fw,
+      "Traceur des numéros cités": nums.length ? traces : null,
+      "Dernières alertes": alerts?.log?.slice(0, 15).map((a) => ({ le: a.at, titre: a.title, detail: a.text })),
+    };
+  }
   app.get("/api/trace", { preHandler: requireUser }, async (req) => pbx.trace(req.query?.n));
   app.get("/api/forwards", { preHandler: requireUser }, async () => ({ forwards: await pbx.forwardsReport() }));
   // Dépannage : tests d'appel (journalisés comme toute action de la console)

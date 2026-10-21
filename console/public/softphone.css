@@ -557,3 +557,14 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .pill.bad{background:rgba(220,38,38,.1);color:#dc2626}
 .pill.wait{background:rgba(245,158,11,.14);color:#b45309}
 .ks-scrim:has(+ .ksheet:not(.oc)){background:rgba(10,10,20,.28)}
+/* IA : résumé des messages vocaux, voix IA des annonces */
+.ai-badge{display:inline-flex;align-items:center;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:.04em;background:var(--accent-soft,rgba(216,20,28,.1));color:var(--accent,#d8141c);flex:none}
+.vm-ai{display:flex;gap:8px;align-items:flex-start;width:100%;box-sizing:border-box;margin-top:6px;padding:8px 10px;border-radius:10px;background:var(--bg2,rgba(127,127,127,.08));font-size:13px;line-height:1.4}
+.vm-ai.urgent{background:rgba(216,20,28,.08)}
+.vm-ai details{margin-top:4px}.vm-ai summary{cursor:pointer;color:var(--muted,#888);font-size:12px}.vm-ai q{display:block;margin-top:4px;color:var(--muted,#666);font-style:italic}
+.rec-ai{border:1px solid var(--line,#ddd);border-radius:12px;padding:10px 12px;margin:0 0 12px}
+.rec-ai-h{font-weight:600;font-size:14px;margin-bottom:6px}
+.rec-ai textarea{width:100%;box-sizing:border-box;font:inherit;border-radius:8px;padding:8px}
+.rec-ai-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}.rec-ai-row select{flex:1;min-width:120px}
+.vm-ai{flex-basis:100%}.vm-cb{background:none;border:0;padding:0;color:var(--accent,#d8141c);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline}
+.rows .vm-ai .grow{display:block;text-align:left;min-width:0}.vm-ai .vm-cb{display:inline}.vm-ai.urgent .ai-badge{background:rgba(216,20,28,.14);color:#c0121a}.vm-ai b{font-weight:600}

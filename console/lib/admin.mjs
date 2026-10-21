@@ -45,18 +45,23 @@ const sysError = (r, what) => new UserError(`${what} : ${(r.lines.find((l) => l.
 const readVersion = () => { try { return fs.readFileSync(path.join(APP_DIR, "VERSION"), "utf8").trim(); } catch { return "?"; } };
 const readChangelog = () => { try { return fs.readFileSync(path.join(APP_DIR, "CHANGELOG.md"), "utf8"); } catch { return ""; } };
 
-export function createAdminService({ db, ami, pbx }) {
+export function createAdminService({ db, ami, pbx, ai = null }) {
   const get = async (key, def) => {
     const v = await db.getSetting(key, null);
     return v && typeof v === "object" && !Array.isArray(v) ? { ...def, ...v } : v ?? def;
   };
 
+/** Clé d'un message vocal (même calcul pour l'e-mail, l'IA et le softphone) */
+  const vmKey = (box, m) => (m.msg_id ? `${box}:${m.msg_id}` : `${box}:${m.at}:${m.caller_number}`);
   async function migrate() {
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_alerts (
       id bigserial PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), event text NOT NULL, severity text NOT NULL,
       title text NOT NULL, text text NOT NULL, email text NOT NULL DEFAULT 'pending')`);
     // Messages vocaux déjà envoyés par e-mail (jamais deux fois)
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_vm_mailed (key text PRIMARY KEY, box text NOT NULL, at timestamptz NOT NULL DEFAULT now())`);
+    // IA : transcription et résumé de chaque message vocal (une seule fois par message)
+    await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_vm_ai (key text PRIMARY KEY, box text NOT NULL, text text NOT NULL DEFAULT '', summary text NOT NULL DEFAULT '',
+      caller_name text NOT NULL DEFAULT '', callback text NOT NULL DEFAULT '', urgent boolean NOT NULL DEFAULT false, at timestamptz NOT NULL DEFAULT now())`);
   }
 
   // ---------------------------------------------------------------- Règles sortantes
@@ -442,19 +447,42 @@ export function createAdminService({ db, ami, pbx }) {
     }
   }
   /** Nouveaux messages vocaux → e-mail à l'utilisateur (option de sa fiche), puis effacés du répondeur si demandé */
+  /** IA : transcrit et résume les nouveaux messages vocaux (pour le softphone, l'appli et l'e-mail) */
+  async function aiVoicemails() {
+    if (!ai) return;
+    const st = await ai.settings();
+    if (!st.enabled || !st.voicemail) return;
+    let budget = 10;   // messages par passage, au plus
+    for (const u of (await pbx.loadUsers()).filter((x) => x.voicemail.enabled && !x.options.disabled)) {
+      const todo = vmbox.listMessages(u.id).filter((m) => m.folder === "new" && m.at && Date.now() - Date.parse(m.at) < 2 * 3600_000);
+      if (!todo.length) continue;
+      const known = await ai.insights(u.id);
+      for (const m of todo) {
+        const key = vmKey(u.id, m);
+        if (known.has(key) || budget-- <= 0) continue;
+        try { await ai.voicemailInsight(u.id, key, vmbox.audioPath(u.id, m.id).file); }
+        catch (e) { if (e.status === 429 || e.status === 403 || e.status === 502) return; }   // plafond, IA coupée, relais injoignable : on réessaie plus tard
+      }
+    }
+    await db.query("DELETE FROM pbxmaison_vm_ai WHERE at < now() - interval '90 days'");
+  }
   async function sendVoicemails() {
     const a = await alertSettings();
     if (!smtpReady(a.smtp)) return;
     const users = (await pbx.loadUsers()).filter((u) => u.voicemail.enabled && u.voicemail.email && u.email && !u.options.disabled);
     if (!users.length) return;
-    const keyOf = (u, m) => m.msg_id ? `${u.id}:${m.msg_id}` : `${u.id}:${m.at}:${m.caller_number}`;
+    const keyOf = (u, m) => vmKey(u.id, m);
+    const aiOn = ai ? await ai.settings().then((x) => x.enabled && x.voicemail) : false;
     for (const u of users) {
       const list = vmbox.listMessages(u.id).map((m) => ({ ...m, key: keyOf(u, m) }));
       if (!list.length) continue;
       const done = new Set((await db.query("SELECT key FROM pbxmaison_vm_mailed WHERE box = $1", [u.id])).rows.map((x) => x.key));
       const todo = messagesToMail(list, done);
       for (const m of todo) {
-        const mail = voicemailMail({ box: u.id, boxName: displayName(u), caller: m.caller_number, callerName: m.caller_name, at: m.at, duration: m.duration, pbxName: pbxName(), tz: tzName(), attach: u.voicemail.email_attach });
+        // IA : transcription et résumé dans l'e-mail (si le relais ne répond pas, l'e-mail part quand même, sans)
+        let insight = null;
+        if (aiOn) { try { insight = await ai.voicemailInsight(u.id, m.key, vmbox.audioPath(u.id, m.id).file); } catch { /* sans résumé */ } }
+        const mail = voicemailMail({ box: u.id, boxName: displayName(u), caller: m.caller_number, callerName: m.caller_name, at: m.at, duration: m.duration, pbxName: pbxName(), tz: tzName(), attach: u.voicemail.email_attach, insight });
         let attachments = [];
         if (u.voicemail.email_attach) {
           const f = vmbox.audioPath(u.id, m.id);
@@ -643,13 +671,14 @@ export function createAdminService({ db, ami, pbx }) {
       if (backupDue(b, last?.trigger === "schedule" ? last.at : null) && !backupJob?.running) await runBackup("schedule");
     }, 60_000);
     tick(async () => { const r = await recording(); purgeRecordings(r.retention_days); }, 6 * 3600_000);
+    tick(aiVoicemails, 20_000);
     tick(sendVoicemails, 15_000);
     tick(sendAlerts, 30_000);
     refreshAllow().catch(() => {});
   }
 
   return {
-    migrate, start, dialplanParts, testMail, consoleAllowed, refreshAllow,
+    migrate, start, dialplanParts, testMail, vmKey, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
     getSecurity, setSecurity, banIp,
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,

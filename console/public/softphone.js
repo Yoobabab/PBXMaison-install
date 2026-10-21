@@ -513,10 +513,10 @@ async function toPhoneWav(buf) {
   return { wav: new Uint8Array(view.buffer), secs };
 }
 const b64 = (u8) => { let x = ""; for (let i = 0; i < u8.length; i += 0x8000) x += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(x); };
-let promptList = null;
+let promptList = null, promptAi = null;
 async function pageAnnonces(el) {
   el.innerHTML = `<div class="sp-loading">Chargement…</div>`;
-  try { promptList = (await api("GET", "/api/u/prompts")).prompts; } catch (e) { el.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
+  try { const r = await api("GET", "/api/u/prompts"); promptList = r.prompts; promptAi = r.ai ? r.voices : null; } catch (e) { el.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
   el.innerHTML = `<section class="panel annpage">
     <div class="ann-head"><div><h2>Annonces</h2><p>Les messages que les appelants entendent (accueil, fermeture, attente…). Réenregistre-les au micro quand tu veux.</p></div>
       <button class="btn" id="annnew">＋ Nouvelle annonce</button></div>
@@ -539,6 +539,10 @@ async function pageAnnonces(el) {
 function recordSheet(p) {
   const sh = openSheet(`<div class="ks-head"><span class="fwp-ic sm">🎙</span><div><h3>${p ? `Réenregistrer « ${esc(p.name)} »` : "Nouvelle annonce"}</h3><p>Parle près du micro, dans un endroit calme.</p></div></div>
     ${p ? "" : `<input id="rname" class="rec-name" placeholder="Nom de l'annonce (ex. Fermeture exceptionnelle)" maxlength="50">`}
+    ${promptAi ? `<div class="rec-ai"><div class="rec-ai-h"><span class="ai-badge">IA</span> Sans micro : tape le texte, une voix le lit</div>
+      <textarea id="raitext" rows="3" maxlength="1500" placeholder="Nous sommes exceptionnellement fermés ce lundi. Nous vous retrouvons mardi à 9 heures."></textarea>
+      <div class="rec-ai-row"><select id="raivoice">${Object.entries(promptAi).map(([k, l]) => `<option value="${esc(k)}">Voix ${esc(l.toLowerCase())}</option>`).join("")}</select>
+        <button class="btn ghost sm" id="raibetter">✨ Améliorer</button><button class="btn sm" id="raigo">Créer la voix</button></div></div>` : ""}
     <div class="rec-box"><button class="rec-btn" id="recgo"><span></span></button><div class="rec-t" id="rect">Appuie pour enregistrer</div></div>
     <div class="rec-after" hidden><audio id="recaudio" controls></audio>
       <div class="rec-acts"><button class="btn ghost" id="recagain">Recommencer</button><button class="ks-main open" id="recsave">Enregistrer l'annonce</button></div></div>
@@ -562,6 +566,26 @@ function recordSheet(p) {
     timer = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); st.textContent = `● ${fmtDur(s)} · appuie pour arrêter`; if (s >= 300) rec?.stop(); }, 250);
   };
   $("#recfile", sh).onchange = async (e) => { const f = e.target.files[0]; if (f) await ready(await f.arrayBuffer()); };
+  if (promptAi) {
+    $("#raibetter", sh).onclick = async (e) => {
+      const t = $("#raitext", sh).value.trim(); if (!t) return $("#raitext", sh).focus();
+      e.target.disabled = true;
+      try { $("#raitext", sh).value = (await api("POST", "/api/u/ai/announce-text", { idea: t })).text; } catch (err) { toast(err.message, "bad"); }
+      e.target.disabled = false;
+    };
+    $("#raigo", sh).onclick = async (e) => {
+      const t = $("#raitext", sh).value.trim(); if (!t) return $("#raitext", sh).focus();
+      e.target.disabled = true; e.target.textContent = "Création…";
+      try {
+        const r = await api("POST", "/api/u/ai/speech", { text: t, voice: $("#raivoice", sh).value });
+        wav = Uint8Array.from(atob(r.wav), (c) => c.charCodeAt(0));
+        $("#recaudio", sh).src = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
+        $(".rec-after", sh).hidden = false; $(".rec-box", sh).hidden = true; $(".rec-file", sh).hidden = true;
+        if ($("#rname", sh) && !$("#rname", sh).value) $("#rname", sh).value = t.split(/[.!?]/)[0].slice(0, 50);
+      } catch (err) { toast(err.message, "bad"); }
+      e.target.disabled = false; e.target.textContent = "Créer la voix";
+    };
+  }
   $("#recagain", sh).onclick = () => { wav = null; $(".rec-after", sh).hidden = true; $(".rec-box", sh).hidden = false; $(".rec-file", sh).hidden = false; st.textContent = "Appuie pour enregistrer"; };
   $("#recsave", sh).onclick = async () => {
     const name = p ? p.name : $("#rname", sh).value.trim();
@@ -1043,6 +1067,8 @@ function pageVoicemail(el) {
         ${m.caller_number ? `<button class="cbtn sm" data-call="${esc(m.caller_number)}" title="Rappeler">${I.phone(16)}</button>` : ""}
         <button class="ghost-ic" data-del title="Supprimer">${I.trash()}</button>
         <div class="player"></div>
+        ${m.ai ? `<div class="vm-ai ${m.ai.urgent ? "urgent" : ""}"><span class="ai-badge">${m.ai.urgent ? "Urgent" : "IA"}</span><span class="grow"><b>${esc(m.ai.summary)}</b>${m.ai.callback ? ` · <button type="button" class="vm-cb" data-call="${esc(m.ai.callback)}">rappeler le ${esc(fmtNum(m.ai.callback))}</button>` : ""}
+          ${m.ai.text ? `<details><summary>Lire la transcription</summary><q>${esc(m.ai.text)}</q></details>` : ""}</span></div>` : ""}
       </li>`).join("") || '<li class="empty-st">Aucun message.</li>'}</ul>
   </section>`;
   wireCalls(el);
