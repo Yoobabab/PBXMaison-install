@@ -21,6 +21,8 @@ import { EMERGENCY } from "./pbx.mjs";
 import { smtpReady, transportOf, smtpError, voicemailMail, alertMail, messagesToMail } from "./mail.mjs";
 import * as vmbox from "./voicemail.mjs";
 import { fraudSignals } from "./fraud.mjs";
+import { periodOf, periodStats, reportInput, monthlyReportMail } from "./report.mjs";
+import { readTheme, assetFile, THEME_DIR } from "./theme.mjs";
 
 /** Lance pbx-configure et renvoie { code, out, lines (JSON par ligne) }. */
 export function runConfigure(args, { timeout = 120_000 } = {}) {
@@ -471,6 +473,52 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     }
     await db.query("DELETE FROM pbxmaison_vm_ai WHERE at < now() - interval '90 days'");
   }
+  // ---------------------------------------------------------------- Rapport mensuel envoyé au client (aux couleurs du partenaire)
+  const REPORT_DEFAULT = { enabled: false, recipients: [], signature: "", ai: true };
+  const reportSettings = () => get("report", REPORT_DEFAULT);
+  async function setReportSettings(input) {
+    const cur = await reportSettings();
+    const list = (Array.isArray(input.recipients) ? input.recipients : String(input.recipients ?? cur.recipients.join(",")).split(/[\s,;]+/)).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    for (const r of list) if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(r)) throw new UserError(`Adresse invalide : ${r}`, "recipients");
+    const next = { ...cur, recipients: [...new Set(list)].slice(0, 10), signature: String(input.signature ?? cur.signature).replace(/[<>\r\n]/g, " ").trim().slice(0, 80),
+      enabled: input.enabled !== undefined ? !!input.enabled : cur.enabled, ai: input.ai !== undefined ? !!input.ai : cur.ai };
+    if (next.enabled && !next.recipients.length) throw new UserError("Indique au moins un destinataire du rapport.", "recipients");
+    await db.setSetting("report", next);
+    return { ...next, last: await db.getSetting("report_last", null) };
+  }
+  async function buildMonthlyReport({ previous = true } = {}) {
+    const st = await reportSettings();
+    const cur = periodOf("month", Date.now(), { previous }), prev = periodOf("month", Date.parse(cur.from) - 1000);
+    const { calls } = await pbx.callLog({ days: 75, limit: 5000 });
+    const names = new Map((await pbx.listExtensions()).map((u) => [u.id, u.name]));
+    const stats = periodStats(calls, { from: cur.from, to: cur.to, tz: tzName(), names }), before = periodStats(calls, { from: prev.from, to: prev.to, tz: tzName(), names });
+    let synthesis = "";
+    if (st.ai && ai && (await ai.settings()).enabled) {
+      try { synthesis = await ai.text("report", reportInput("month", cur.label, stats, before)); } catch { /* rapport sans analyse */ }
+    }
+    const theme = (() => { try { return readTheme(THEME_DIR); } catch { return { color: "#d8141c" }; } })();
+    const logo = (() => { try { const f = theme.logo ? assetFile("logo", THEME_DIR) : null; return f?.type && f.type !== "image/svg+xml" ? f : null; } catch { return null; } })();
+    const mail = monthlyReportMail({ label: cur.label, stats, prev: before, synthesis, pbxName: pbxName(), brand: { color: theme.color, logoCid: logo ? "logo@callikoe" : "", signature: st.signature } });
+    return { mail, label: cur.label, attachments: logo ? [{ filename: `logo.${logo.type.split("/")[1]}`, content: logo.buf, contentType: logo.type, cid: "logo@callikoe" }] : [] };
+  }
+  async function sendMonthlyReport({ to = null, force = false } = {}) {
+    const st = await reportSettings();
+    const r = await buildMonthlyReport();
+    const dest = to ? [to] : st.recipients;
+    if (!dest.length) throw new UserError("Aucun destinataire pour le rapport.", "recipients");
+    await sendMail(dest, r.mail, r.attachments);
+    if (!to && !force) await db.setSetting("report_last", { label: r.label, at: new Date().toISOString(), to: dest });
+    return { ok: true, label: r.label, to: dest };
+  }
+  async function reportTick() {
+    const st = await reportSettings();
+    if (!st.enabled || !st.recipients.length || !smtpReady((await alertSettings()).smtp)) return;
+    const now = new Date(), local = new Date(now.toLocaleString("en-US", { timeZone: tzName() }));
+    if (local.getDate() !== 1 || local.getHours() < 8) return;   // le 1er du mois, à partir de 8 h
+    const label = periodOf("month", Date.now(), { previous: true }).label;
+    if ((await db.getSetting("report_last", null))?.label === label) return;
+    await sendMonthlyReport().catch((e) => mailFailed(`Rapport mensuel : ${e.message}`));
+  }
   /** Anti-fraude intelligent : appels sortants comparés aux habitudes du PBX (toutes les 5 minutes) */
   async function fraudWatch() {
     const { calls } = await pbx.callLog({ days: 30, direction: "out", limit: 5000 });
@@ -687,13 +735,14 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     tick(async () => { const r = await recording(); purgeRecordings(r.retention_days); }, 6 * 3600_000);
     tick(aiVoicemails, 20_000);
     tick(fraudWatch, 5 * 60_000);
+    tick(reportTick, 30 * 60_000);
     tick(sendVoicemails, 15_000);
     tick(sendAlerts, 30_000);
     refreshAllow().catch(() => {});
   }
 
   return {
-    migrate, start, dialplanParts, testMail, vmKey, consoleAllowed, refreshAllow,
+    migrate, start, dialplanParts, testMail, vmKey, reportSettings, setReportSettings, buildMonthlyReport, sendMonthlyReport, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
     getSecurity, setSecurity, banIp,
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,

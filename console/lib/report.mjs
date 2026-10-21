@@ -82,3 +82,43 @@ export function reportInput(kind, label, cur, prev, voicemailSummaries = []) {
   return JSON.stringify({ type: kind === "month" ? "rapport mensuel" : "bilan de la semaine", periode: label, chiffres: brief(cur), periode_precedente: brief(prev),
     sujets_des_messages_vocaux: voicemailSummaries.slice(0, 40) });
 }
+
+const escH = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const dur = (s) => (s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`);
+/**
+ * E-mail du rapport mensuel envoyé au client, aux couleurs du partenaire (thème du serveur, ou Callikoe sans Marque blanche).
+ * brand : { color, logoCid?, signature } ; synthesis : texte de l'IA (facultatif).
+ */
+export function monthlyReportMail({ label, stats: s, prev: p0, synthesis = "", pbxName = "", brand = {} }) {
+  const p = p0 && p0.inbound ? p0 : null;   // pas de comparaison avec un mois sans appels
+  const color = /^#[0-9a-f]{6}$/i.test(brand.color || "") ? brand.color : "#d8141c";
+  const sign = brand.signature || "Votre installateur téléphonique";
+  const ev = (cur, old, opts) => { const t = delta(cur, old, opts); return t && t !== "=" ? ` (${t} par rapport au mois précédent)` : ""; };
+  const kpi = (v, l, sub = "") => `<td style="padding:14px 10px;background:#f6f7f9;border-radius:10px;text-align:center;width:25%"><div style="font-size:24px;font-weight:700;color:#1b1d24">${escH(v)}</div>
+    <div style="font-size:13px;color:#626977">${escH(l)}</div>${sub ? `<div style="font-size:12px;color:#8a90a0;margin-top:2px">${escH(sub)}</div>` : ""}</td>`;
+  const maxD = Math.max(1, ...s.days.map((d) => d.calls));
+  const bars = s.days.map((d) => `<tr><td style="padding:3px 10px 3px 0;font-size:13px;color:#626977;width:90px">${escH(d.name)}</td>
+    <td style="padding:3px 0"><div style="height:14px;border-radius:7px;background:${color};opacity:.85;width:${Math.max(2, Math.round((d.calls / maxD) * 100))}%"></div></td>
+    <td style="padding:3px 0 3px 10px;font-size:13px;color:#1b1d24;width:110px;white-space:nowrap">${d.calls} appel${d.calls > 1 ? "s" : ""}${d.missed ? ` · ${d.missed} manqué${d.missed > 1 ? "s" : ""}` : ""}</td></tr>`).join("");
+  const syn = synthesis ? synthesis.split("\n").map((l) => l.trim()).filter(Boolean) : [];
+  const title = `Votre standard téléphonique en ${label}`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;background:#eef0f4;padding:24px 12px"><div style="max-width:620px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden">
+  <div style="background:${color};padding:22px 24px;color:#fff">${brand.logoCid ? `<img src="cid:${brand.logoCid}" alt="" style="height:40px;background:#fff;border-radius:8px;padding:4px;margin-bottom:10px;display:block">` : ""}
+    <div style="font-size:20px;font-weight:700">${escH(title)}</div><div style="font-size:14px;opacity:.9;margin-top:4px">${escH(pbxName)}</div></div>
+  <div style="padding:22px 24px">
+    <table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px"><tr>
+      ${kpi(s.inbound, "appels reçus", delta(s.inbound, p?.inbound))}${kpi(`${s.answer_rate} %`, "appels pris", delta(s.answer_rate, p?.answer_rate, { points: true }))}
+      ${kpi(s.missed, "appels manqués", s.voicemail ? `dont ${s.voicemail} message${s.voicemail > 1 ? "s" : ""}` : "")}${kpi(dur(s.avg_wait), "d'attente en moyenne", "")}</tr></table>
+    <h3 style="font-size:15px;margin:20px 0 8px;color:#1b1d24">Appels reçus par jour</h3><table role="presentation" style="width:100%;border-collapse:collapse">${bars}</table>
+    ${s.busiest_hour !== null ? `<p style="font-size:14px;color:#1b1d24;margin:14px 0 0">Heure la plus chargée : <b>${s.busiest_hour} h – ${s.busiest_hour + 1} h</b>.${s.worst_hour ? ` C'est vers <b>${s.worst_hour.hour} h</b> que l'on perd le plus d'appels (${s.worst_hour.rate} %).` : ""}</p>` : ""}
+    ${s.agents.length ? `<h3 style="font-size:15px;margin:20px 0 8px;color:#1b1d24">Appels pris par personne</h3><p style="font-size:14px;color:#1b1d24;margin:0;line-height:1.7">${s.agents.slice(0, 12).map((a) => `${escH(a.name || a.ext)} : <b>${a.answered}</b>`).join(" · ")}</p>` : ""}
+    ${s.outbound ? `<p style="font-size:14px;color:#1b1d24;margin:14px 0 0">${s.outbound} appel${s.outbound > 1 ? "s" : ""} passé${s.outbound > 1 ? "s" : ""} vers l'extérieur.</p>` : ""}
+    ${syn.length ? `<div style="margin:22px 0 0;padding:14px 16px;border-radius:10px;background:#f6f7f9;border-left:4px solid ${color}"><div style="font-size:15px;font-weight:700;margin-bottom:6px;color:#1b1d24">Notre analyse</div>
+      ${syn.map((l) => `<p style="margin:4px 0;font-size:14px;color:#1b1d24;line-height:1.5">${escH(l)}</p>`).join("")}</div>` : ""}
+  </div>
+  <div style="padding:16px 24px;border-top:1px solid #e6e8ee;font-size:12px;color:#8a90a0">Rapport préparé par ${escH(sign)} · chiffres du standard ${escH(pbxName)}, du 1er au dernier jour du mois.</div></div></div>`;
+  const text = [title, pbxName, "", `Appels reçus : ${s.inbound}${ev(s.inbound, p?.inbound)}`, `Appels pris : ${s.answer_rate} %${ev(s.answer_rate, p?.answer_rate, { points: true })}`,
+    `Appels manqués : ${s.missed}${s.voicemail ? ` (dont ${s.voicemail} messages)` : ""}`, `Attente moyenne avant réponse : ${dur(s.avg_wait)}`, "",
+    ...s.days.map((d) => `${d.name} : ${d.calls} appels, ${d.missed} manqués`), ...(syn.length ? ["", "Notre analyse :", ...syn] : []), "", `Rapport préparé par ${sign}.`].join("\n");
+  return { subject: title + (pbxName ? ` — ${pbxName}` : ""), html, text };
+}

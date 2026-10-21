@@ -19,3 +19,14 @@ test("bilan : période, chiffres, évolution", () => {
   assert.equal(delta(120, 100), "+20 %"); assert.equal(delta(40, 45, { points: true }), "−5 pts"); assert.equal(delta(3, 0), "nouveau");
   assert.doesNotMatch(reportInput("week", w.label, s, null, ["Devis"]), /0612345678/);
 });
+
+test("rapport mensuel : e-mail aux couleurs du partenaire", async () => {
+  const { monthlyReportMail } = await import("../lib/report.mjs");
+  const s = { inbound: 120, answered: 100, answer_rate: 83, missed: 20, voicemail: 6, avg_wait: 14, outbound: 40, busiest_hour: 9, worst_hour: { hour: 12, rate: 30 },
+    days: ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"].map((name, i) => ({ name, calls: i < 5 ? 24 : 0, missed: i < 5 ? 4 : 0 })), agents: [{ ext: "201", name: "Sophie <b>", answered: 60 }] };
+  const m = monthlyReportMail({ label: "septembre 2026", stats: s, prev: { ...s, inbound: 100, answer_rate: 80 }, synthesis: "• Bien.\nConseils :\n→ Ajouter quelqu'un à midi.", pbxName: "Boulangerie Martin",
+    brand: { color: "#1d4ed8", logoCid: "logo1", signature: "Télécom Ouest" } });
+  assert.equal(m.subject, "Votre standard téléphonique en septembre 2026 — Boulangerie Martin");
+  assert.match(m.html, /#1d4ed8/); assert.match(m.html, /cid:logo1/); assert.match(m.html, /\+20 %/); assert.match(m.html, /\+3 pts/); assert.match(m.html, /Télécom Ouest/);
+  assert.doesNotMatch(m.html, /<b>Sophie|Sophie <b>/); assert.match(m.text, /Notre analyse/);
+});

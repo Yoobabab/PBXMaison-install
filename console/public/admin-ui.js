@@ -658,7 +658,7 @@ async function pageCapture() {
 // ================================================================ IA
 async function pageAi() {
   H.setNav("ai");
-  const d = await H.api("GET", "/api/ai-settings");
+  const [d, rep] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report")]);
   const r = d.relay, on = d.settings.enabled;
   const euro = (n) => `${(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
   const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce", report: "bilans et rapports" };
@@ -674,10 +674,26 @@ async function pageAi() {
       ${sw("voicemail", d.settings.voicemail, "Transcrire et résumer les messages vocaux", "Chaque nouveau message est écrit en texte avec un résumé d'une phrase : dans l'e-mail, le softphone et l'appli. Environ 0,3 centime la minute.")}
       <div class="note">À prévoir côté client (RGPD) : informer les appelants que les messages sont transcrits automatiquement, par exemple dans l'annonce du répondeur. Les messages passent par le relais Callikoe puis OpenAI, sans y être conservés au-delà du traitement.</div>
       <div class="actions"><button class="btn">Enregistrer</button></div></form></div>
+    <div class="panel"><div class="ph"><h2>Rapport mensuel au client</h2></div><form id="rpf" class="pad stack" novalidate><div class="form-msg"></div>
+      <p class="hint" style="margin:0">Le 1er de chaque mois, le client reçoit par e-mail le bilan du mois écoulé : appels reçus, pris, manqués, attente, jours et heures chargés, appels par personne${on ? ", avec l'analyse et les conseils de l'IA" : ""}. Aux couleurs et au logo du serveur (option Marque blanche), sinon aux couleurs Callikoe.</p>
+      ${sw("enabled", rep.enabled, "Envoyer le rapport chaque mois")}
+      <div class="grid2"><label>Destinataires<input name="recipients" value="${H.esc(rep.recipients.join(", "))}" placeholder="gerant@client.fr, compta@client.fr"><span class="hint">Séparés par des virgules (10 au plus).</span></label>
+        <label>Signé par<input name="signature" value="${H.esc(rep.signature)}" maxlength="80" placeholder="Ex. Télécom Ouest — votre installateur"></label></div>
+      ${sw("ai", rep.ai, "Ajouter l'analyse et les conseils de l'IA", on ? "Environ 1 centime par rapport." : "L'IA doit être activée ci-dessus.")}
+      <p class="s" style="margin:0">${rep.last ? `Dernier envoi : ${H.esc(rep.last.label)}, le ${fmtDT(rep.last.at)} à ${H.esc(rep.last.to.join(", "))}.` : "Pas encore envoyé."}</p>
+      <div class="actions"><a class="btn ghost" href="/api/ai-settings/report/preview" target="_blank" rel="noopener">Aperçu du mois dernier</a><button type="button" class="btn ghost" id="rptest">M'envoyer un essai</button><button class="btn">Enregistrer</button></div></form></div>
     <div class="panel"><div class="ph"><h2>Essayer</h2></div><div class="pad stack">
       <div class="row"><input id="aitry" class="grow" value="On est fermés lundi pour inventaire" maxlength="300"><button type="button" class="btn ghost" id="aitryb" ${on ? "" : "disabled"}>Rédiger une annonce</button></div>
       <div id="aitryr"></div></div></div>`;
   onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
+  onSubmit(H.$("#rpf"), async (f) => { await H.api("PUT", "/api/ai-settings/report", { enabled: f.enabled, ai: f.ai, recipients: f.recipients, signature: f.signature }); ok("Rapport mensuel enregistré."); pageAi(); });
+  H.$("#rptest").onclick = async (e) => {
+    const to = prompt("Envoyer un essai du rapport (mois dernier) à :", H.state?.email || "");
+    if (!to) return;
+    e.target.disabled = true;
+    try { const x = await H.api("POST", "/api/ai-settings/report/test", { to }); alert(`Rapport de ${x.label} envoyé à ${x.to.join(", ")}.`); } catch (err) { alert(err.message); }
+    e.target.disabled = false;
+  };
   H.$("#aitryb").onclick = async (e) => {
     e.target.disabled = true; H.$("#aitryr").innerHTML = '<span class="spin"></span>';
     try { const x = await H.api("POST", "/api/ai/announce-text", { idea: H.$("#aitry").value }); H.$("#aitryr").innerHTML = `<div class="note">« ${H.esc(x.text)} »</div>`; }

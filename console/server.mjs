@@ -1031,6 +1031,15 @@ export async function buildApp({ db, ami } = {}) {
   // ---------------------------------------------------------------- IA (relais du portail pro : la clé OpenAI n'est jamais sur le PBX)
   app.get("/api/ai-settings", { preHandler: requireUser }, async () => ({ ...(await ai.status()), voices: AI_VOICES }));
   app.put("/api/ai-settings", { preHandler: requireUser }, async (req) => ({ ...(await ai.saveSettings(req.body || {})), voices: AI_VOICES }));
+  // Rapport mensuel au client (réglé par l'installateur)
+  app.get("/api/ai-settings/report", { preHandler: requireUser }, async () => ({ ...(await admin.reportSettings()), last: await db.getSetting("report_last", null) }));
+  app.put("/api/ai-settings/report", { preHandler: requireUser }, async (req) => admin.setReportSettings(req.body || {}));
+  app.get("/api/ai-settings/report/preview", { preHandler: requireUser }, async (req, reply) => {
+    const r = await admin.buildMonthlyReport({ previous: req.query?.current !== "1" });
+    const html = r.attachments.length ? r.mail.html.replace(/cid:logo@callikoe/g, "/theme/logo") : r.mail.html;
+    return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(`<!doctype html><meta charset="utf-8"><title>${r.mail.subject.replace(/[<>&]/g, "")}</title><body style="margin:0">${html}</body>`);
+  });
+  app.post("/api/ai-settings/report/test", { preHandler: requireUser }, async (req) => admin.sendMonthlyReport({ to: String(req.body?.to || "").trim() || null, force: true }));
   app.get("/api/ai", { preHandler: requireUser }, async () => { const s = await ai.settings(); return { enabled: s.enabled, voices: AI_VOICES }; });
   app.post("/api/ai/speech", { preHandler: requireUser }, async (req) => {
     const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice);
