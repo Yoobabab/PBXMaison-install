@@ -400,6 +400,19 @@ export function contactSource(contact, tenant = false) {
   return /@\[?([^\]:;>]+)\]?(?::(\d+))?/.exec(contact?.uri || "");
 }
 
+/** Adresse IP publique (Internet), pas une adresse de réseau local */
+export const isPublicIp = (ip) => !!ip && /^[0-9a-f.:]+$/i.test(ip) && !privateIp(ip) && !/^(::1|fe80:|fc|fd)/i.test(ip);
+/**
+ * Clé stable d'un appareil d'un poste, pour s'en souvenir quand il se déconnecte :
+ * l'adresse MAC si le téléphone l'annonce, sinon le type d'appareil et son logiciel (sans les numéros de version).
+ */
+export function deviceKey(device = {}, userAgent = "") {
+  if (device.mac) return `mac:${device.mac}`;
+  const family = String(userAgent).toLowerCase().replace(/([0-9a-f]{2}[:-]){5}[0-9a-f]{2}/g, " ").replace(/\bv?\d+(\.\d+)+\w*/g, " ")
+    .replace(/[^a-z0-9]+/g, " ").trim().split(" ").slice(0, 3).join("-");
+  return `${device.kind || "unknown"}:${family || "inconnu"}`;
+}
+
 export function connectionType(sourceIp, localIp, sbcs = []) {
   const sbc = sbcs.find((s) => s.ip === sourceIp);
   if (sbc) return { code: "sbc", label: `Via le SBC « ${sbc.name} »` };

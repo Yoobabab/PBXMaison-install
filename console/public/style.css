@@ -945,3 +945,8 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .tx-prev .actions{display:flex;justify-content:flex-end;gap:8px}
 .tx-tip{margin:-6px 0 16px;max-width:820px}
 .tx-pa .grow{flex:1}
+/* Téléphones : appareil déconnecté (gardé avec sa dernière adresse) */
+.ptable tr.dev-off td{background:color-mix(in srgb,var(--bad-soft) 45%,transparent)}
+.ptable tr.dev-off .devcell strong,.ptable tr.dev-off td a{opacity:.7}
+.ptable tr.dev-off .dev{filter:grayscale(1);opacity:.55}
+.ptable tr.dev-never .dev{opacity:.45}

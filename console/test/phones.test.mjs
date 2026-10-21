@@ -109,3 +109,18 @@ test("Téléphones supplémentaires d'un utilisateur : modèle, MAC unique", () 
   assert.throws(() => validatePhone({ extra: [{ model: "", mac: "44dbd2000001" }] }, cur, ctx), /modèle/);
   assert.equal(validatePhone({ extra: [] }, { ...cur, extra: [{ model: "yealink-t54w", mac: "44dbd2000001" }] }, ctx).extra.length, 0);
 });
+
+test("appareils : clé stable et adresse publique", async () => {
+  const { deviceKey, isPublicIp, identifyDevice } = await import("../lib/phones.mjs");
+  const ua = "Yealink SIP-T46U 108.86.0.20 44:db:d2:29:fa:7b";
+  assert.equal(deviceKey(identifyDevice(ua), ua), "mac:44dbd229fa7b");
+  assert.equal(deviceKey({ kind: "pc" }, "MicroSIP/3.21.3"), deviceKey({ kind: "pc" }, "MicroSIP/3.22.0"));
+  assert.notEqual(deviceKey({ kind: "web" }, "Callikoe-Web 1.0"), deviceKey({ kind: "mobile" }, "Callikoe-Web 1.0"));
+  assert.equal(isPublicIp("90.12.4.8"), true);
+  for (const ip of ["192.168.1.20", "10.0.0.3", "172.20.1.1", "100.64.0.1", "127.0.0.1", ""]) assert.equal(isPublicIp(ip), false, ip);
+});
+test("appareils : deux modèles différents gardent deux clés", async () => {
+  const { deviceKey } = await import("../lib/phones.mjs");
+  assert.notEqual(deviceKey({ kind: "phone" }, "Yealink SIP-T54W 96.86.0.70"), deviceKey({ kind: "phone" }, "Yealink SIP-T46U 108.86.0.20"));
+  assert.equal(deviceKey({ kind: "phone" }, "Yealink SIP-T54W 96.86.0.70"), deviceKey({ kind: "phone" }, "Yealink SIP-T54W 96.86.0.85"));
+});

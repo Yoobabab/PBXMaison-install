@@ -704,6 +704,7 @@ const DEV_ICONS = {
 };
 const KIND_LABELS = { phone: "Téléphone de bureau", pc: "Softphone sur PC", mobile: "Appli mobile", web: "Softphone web", unknown: "Appareil inconnu" };
 const deviceIcon = (kind = "unknown", extra = "") => `<span class="dev ${kind}" title="${esc(KIND_LABELS[kind] || "")}${extra ? " · " + esc(extra) : ""}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">${DEV_ICONS[kind] || DEV_ICONS.unknown}</svg></span>`;
+const fmtSeen = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 const ago = (iso) => {
   if (!iso) return "—";
   const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
@@ -766,16 +767,29 @@ async function renderPhones() {
     const hay = (p) => `${p.user.id}${p.user.name}${p.model}${p.label || ""}${p.mac}${p.source_ip}${p.local_ip}${p.device?.label || ""}`.toLowerCase().replace(/[:\s-]/g, "");
     const list = d.phones.filter((p) => (f === "all" || (f === "on") === p.online) && (!q || hay(p).includes(q)));
     rows.innerHTML = list.map((p) => {
-      const sub = [p.label, p.mac ? fmtMac(p.mac) : "", p.firmware ? `v${p.firmware}` : ""].filter(Boolean).join(" · ") || (!p.model && p.user_agent ? p.user_agent : "");
-      return `<tr class="click" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
+      const sub = [p.label, p.mac ? fmtMac(p.mac) : "", p.firmware ? `v${p.firmware}` : ""].filter(Boolean).join(" · ") || (!p.configured && p.user_agent ? p.user_agent : "");
+      const state = p.online ? `<span class="pill ok">Connecté</span><div class="s">depuis ${esc(ago(p.since))}</div>`
+        : p.last_seen ? `<span class="pill bad">Déconnecté</span><div class="s">depuis ${esc(ago(p.since || p.last_seen))}</div><div class="s">dernière connexion le ${esc(fmtSeen(p.last_seen))}</div>`
+        : `<span class="pill off">Jamais connecté</span>${p.provisioned ? `<div class="s">provisionné le ${esc(fmtDate(p.provisioned.at))}</div>` : ""}`;
+      const pub = p.public_ip ? `<div class="s">${p.online && p.public_ip === p.source_ip ? "IP publique" : "Dernière IP publique"} <span class="mono">${esc(p.public_ip)}</span>${!p.online && p.public_at ? ` · ${esc(fmtSeen(p.public_at))}` : ""}</div>` : "";
+      const addr = p.online
+        ? `<span class="mono">${esc(p.source_ip || "—")}</span>${p.local_ip && p.local_ip !== p.source_ip || p.connection ? `<div class="s">${[p.local_ip && p.local_ip !== p.source_ip ? `local ${esc(p.local_ip)}` : "", p.connection ? esc(p.connection.label) : ""].filter(Boolean).join(" · ")}</div>` : ""}${p.public_ip !== p.source_ip ? pub : ""}`
+        : p.last_seen ? `${p.public_ip ? `<span class="s">Dernière IP publique</span><div><span class="mono">${esc(p.public_ip)}</span></div>` : `<span class="s">Dernière adresse</span><div><span class="mono">${esc(p.source_ip || "—")}</span></div><div class="s">réseau local, pas d'IP publique connue</div>`}${p.local_ip && p.local_ip !== p.public_ip ? `<div class="s">local ${esc(p.local_ip)}</div>` : ""}`
+        : '<span class="s">—</span>';
+      return `<tr class="click ${p.online ? "" : p.last_seen ? "dev-off" : "dev-never"}" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
       <td><span class="devcell">${deviceIcon(p.device.kind)}<span><strong>${esc(p.model || p.device?.label || "Appareil")}</strong>${sub ? `<div class="s mono-s">${esc(sub)}</div>` : ""}</span></span></td>
       <td class="nw"><a href="#/utilisateurs/${esc(p.user.id)}">${esc(p.user.id)} · ${esc(p.user.name)}</a></td>
-      <td class="nw">${p.online ? '<span class="pill ok">Connecté</span>' : '<span class="pill off">Déconnecté</span>'}
-        <div class="s">${p.since ? `depuis ${esc(ago(p.since))}` : p.provisioned ? `provisionné le ${esc(fmtDate(p.provisioned.at))}` : "jamais connecté"}</div></td>
-      <td class="hide-sm"><span class="mono">${esc(p.source_ip || "—")}</span>${p.local_ip && p.local_ip !== p.source_ip || p.connection ? `<div class="s">${[p.local_ip && p.local_ip !== p.source_ip ? `local ${esc(p.local_ip)}` : "", p.connection ? esc(p.connection.label) : ""].filter(Boolean).join(" · ")}</div>` : ""}</td>
-      <td class="acts nw">${p.online && !p.extra ? `<button class="ic" data-resync="${esc(p.user.id)}" title="Reprovisionner (sans redémarrer)" aria-label="Reprovisionner">⟳</button><button class="ic" data-reboot="${esc(p.user.id)}" title="Redémarrer" aria-label="Redémarrer">⏻</button>` : ""}</td></tr>`;
+      <td class="nw">${state}</td>
+      <td class="hide-sm">${addr}</td>
+      <td class="acts nw">${p.online && p.device.kind === "phone" && !p.extra ? `<button class="ic" data-resync="${esc(p.user.id)}" title="Reprovisionner (sans redémarrer)" aria-label="Reprovisionner">⟳</button><button class="ic" data-reboot="${esc(p.user.id)}" title="Redémarrer" aria-label="Redémarrer">⏻</button>` : ""}
+        ${!p.online && p.last_seen && !p.configured ? `<button class="ic" data-forget="${esc(p.user.id)}|${esc(p.key)}" title="Retirer de la liste (il revient s'il se reconnecte)" aria-label="Retirer de la liste">✕</button>` : ""}</td></tr>`;
     }).join("") || '<tr><td colspan="5" class="empty">Aucun appareil ne correspond.</td></tr>';
     wireResync(rows);
+    rows.querySelectorAll("[data-forget]").forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation();
+      const [ext, ...k] = b.dataset.forget.split("|");
+      await api("POST", "/api/phones/forget", { ext, key: k.join("|") }); renderPhones();
+    });
     rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a,button")) location.hash = tr.dataset.href; });
   };
   app.querySelectorAll("#pf input").forEach((i) => i.addEventListener("change", draw));

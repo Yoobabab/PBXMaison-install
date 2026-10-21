@@ -11,7 +11,7 @@ import { CX_MODE, KAMAILIO_URI, VAR as CX_VAR } from "./config.mjs";
 import { numberRisk, deviceCategory, CATEGORY_LABELS } from "./watch.mjs";
 import { runConfigure } from "./admin.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
-  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, contactSource, connectionType, modelById, addToggleKey } from "./phones.mjs";
+  phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, deviceKey, isPublicIp, contactSource, connectionType, modelById, addToggleKey } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
@@ -697,9 +697,42 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       }
     }
     for (const id of prev.keys()) if (!reg.has(id)) await db.query("DELETE FROM pbxmaison_devices WHERE endpoint = $1", [id]);
+    await trackSeen(reg).catch(() => {});
     await watchDevices(reg).catch(() => {});
     if (++watchTick % 3 === 1) await watchCalls().catch(() => {});
     return reg;
+  }
+
+  /** Appareils de chaque poste : connectés maintenant, ou déconnectés avec leur dernière adresse (gardés 90 jours) */
+  async function trackSeen(reg) {
+    const prev = (await db.query("SELECT ext, dkey, online FROM pbxmaison_device_seen")).rows;
+    const live = new Set();
+    for (const [ext, contacts] of reg) {
+      for (const c of contacts) {
+        const dev = c.device || identifyDevice(c.user_agent);
+        const key = deviceKey(dev, c.user_agent);
+        if (live.has(`${ext}|${key}`)) continue;
+        live.add(`${ext}|${key}`);
+        const pub = isPublicIp(c.source_ip) ? c.source_ip : "";
+        await db.query(`INSERT INTO pbxmaison_device_seen (ext, dkey, kind, label, mac, firmware, user_agent, source_ip, local_ip, public_ip, public_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $10 = '' THEN NULL ELSE now() END)
+          ON CONFLICT (ext, dkey) DO UPDATE SET kind = $3, label = $4, mac = $5, firmware = $6, user_agent = $7, source_ip = $8, local_ip = $9,
+            public_ip = CASE WHEN $10 = '' THEN pbxmaison_device_seen.public_ip ELSE $10 END,
+            public_at = CASE WHEN $10 = '' THEN pbxmaison_device_seen.public_at ELSE now() END,
+            since = CASE WHEN pbxmaison_device_seen.online THEN pbxmaison_device_seen.since ELSE now() END, online = true, last_seen = now()`,
+        [ext, key, dev.kind || "unknown", dev.label || "", dev.mac || "", dev.firmware || "", c.user_agent || "", c.source_ip || "", c.local_ip || "", pub]);
+      }
+    }
+    for (const r of prev) {
+      if (!reg.has(r.ext)) await db.query("DELETE FROM pbxmaison_device_seen WHERE ext = $1", [r.ext]);          // poste supprimé
+      else if (r.online && !live.has(`${r.ext}|${r.dkey}`)) await db.query("UPDATE pbxmaison_device_seen SET online = false, since = now() WHERE ext = $1 AND dkey = $2", [r.ext, r.dkey]);
+    }
+    await db.query("DELETE FROM pbxmaison_device_seen WHERE NOT online AND last_seen < now() - interval '90 days'");
+  }
+  /** Retirer un appareil déconnecté de la liste (il revient s'il se reconnecte) */
+  async function forgetDevice(ext, key) {
+    await db.query("DELETE FROM pbxmaison_device_seen WHERE ext = $1 AND dkey = $2 AND NOT online", [String(ext), String(key)]);
+    return { ok: true };
   }
 
   // ------------------------------------------------------------------ Surveillance (console du serveur)
@@ -740,46 +773,36 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     }
   }
 
+  /** Une ligne par appareil : connectés, déconnectés (dernière adresse gardée), et téléphones configurés jamais vus */
   async function listPhones() {
-    const reg = await trackDevices();
+    await trackDevices();
     const users = await loadUsers();
-    const devices = new Map((await db.query("SELECT * FROM pbxmaison_devices")).rows.map((r) => [r.endpoint, r]));
+    const seen = (await db.query("SELECT * FROM pbxmaison_device_seen ORDER BY ext, online DESC, last_seen DESC")).rows;
     const models = new Map(MODELS.map((m) => [m.id, m.label]));
     const out = [];
     for (const u of users) {
-      const d = devices.get(u.id);
-      const contacts = reg.get(u.id) || [];
-      if (!d && !u.phone.mac && !contacts.length) continue;
-      const c = contacts[0];
-      const ua = c?.user_agent || d?.user_agent || "";
-      const dev = identifyDevice(ua);
-      const sourceIp = c?.source_ip || d?.source_ip || "";
-      const localIp = c?.local_ip || d?.local_ip || "";
-      out.push({
-        user: { id: u.id, name: displayName(u) },
-        online: contacts.length > 0,
-        since: d?.since || null, last_seen: d?.last_seen || null,
-        model: u.phone.model ? models.get(u.phone.model) : dev.label,
-        mac: u.phone.mac || dev.mac || "",
-        device: dev, user_agent: ua, firmware: dev.firmware || "",
-        source_ip: sourceIp, local_ip: localIp,
-        connection: sourceIp ? connectionType(sourceIp, localIp, []) : null,
-        provisioned: u.phone.last_provisioned || null,
-        extra_contacts: Math.max(0, contacts.length - 1),
-      });
-      // Téléphones supplémentaires : reconnus par l'adresse MAC annoncée par le téléphone (Yealink)
-      for (const ex of u.phone.extra || []) {
-        const ce = contacts.find((x) => x.device?.mac === ex.mac);
-        const dv = ce ? identifyDevice(ce.user_agent) : { label: models.get(ex.model) };
-        out.push({
-          user: { id: u.id, name: displayName(u) }, extra: true, label: ex.label || "",
-          online: !!ce, since: null, last_seen: null,
-          model: models.get(ex.model) || dv.label, mac: ex.mac, device: dv, user_agent: ce?.user_agent || "", firmware: dv.firmware || "",
-          source_ip: ce?.source_ip || "", local_ip: ce?.local_ip || "",
-          connection: ce?.source_ip ? connectionType(ce.source_ip, ce.local_ip, []) : null,
-          provisioned: ex.last_provisioned || null, extra_contacts: 0,
-        });
+      const user = { id: u.id, name: displayName(u) };
+      const mine = seen.filter((r) => r.ext === u.id);
+      const used = new Set();
+      const row = (r, extra = {}) => {
+        if (r) used.add(r.dkey);
+        const dev = r ? { ...identifyDevice(r.user_agent), kind: r.kind, label: r.label } : { kind: "phone", label: "" };
+        return {
+          user, key: r?.dkey || "", online: !!r?.online, since: r?.since || null, last_seen: r?.last_seen || null,
+          model: dev.label, mac: r?.mac || "", device: dev, user_agent: r?.user_agent || "", firmware: r?.firmware || "",
+          source_ip: r?.source_ip || "", local_ip: r?.local_ip || "", public_ip: r?.public_ip || "", public_at: r?.public_at || null,
+          connection: r?.source_ip ? connectionType(r.source_ip, r.local_ip, []) : null, provisioned: null, configured: false, ...extra,
+        };
+      };
+      // Téléphones de la fiche (principal + supplémentaires) : reconnus par leur adresse MAC
+      const configured = [...(u.phone.mac ? [{ ...u.phone, main: true }] : []), ...(u.phone.extra || [])];
+      for (const ph of configured) {
+        const r = mine.find((x) => x.mac && x.mac === ph.mac);
+        out.push(row(r, { configured: true, extra: !ph.main, label: ph.main ? "" : ph.label || "", mac: ph.mac,
+          model: models.get(ph.model) || r?.label || "Téléphone", provisioned: ph.last_provisioned || null }));
       }
+      // Les autres appareils vus sur ce poste (softphone, appli, téléphone non provisionné…)
+      for (const r of mine) if (!used.has(r.dkey)) out.push(row(r));
     }
     return out;
   }
@@ -1454,7 +1477,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     getStandard, setStandardState, setStandardConfig, pollStandard, pollForwardCodes, phoneKeyInfo, addPhoneKey,
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
-    getUser, updateUser, applyDialplan, deleteImpact, findConsoleUser, consoleUserActive,
+    getUser, updateUser, applyDialplan, forgetDevice, deleteImpact, findConsoleUser, consoleUserActive,
     provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,

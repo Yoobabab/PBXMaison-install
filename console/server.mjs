@@ -842,6 +842,7 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/phones", { preHandler: requireUser }, async () => ({
     phones: await pbx.listPhones(), provisioning_url: await pbx.provisioningUrl(sipServer()) }));
   app.post("/api/phones/resync", { preHandler: requireUser }, async () => pbx.resyncAll());
+  app.post("/api/phones/forget", { preHandler: requireUser }, async (req) => pbx.forgetDevice(req.body?.ext, req.body?.key));
   app.get("/api/phone-options", { preHandler: requireUser }, async () => ({
     ...pbx.phoneOptions(), provisioning_url: await pbx.provisioningUrl(sipServer()), timezone: pbxEnv().PBX_TIMEZONE || "Europe/Paris" }));
   app.get("/api/extensions/:id/phone.cfg", { preHandler: requireUser }, async (req, reply) => {

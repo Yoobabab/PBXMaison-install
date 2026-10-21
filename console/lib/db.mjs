@@ -141,6 +141,15 @@ export function createDb(cfg) {
         email text NOT NULL DEFAULT '', notes text NOT NULL DEFAULT '', phones jsonb NOT NULL DEFAULT '[]',
         created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), updated_by text NOT NULL DEFAULT ''
       );
+      -- Chaque appareil vu sur un poste (téléphone, softphone, appli) : gardé quand il se déconnecte, avec sa dernière adresse publique
+      CREATE TABLE IF NOT EXISTS pbxmaison_device_seen (
+        ext text NOT NULL, dkey text NOT NULL,
+        kind text NOT NULL DEFAULT 'unknown', label text NOT NULL DEFAULT '', mac text NOT NULL DEFAULT '', firmware text NOT NULL DEFAULT '',
+        user_agent text NOT NULL DEFAULT '', source_ip text NOT NULL DEFAULT '', local_ip text NOT NULL DEFAULT '', public_ip text NOT NULL DEFAULT '',
+        public_at timestamptz, online boolean NOT NULL DEFAULT true, since timestamptz NOT NULL DEFAULT now(),
+        first_seen timestamptz NOT NULL DEFAULT now(), last_seen timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (ext, dkey)
+      );
       CREATE TABLE IF NOT EXISTS pbxmaison_devices (
         endpoint text PRIMARY KEY,
         online boolean NOT NULL DEFAULT false,
