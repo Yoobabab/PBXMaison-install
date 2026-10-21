@@ -963,7 +963,21 @@ export async function buildApp({ db, ami } = {}) {
   app.put("/api/prompts/:id", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => pbx.savePrompt(req.params.id, req.body?.name, wavOf(req.body), currentUser(req).email));
   app.get("/api/prompts/:id/audio", { preHandler: requireUser }, async (req, reply) =>
     reply.type("audio/wav").header("cache-control", "no-store").send(fs.createReadStream(await pbx.promptFile(req.params.id))));
-  app.post("/api/callflow-parse", { preHandler: requireUser }, async (req) => pbx.parseFlow(String(req.body?.text || "").slice(0, 2000)));
+  // Routage écrit en français : analyse sans IA ; si l'IA est activée, elle réécrit d'abord le texte libre dans les tournures comprises
+  app.post("/api/callflow-parse", { preHandler: requireUser }, async (req) => {
+    const text = String(req.body?.text || "").slice(0, 2000);
+    const plain = await pbx.parseFlow(text);
+    if (!(await ai.settings()).enabled || (plain.proposal && !plain.warnings.length)) return plain;
+    try {
+      const [users, objects] = await Promise.all([pbx.listExtensions(), pbx.loadObjects()]);
+      const names = { utilisateurs: users.map((u) => `${u.name} (${u.id})`), ...Object.fromEntries(Object.entries({ group: "groupes", queue: "files", ivr: "svi", prompt: "annonces", groupvm: "messageries_de_groupe", schedule: "horaires" })
+        .map(([k, l]) => [l, objects.filter((o) => o.kind === k).map((o) => o.name)])) };
+      const rewritten = (await ai.text("flow", JSON.stringify({ texte: text, noms: names }))).trim();
+      const smart = await pbx.parseFlow(rewritten.slice(0, 2000));
+      const score = (r) => (r.proposal ? 0 : 100) + r.warnings.length;
+      return score(smart) <= score(plain) ? { ...smart, ai_text: rewritten } : plain;
+    } catch { return plain; }
+  });
   app.get("/api/cdr", { preHandler: requireUser }, async (req) => pbx.callLog(req.query || {}));
   app.get("/api/cdr.csv", { preHandler: requireUser }, async (req, reply) => {
     const { calls } = await pbx.callLog({ ...(req.query || {}), limit: 5000 });

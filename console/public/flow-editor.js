@@ -372,7 +372,7 @@ async function propose() {
     if (!flow.name) { flow.name = p.name; h.$("#fname").value = p.name; }
     h.$("#fdef").checked = flow.is_default; h.$("#fsched").value = flow.schedule;
     sel = null; errAt = null; adding = null; tab = "open"; closePanel(); drawDids(); draw();
-    box.innerHTML = `<div class="fx-prop"><strong>Ce que j'ai compris</strong><ul>${r.understood.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    box.innerHTML = `<div class="fx-prop">${r.ai_text ? `<p class="hint" style="margin:0 0 6px"><span class="ai-badge">IA</span> Reformulé : « ${esc(r.ai_text)} »</p>` : ""}<strong>Ce que j'ai compris</strong><ul>${r.understood.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
       ${r.warnings.length ? `<div class="fx-warn"><strong>À vérifier</strong><ul>${r.warnings.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
       <p class="hint" style="margin:6px 0 0">Vérifie le schéma ci-dessous, ajuste si besoin, puis « Valider et appliquer ».</p></div>`;
   } catch (e) { box.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; }
