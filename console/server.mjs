@@ -623,7 +623,7 @@ export async function buildApp({ db, ami } = {}) {
     id: u.id, name: u.name, first_name: u.first_name, last_name: u.last_name, status: u.status, email: u.email,
     mobile: u.mobile, dids: u.dids, outbound_cid: u.outbound_cid,
     forwarding: u.forwarding, voicemail: { enabled: u.voicemail.enabled, pin: u.voicemail.pin, skip_pin: u.voicemail.skip_pin, email: !!u.voicemail.email, email_attach: u.voicemail.email_attach !== false },
-    ring_mobile: u.options.ring_mobile, manager: isManager(u), standardist: isStandardist(u),
+    ring_mobile: u.options.ring_mobile, manager: isManager(u), standardist: isStandardist(u), phone_model: u.phone.model || "",
   });
   app.get("/api/u/me", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
@@ -754,6 +754,27 @@ export async function buildApp({ db, ami } = {}) {
     return pbx.savePrompt(req.params.id, req.body?.name || cur.name, wavOf(req.body), `Pilote ${me.id} ${me.name}`);
   });
   // Ajouter la touche « Renvoi » (tout le monde) ou « Ouvert / Fermé » (postes autorisés) sur son téléphone IP
+  // Touches de son propre téléphone IP (tout le monde) : même éditeur que la console
+  app.get("/api/u/phone/keys", { preHandler: requireWebUser }, async (req) => {
+    const u = await pbx.getUser(webUser(req).ext);
+    if (!u.phone.model) return { phone: null };
+    const users = (await pbx.listExtensions()).filter((x) => !x.disabled && !x.hidden).map((x) => ({ id: x.id, name: x.name }));
+    return { phone: { model: u.phone.model, keys: u.phone.keys, modules: u.phone.modules || [], mac: !!u.phone.mac }, user: { id: u.id, name: u.name }, users, opts: pbx.phoneOptions() };
+  });
+  app.put("/api/u/phone/keys", { preHandler: requireWebUser }, async (req) => {
+    const s = webUser(req);
+    const u = await pbx.getUser(s.ext);
+    if (!u.phone.model) throw new UserError("Aucun téléphone IP n'est associé à ton poste.");
+    const keys = Array.isArray(req.body?.keys) ? req.body.keys.slice(0, 200) : [];
+    const mods = Array.isArray(req.body?.mods) ? req.body.mods.slice(0, 3) : [];
+    // Touche « Ouvert / Fermé » : seulement pour les postes autorisés (comme dans la console)
+    const all = [...keys, ...mods.flat()];
+    if (!isStandardist(u) && all.some((k) => k?.type === "standard") && !u.phone.keys.some((k) => k.type === "standard")) throw new UserError("La touche Ouvert / Fermé est réservée au rôle Pilote.");
+    await pbx.updateUser(s.ext, { phone: { keys, modules: mods.map((k) => ({ keys: Array.isArray(k) ? k.slice(0, 200) : [] })) } }, webBy(s));
+    let sent = false;
+    try { await pbx.notifyPhone(s.ext, "resync"); sent = true; } catch { /* au prochain démarrage du téléphone */ }
+    return { ok: true, sent };
+  });
   app.post("/api/u/phone/key", { preHandler: requireWebUser }, async (req) => {
     const s = webUser(req);
     const type = req.body?.type;

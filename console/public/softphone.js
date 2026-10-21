@@ -252,13 +252,13 @@ if (IN_APP) document.documentElement.classList.add("in-app");
 const NAV = IN_APP
   ? [["equipe", "Équipe", I.team], ["contacts", "Contacts", I.book], ["clavier", "Clavier", I.keypad], ["appels", "Récents", I.calls], ["chat", "Chat", I.chat], ["messagerie", "Messagerie", I.vm]]
   : [["equipe", "Équipe", I.team], ["chat", "Chat", I.chat], ["appels", "Appels", I.calls], ["contacts", "Contacts", I.book], ["messagerie", "Messagerie", I.vm], ["reglages", "Réglages", I.gear]];
-const TITLES = { rappeler: "À rappeler", renvoi: "Renvoi", annonces: "Annonces", supervision: "Supervision", clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
+const TITLES = { touches: "Touches de mon téléphone", rappeler: "À rappeler", renvoi: "Renvoi", annonces: "Annonces", supervision: "Supervision", clavier: "Clavier", equipe: "Équipe", chat: "Chat", appels: "Appels", contacts: "Contacts", messagerie: "Messagerie vocale", reglages: "Réglages", planning: "Plannings d'appels" };
 // Responsable : onglet Plannings (dans le menu de l'appli, où la barre du bas est déjà pleine)
 // Renvoi : menu à part (barre de gauche ; dans l'appli : menu du profil, en haut à droite)
 // Pilote : Annonces ; Superviseur : Supervision et Plannings (dans l'appli : menu du profil, la barre du bas est déjà pleine)
 const navItems = () => {
   if (IN_APP) return NAV;
-  const extra = [["renvoi", "Renvoi", I.fwd],
+  const extra = [["renvoi", "Renvoi", I.fwd], ...(me?.user?.phone_model ? [["touches", "Mes touches", I.keypad]] : []),
     ...(me?.user?.standardist ? [["rappeler", "À rappeler", I.calls], ["annonces", "Annonces", I.mega]] : []),
     ...(me?.user?.manager ? [["supervision", "Supervision", I.eye], ["planning", "Plannings", I.cal]] : [])];
   return [...NAV.slice(0, -1), ...extra, NAV.at(-1)];
@@ -737,7 +737,7 @@ function refreshPresence() {
 // ------------------------------------------------------------------ Navigation
 function route() {
   const [p, s] = location.hash.replace(/^#\/?/, "").split("/");
-  page = TITLES[p] && (!["planning", "supervision"].includes(p) || me.user.manager) && (!["annonces", "rappeler"].includes(p) || me.user.standardist) && (p !== "clavier" || IN_APP) ? p : "equipe"; sub = s || "";
+  page = TITLES[p] && (!["planning", "supervision"].includes(p) || me.user.manager) && (!["annonces", "rappeler"].includes(p) || me.user.standardist) && (p !== "clavier" || IN_APP) && (p !== "touches" || (!IN_APP && me.user.phone_model)) ? p : "equipe"; sub = s || "";
   $$(".rail [data-r]").forEach((a) => a.classList.toggle("on", a.dataset.r === page));
   $("#title").textContent = TITLES[page];
   if (page === "appels") store.set(`callikoe_seen_${me.user.id}`, new Date().toISOString());
@@ -748,7 +748,38 @@ window.addEventListener("hashchange", () => { if (me && $("#page")) route(); });
 function renderPage() {
   const el = $("#page"); if (!el) return;
   el.className = `pg-${page}`;
-  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, renvoi: pageRenvoi, annonces: pageAnnonces, rappeler: pageCallbacks, supervision: pageSupervision, clavier: (x) => renderDialer(x, true) })[page](el);
+  ({ equipe: pageTeam, chat: pageChat, appels: pageCalls, contacts: pageContacts, messagerie: pageVoicemail, reglages: pageSettings, planning: pagePlanning, renvoi: pageRenvoi, annonces: pageAnnonces, rappeler: pageCallbacks, touches: pageKeys, supervision: pageSupervision, clavier: (x) => renderDialer(x, true) })[page](el);
+}
+
+// ------------------------------------------------------------------ Touches de mon téléphone IP (tout le monde, softphone PC)
+async function pageKeys(el) {
+  el.innerHTML = '<div class="sp-loading">Chargement…</div>';
+  let d, mountKeys;
+  try { [d, { mountKeys }] = await Promise.all([api("GET", "/api/u/phone/keys"), import("./keys-ui.js")]); }
+  catch (e) { el.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
+  if (!d.phone) { el.innerHTML = '<div class="panel pad empty-st">Aucun téléphone IP n\'est associé à ton poste.</div>'; return; }
+  const model = d.opts.models.find((m) => m.id === d.phone.model);
+  el.innerHTML = `<section class="panel keyspage"><div class="pad">
+    <div class="vm-head"><div><strong>${esc(model?.label || "Mon téléphone")}</strong><span class="s cb-sub">Clique sur une touche pour choisir ce qu'elle fait : un collègue (BLF), Ne pas déranger, Renvoi, un numéro… Puis Enregistrer : le téléphone se met à jour tout seul.</span></div>
+      <div class="row-c"><span id="kdirty" class="pill wait" hidden>Non enregistré</span><button class="btn" id="ksave" disabled>Enregistrer</button></div></div>
+    <form id="kf" class="stack" onsubmit="return false"><div class="phv-wrap"><div id="phv"></div><div id="phvpanel" class="phv-panel"></div></div>
+      <details class="phv-list"><summary>Vue en liste</summary><div class="keys" id="keys"></div></details>
+      <div class="row"><button type="button" class="btn ghost sm" id="addkey">+ Ajouter une touche</button><button type="button" class="btn ghost sm" id="addall" title="Une BLF pour chaque collègue qui n'en a pas encore">Remplir BLF</button></div></form>
+  </div></section>`;
+  let cur = null;
+  const clean = (a) => { const c = (a || []).map((k) => ({ ...k })); while (c.length && c.at(-1).type === "none") c.pop(); return c; };
+  const orig = JSON.stringify([clean(d.phone.keys), (d.phone.modules || []).map((m) => clean(m.keys))]);
+  mountKeys(el, { u: { id: d.user.id, phone: d.phone }, users: d.users, opts: d.opts, onChange: (keys, mods) => {
+    cur = { keys, mods };
+    const dirty = JSON.stringify([keys, mods]) !== orig;
+    $("#kdirty", el).hidden = !dirty; $("#ksave", el).disabled = !dirty;
+  } });
+  $("#ksave", el).onclick = async (e) => {
+    if (!cur) return;
+    e.target.disabled = true;
+    try { const r = await api("PUT", "/api/u/phone/keys", cur); toast(r.sent ? "Touches enregistrées : le téléphone se met à jour" : "Touches enregistrées : elles arrivent au prochain démarrage du téléphone"); pageKeys(el); }
+    catch (err) { toast(err.message, "bad"); e.target.disabled = false; }
+  };
 }
 
 // ------------------------------------------------------------------ À rappeler (Pilote) : appels perdus classés par priorité
