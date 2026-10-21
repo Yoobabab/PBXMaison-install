@@ -755,9 +755,9 @@ async function renderAudit() {
 }
 
 // ---------------------------------------------------------------- Surveillance (appels étranger / surtaxés, changements d'adresse)
-const WATCH_KINDS = { intl: ["bad", "Étranger"], premium: ["wait", "Surtaxé"], ip: ["off", "Nouvelle adresse"] };
+const WATCH_KINDS = { anomaly: ["bad", "Inhabituel"], intl: ["bad", "Étranger"], premium: ["wait", "Surtaxé"], ip: ["off", "Nouvelle adresse"] };
 const WATCH_CATS = { phone: "Téléphones", softphone: "Softphones", app: "Applis" };
-let watchF = { days: 30, state: "todo", kinds: new Set(["intl", "premium", "ip"]), cats: new Set(["phone", "softphone", "app"]), pbx: "", q: "" };
+let watchF = { days: 30, state: "todo", kinds: new Set(["anomaly", "intl", "premium", "ip"]), cats: new Set(["phone", "softphone", "app"]), pbx: "", q: "" };
 async function renderWatch() {
   setNav("watch", "Surveillance");
   app.innerHTML = `<div class="bar"><div class="grow"><h1>Surveillance</h1>
@@ -779,6 +779,7 @@ async function renderWatch() {
     const cnt = (k) => base.filter((e) => e.kind === k && !e.reviewed_at).length;
     const chk = (set, k, l, n) => `<label class="check wchk"><input type="checkbox" data-${set}="${k}" ${watchF[set].has(k) ? "checked" : ""}> ${l}${n !== undefined ? ` <span class="s">(${n})</span>` : ""}</label>`;
     $("#wbody").innerHTML = `<div class="kpis">
+        ${kpi("shield", "Appels inhabituels", cnt("anomaly"), "anti-fraude intelligent", cnt("anomaly") ? "warn" : "good")}
         ${kpi("call", "Appels vers l'étranger", cnt("intl"), "à vérifier", cnt("intl") ? "warn" : "good")}
         ${kpi("lic", "Numéros surtaxés", cnt("premium"), "à vérifier", cnt("premium") ? "warn" : "good")}
         ${kpi("phone", "Nouvelles adresses", cnt("ip"), "appareils connectés d'ailleurs", cnt("ip") ? "warn" : "good")}
@@ -789,7 +790,7 @@ async function renderWatch() {
           <label>PBX<select id="wpbx"><option value="">Tous</option>${pbxs.map(([k, n]) => `<option value="${esc(k)}" ${k === watchF.pbx ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
           <label>Afficher<select id="wstate"><option value="todo" ${watchF.state === "todo" ? "selected" : ""}>À vérifier</option><option value="done" ${watchF.state === "done" ? "selected" : ""}>Déjà vérifiés</option><option value="all" ${watchF.state === "all" ? "selected" : ""}>Tout</option></select></label>
         </div>
-        <div class="wfil"><span class="dl">Types</span>${chk("kinds", "intl", "Appels vers l'étranger")}${chk("kinds", "premium", "Numéros surtaxés")}${chk("kinds", "ip", "Changements d'adresse")}</div>
+        <div class="wfil"><span class="dl">Types</span>${chk("kinds", "anomaly", "Appels inhabituels")}${chk("kinds", "intl", "Appels vers l'étranger")}${chk("kinds", "premium", "Numéros surtaxés")}${chk("kinds", "ip", "Changements d'adresse")}</div>
         <div class="wfil ${watchF.kinds.has("ip") ? "" : "dim"}"><span class="dl">Appareils</span>${Object.entries(WATCH_CATS).map(([k, l]) => chk("cats", k, l, base.filter((e) => e.kind === "ip" && e.category === k && !e.reviewed_at).length)).join("")}</div>
       </div>
       <div class="panel"><div class="ph"><h2>Événements</h2><span class="s">${list.length}</span></div>

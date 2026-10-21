@@ -20,6 +20,7 @@ import { GATEWAY_MODELS, GATEWAY_TYPES, validateGateway, manualGuide } from "./d
 import { EMERGENCY } from "./pbx.mjs";
 import { smtpReady, transportOf, smtpError, voicemailMail, alertMail, messagesToMail } from "./mail.mjs";
 import * as vmbox from "./voicemail.mjs";
+import { fraudSignals } from "./fraud.mjs";
 
 /** Lance pbx-configure et renvoie { code, out, lines (JSON par ligne) }. */
 export function runConfigure(args, { timeout = 120_000 } = {}) {
@@ -469,6 +470,15 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     }
     await db.query("DELETE FROM pbxmaison_vm_ai WHERE at < now() - interval '90 days'");
   }
+  /** Anti-fraude intelligent : appels sortants comparés aux habitudes du PBX (toutes les 5 minutes) */
+  async function fraudWatch() {
+    const { calls } = await pbx.callLog({ days: 30, direction: "out", limit: 5000 });
+    for (const sig of fraudSignals(calls, { cc: pbx.countryCode(), tz: tzName() })) {
+      const r = await db.query(`INSERT INTO pbxmaison_watch (key, kind, category, extension, text, detail) VALUES ($1, 'anomaly', $2, $3, $4, $5) ON CONFLICT (key) DO NOTHING`,
+        [`fraud:${sig.key}`, sig.kind, sig.extension, sig.text, sig.detail]);
+      if (r.rowCount) await logAlert("fraud_ai", sig.text);
+    }
+  }
   async function sendVoicemails() {
     const a = await alertSettings();
     if (!smtpReady(a.smtp)) return;
@@ -675,6 +685,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     }, 60_000);
     tick(async () => { const r = await recording(); purgeRecordings(r.retention_days); }, 6 * 3600_000);
     tick(aiVoicemails, 20_000);
+    tick(fraudWatch, 5 * 60_000);
     tick(sendVoicemails, 15_000);
     tick(sendAlerts, 30_000);
     refreshAllow().catch(() => {});
