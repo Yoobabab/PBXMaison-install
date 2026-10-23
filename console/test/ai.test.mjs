@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseVoicemailSummary, toPbxWav, diagnosisInput, createAi } from "../lib/ai.mjs";
+import { parseVoicemailSummary, toPbxWav, diagnosisInput, createAi, mixMusic } from "../lib/ai.mjs";
 import { voicemailMail } from "../lib/mail.mjs";
 
 const wav = (rate, ch, n) => {
@@ -52,4 +52,25 @@ test("IA : inscription auprès du relais puis nouvelle inscription si le jeton e
   assert.deepEqual(calls, ["/v1/ai/register", "/v1/ai/text", "/v1/ai/register", "/v1/ai/text"]);
   store.set("ai", { enabled: false });
   await assert.rejects(ai.text("diagnose", "aide"), /désactivée/);
+});
+
+test("fond musical : musique seule au début, voix 1,5 s après, musique baissée, fondu de fin, boucle", () => {
+  const R = 8000;
+  const wavOf = (s) => { const b = Buffer.alloc(44 + s.length * 2); s.forEach((x, i) => b.writeInt16LE(Math.round(x), 44 + i * 2));
+    b.write("RIFF", 0); b.writeUInt32LE(36 + s.length * 2, 4); b.write("WAVEfmt ", 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
+    b.writeUInt32LE(R, 24); b.writeUInt32LE(R * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(s.length * 2, 40); return b; };
+  const sine = (n, f, a) => Array.from({ length: n }, (_, i) => a * Math.sin((2 * Math.PI * f * i) / R));
+  const voice = wavOf(sine(3 * R, 440, 8000));           // 3 s de « voix »
+  const music = wavOf(sine(2 * R, 200, 20000));          // 2 s de musique forte : doit boucler
+  const out = mixMusic(voice, music);
+  const n = (out.length - 44) / 2;
+  assert.equal(n, Math.round(1.5 * R) + 3 * R + 2 * R);  // 1,5 s + voix + 2 s
+  const rms = (a, z) => { let e = 0; for (let i = a; i < z; i++) e += out.readInt16LE(44 + i * 2) ** 2; return Math.sqrt(e / (z - a)); };
+  const intro = rms(0.3 * R, 0.9 * R), bed = rms(4.6 * R, 4.95 * R), end = rms(n - 400, n);
+  const vr = 8000 / Math.SQRT2;
+  assert.ok(Math.abs(20 * Math.log10(intro / vr) + 6) < 1.5, `intro ${intro}`);   // musique seule : 6 dB sous la voix
+  assert.ok(Math.abs(20 * Math.log10(bed / vr) + 15) < 1.5, `après la voix ${bed}`); // 15 dB sous la voix
+  assert.ok(end < bed / 4, "fondu de fin");
+  assert.ok(rms(2 * R, 4 * R) > 0.9 * vr, "la voix reste entendue");
+  assert.ok(rms(3.4 * R, 3.6 * R) > 0, "la musique a bouclé");
 });

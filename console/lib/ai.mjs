@@ -48,6 +48,52 @@ export function toPbxWav(buf) {
   return out;
 }
 
+/** Échantillons d'un WAV 8 kHz mono 16 bits (tel que rendu par toPbxWav) */
+const samplesOf = (wav) => { const b = toPbxWav(wav); const n = (b.length - 44) >> 1; const s = new Float32Array(n); for (let i = 0; i < n; i++) s[i] = b.readInt16LE(44 + i * 2); return s; };
+const rmsOf = (s) => { let e = 0, n = 0; for (let i = 0; i < s.length; i++) if (Math.abs(s[i]) > 300) { e += s[i] * s[i]; n++; } return n ? Math.sqrt(e / n) : 0; };   // sans les silences
+
+/**
+ * Annonce sur fond musical : la musique démarre seule, la voix arrive après `lead` secondes,
+ * la musique est baissée de `duckDb` sous la voix, puis s'éteint en fondu `tail` secondes après la fin de la voix.
+ * Musique trop courte : rejouée en boucle avec un fondu enchaîné d'1 s. Entrées et sortie : WAV (sortie 8 kHz mono).
+ */
+export function mixMusic(voiceWav, musicWav, { lead = 1.5, tail = 2, duckDb = 15, introDb = 6 } = {}) {
+  const R = 8000, v = samplesOf(voiceWav), m0 = samplesOf(musicWav);
+  if (!m0.length) return toPbxWav(voiceWav);
+  const L = Math.round(lead * R), T = Math.round(tail * R), n = L + v.length + T;
+  // musique au moins aussi longue que l'annonce : boucle avec fondu enchaîné
+  const X = Math.min(R, m0.length >> 2), m = new Float32Array(n);
+  for (let start = 0; start < n; start += m0.length - X) {
+    for (let j = 0; j < m0.length && start + j < n; j++) {
+      const k = start > 0 && j < X ? j / X : 1;   // la nouvelle copie monte pendant que la précédente s'éteint
+      m[start + j] = start > 0 && j < X ? m[start + j] * (1 - k) + m0[j] * k : m0[j];
+    }
+    if (m0.length <= X) break;
+  }
+  // niveaux : musique seule 6 dB sous la voix, puis 15 dB sous la voix pendant qu'elle parle
+  const vr = rmsOf(v) || 3000, mr = rmsOf(m) || 1;
+  const gIntro = (vr / mr) * 10 ** (-introDb / 20), gBed = (vr / mr) * 10 ** (-duckDb / 20);
+  const ramp = Math.round(0.5 * R), fadeIn = Math.round(0.2 * R), endV = L + v.length, fadeOut = Math.max(1, T - Math.round(0.5 * R));
+  const out = new Float32Array(n);
+  let peak = 0;
+  for (let i = 0; i < n; i++) {
+    let g;
+    if (i < L - ramp) g = gIntro;
+    else if (i < L) g = gIntro + (gBed - gIntro) * ((i - (L - ramp)) / ramp);   // la musique baisse juste avant la voix
+    else if (i < endV + T - fadeOut) g = gBed;
+    else g = gBed * Math.max(0, (n - i) / fadeOut);   // fondu de fin
+    if (i < fadeIn) g *= i / fadeIn;
+    const s = m[i] * g + (i >= L && i < endV ? v[i - L] : 0);
+    out[i] = s; if (Math.abs(s) > peak) peak = Math.abs(s);
+  }
+  const k = peak > 32000 ? 32000 / peak : 1;   // jamais de saturation
+  const b = Buffer.alloc(44 + n * 2);
+  for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(out[i] * k), 44 + i * 2);
+  b.write("RIFF", 0); b.writeUInt32LE(36 + n * 2, 4); b.write("WAVEfmt ", 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(R, 24); b.writeUInt32LE(R * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n * 2, 40);
+  return b;
+}
+
 /** Texte envoyé au diagnostic : la question + l'état utile du PBX, sans aucun secret */
 export function diagnosisInput(question, facts) {
   const strip = (o) => JSON.stringify(o, (k, v) => (/pass|secret|token|pin|hash|key/i.test(k) ? undefined : v));
@@ -102,7 +148,29 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
   };
   const transcribe = async (file) => (await call("/v1/ai/transcribe", { audio: fs.readFileSync(file).toString("base64") })).text;
   const text = async (task, input) => (await call("/v1/ai/text", { task, input })).text;
-  const speech = async (t, voice) => toPbxWav(Buffer.from((await call("/v1/ai/speech", { text: t, voice })).audio, "base64"));
+  // Fonds musicaux des annonces : gardés sur le portail (licence), récupérés à la demande et gardés en mémoire
+  let musicList = null;
+  const musicCache = new Map();
+  async function musics() {
+    if (musicList && Date.now() - musicList.at < 10 * 60_000) return musicList.items;
+    const r = await call("/v1/ai/music", undefined);
+    musicList = { at: Date.now(), items: (r.music || []).map((x) => ({ id: String(x.id), name: String(x.name || ""), seconds: Number(x.seconds) || 0 })) };
+    return musicList.items;
+  }
+  async function music(id) {
+    id = String(id || "");
+    if (!/^[a-z0-9-]{1,40}$/.test(id)) throw new AiError("Fond musical inconnu.", 404);
+    if (!musicCache.has(id)) {
+      const wav = toPbxWav(Buffer.from((await call(`/v1/ai/music/${id}`, undefined)).audio, "base64"));
+      if (musicCache.size >= 20) musicCache.delete(musicCache.keys().next().value);
+      musicCache.set(id, wav);
+    }
+    return musicCache.get(id);
+  }
+  const speech = async (t, voice, musicId) => {
+    const v = toPbxWav(Buffer.from((await call("/v1/ai/speech", { text: t, voice })).audio, "base64"));
+    return musicId ? mixMusic(v, await music(musicId)) : v;
+  };
 
   /** Message vocal → transcription + résumé (gardés en base : une seule fois par message) */
   async function voicemailInsight(box, msgKey, file, meta = {}) {
@@ -127,5 +195,5 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
     if (next.enabled && !s.enabled) { try { await register(next); } catch { /* le statut affichera l'erreur */ } }
     return status();
   }
-  return { settings, saveSettings, status, transcribe, text, speech, voicemailInsight, insights, realtimeUrl, AiError };
+  return { settings, saveSettings, status, transcribe, text, speech, musics, music, voicemailInsight, insights, realtimeUrl, AiError };
 }

@@ -658,6 +658,9 @@ function renderPromptForm(head, id) {
       <div class="row ai-row"><select id="paivoice"></select>
         <button type="button" class="btn ghost sm" id="paibetter" title="L'IA reformule ton idée en annonce polie et claire">✨ Améliorer le texte</button>
         <button type="button" class="btn sm" id="paigo">Générer la voix</button><span id="paist" class="hint"></span></div>
+      <div class="row ai-row" id="paimrow" hidden><select id="paimusic"><option value="">Sans fond musical</option></select>
+        <button type="button" class="btn ghost sm" id="paimplay" hidden>▶ Écouter la musique</button><audio id="paimaudio" hidden></audio>
+        <span class="hint">La musique démarre seule, la voix arrive 1,5 s après, musique baissée pendant qu'elle parle.</span></div>
       <p class="hint" style="margin:0">La voix est créée en quelques secondes ; écoute-la ci-dessous avant d'enregistrer.</p></div>
     <div id="ppreview"></div>
     <div class="form-msg"></div>
@@ -702,6 +705,18 @@ function renderPromptForm(head, id) {
     h.$("#paisec").hidden = false;
     h.$("#paivoice").innerHTML = Object.entries(x.voices).map(([k, l]) => `<option value="${esc(k)}">Voix ${esc(l.toLowerCase())}</option>`).join("");
     const st = h.$("#paist");
+    if (x.musics?.length) {
+      const mus = h.$("#paimusic"), mplay = h.$("#paimplay"), maudio = h.$("#paimaudio");
+      h.$("#paimrow").hidden = false;
+      mus.innerHTML += x.musics.map((m) => `<option value="${esc(m.id)}">🎵 ${esc(m.name)}</option>`).join("");
+      const stop = () => { maudio.pause(); mplay.textContent = "▶ Écouter la musique"; };
+      mus.onchange = () => { stop(); mplay.hidden = !mus.value; };
+      maudio.onended = stop;
+      mplay.onclick = () => {
+        if (!maudio.paused) return stop();
+        maudio.src = `/api/ai/music/${encodeURIComponent(mus.value)}`; maudio.play().catch(() => { st.textContent = "Musique indisponible pour le moment."; }); mplay.textContent = "■ Arrêter";
+      };
+    }
     h.$("#paibetter").onclick = async (ev) => {
       const t = h.$("#paitext").value.trim(); if (!t) { h.$("#paitext").focus(); return; }
       ev.target.disabled = true; st.textContent = "Rédaction…";
@@ -712,7 +727,8 @@ function renderPromptForm(head, id) {
       const t = h.$("#paitext").value.trim(); if (!t) { h.$("#paitext").focus(); return; }
       ev.target.disabled = true; st.textContent = "Création de la voix…";
       try {
-        const r = await h.api("POST", "/api/ai/speech", { text: t, voice: h.$("#paivoice").value });
+        h.$("#paimaudio").pause();
+        const r = await h.api("POST", "/api/ai/speech", { text: t, voice: h.$("#paivoice").value, music: h.$("#paimusic").value });
         setWav(Uint8Array.from(atob(r.wav), (c) => c.charCodeAt(0)), r.seconds); st.textContent = "";
         if (h.$("[name=name]").value === "Annonce") h.$("[name=name]").value = t.replace(/[^\p{L}\p{N} ']/gu, " ").trim().split(/\s+/).slice(0, 5).join(" ").slice(0, 50) || "Annonce";
       } catch (err) { st.textContent = err.message; }

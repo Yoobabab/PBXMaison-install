@@ -513,10 +513,10 @@ async function toPhoneWav(buf) {
   return { wav: new Uint8Array(view.buffer), secs };
 }
 const b64 = (u8) => { let x = ""; for (let i = 0; i < u8.length; i += 0x8000) x += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(x); };
-let promptList = null, promptAi = null;
+let promptList = null, promptAi = null, promptMusic = [];
 async function pageAnnonces(el) {
   el.innerHTML = `<div class="sp-loading">Chargement…</div>`;
-  try { const r = await api("GET", "/api/u/prompts"); promptList = r.prompts; promptAi = r.ai ? r.voices : null; } catch (e) { el.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
+  try { const r = await api("GET", "/api/u/prompts"); promptList = r.prompts; promptAi = r.ai ? r.voices : null; promptMusic = r.musics || []; } catch (e) { el.innerHTML = `<div class="sp-banner warn">${esc(e.message)}</div>`; return; }
   el.innerHTML = `<section class="panel annpage">
     <div class="ann-head"><div><h2>Annonces</h2><p>Les messages que les appelants entendent (accueil, fermeture, attente…). Réenregistre-les au micro quand tu veux.</p></div>
       <button class="btn" id="annnew">＋ Nouvelle annonce</button></div>
@@ -542,7 +542,9 @@ function recordSheet(p) {
     ${promptAi ? `<div class="rec-ai"><div class="rec-ai-h"><span class="ai-badge">IA</span> Sans micro : tape le texte, une voix le lit</div>
       <textarea id="raitext" rows="3" maxlength="1500" placeholder="Nous sommes exceptionnellement fermés ce lundi. Nous vous retrouvons mardi à 9 heures."></textarea>
       <div class="rec-ai-row"><select id="raivoice">${Object.entries(promptAi).map(([k, l]) => `<option value="${esc(k)}">Voix ${esc(l.toLowerCase())}</option>`).join("")}</select>
-        <button class="btn ghost sm" id="raibetter">✨ Améliorer</button><button class="btn sm" id="raigo">Créer la voix</button></div></div>` : ""}
+        <button class="btn ghost sm" id="raibetter">✨ Améliorer</button><button class="btn sm" id="raigo">Créer la voix</button></div>
+      ${promptMusic.length ? `<div class="rec-ai-row"><select id="raimusic"><option value="">Sans fond musical</option>${promptMusic.map((m) => `<option value="${esc(m.id)}">🎵 ${esc(m.name)}</option>`).join("")}</select>
+        <button class="btn ghost sm" id="raimusicplay" hidden>▶ Écouter la musique</button><audio id="raimusicaudio" hidden></audio></div>` : ""}</div>` : ""}
     <div class="rec-box"><button class="rec-btn" id="recgo"><span></span></button><div class="rec-t" id="rect">Appuie pour enregistrer</div></div>
     <div class="rec-after" hidden><audio id="recaudio" controls></audio>
       <div class="rec-acts"><button class="btn ghost" id="recagain">Recommencer</button><button class="ks-main open" id="recsave">Enregistrer l'annonce</button></div></div>
@@ -573,11 +575,21 @@ function recordSheet(p) {
       try { $("#raitext", sh).value = (await api("POST", "/api/u/ai/announce-text", { idea: t })).text; } catch (err) { toast(err.message, "bad"); }
       e.target.disabled = false;
     };
+    const mus = $("#raimusic", sh), mplay = $("#raimusicplay", sh), maudio = $("#raimusicaudio", sh);
+    if (mus) {
+      const stop = () => { maudio.pause(); mplay.textContent = "▶ Écouter la musique"; };
+      mus.onchange = () => { stop(); mplay.hidden = !mus.value; };
+      maudio.onended = stop;
+      mplay.onclick = () => {
+        if (!maudio.paused) return stop();
+        maudio.src = `/api/u/ai/music/${encodeURIComponent(mus.value)}`; maudio.play().catch(() => toast("Musique indisponible pour le moment.", "bad")); mplay.textContent = "■ Arrêter";
+      };
+    }
     $("#raigo", sh).onclick = async (e) => {
       const t = $("#raitext", sh).value.trim(); if (!t) return $("#raitext", sh).focus();
-      e.target.disabled = true; e.target.textContent = "Création…";
+      e.target.disabled = true; e.target.textContent = "Création…"; maudio?.pause();
       try {
-        const r = await api("POST", "/api/u/ai/speech", { text: t, voice: $("#raivoice", sh).value });
+        const r = await api("POST", "/api/u/ai/speech", { text: t, voice: $("#raivoice", sh).value, music: $("#raimusic", sh)?.value || "" });
         wav = Uint8Array.from(atob(r.wav), (c) => c.charCodeAt(0));
         $("#recaudio", sh).src = URL.createObjectURL(new Blob([wav], { type: "audio/wav" }));
         $(".rec-after", sh).hidden = false; $(".rec-box", sh).hidden = true; $(".rec-file", sh).hidden = true;

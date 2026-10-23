@@ -735,7 +735,8 @@ export async function buildApp({ db, ami } = {}) {
   // Pilote : annonces (écouter, remplacer ou créer au micro)
   app.get("/api/u/prompts", { preHandler: requireWebUser }, async (req) => {
     await pilotOf(req);
-    return { ai: (await ai.settings()).enabled, voices: AI_VOICES, prompts: (await pbx.listObjects("prompt")).map((o) => ({ id: o.id, name: o.name, duration: o.data.duration || 0, updated_at: o.updated_at, updated_by: o.updated_by })) };
+    const aiOn = (await ai.settings()).enabled;
+    return { ai: aiOn, voices: AI_VOICES, musics: aiOn ? await ai.musics().catch(() => []) : [], prompts: (await pbx.listObjects("prompt")).map((o) => ({ id: o.id, name: o.name, duration: o.data.duration || 0, updated_at: o.updated_at, updated_by: o.updated_by })) };
   });
   app.get("/api/u/prompts/:id/audio", { preHandler: requireWebUser }, async (req, reply) => {
     await pilotOf(req);
@@ -747,9 +748,10 @@ export async function buildApp({ db, ami } = {}) {
   });
   app.post("/api/u/ai/speech", { preHandler: requireWebUser }, async (req) => {
     await pilotOf(req);
-    const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice);
+    const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice, req.body?.music || "");
     return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / 16000) * 10) / 10 };
   });
+  app.get("/api/u/ai/music/:id", { preHandler: requireWebUser }, async (req, reply) => { await pilotOf(req); return reply.type("audio/wav").header("cache-control", "private, max-age=3600").send(await ai.music(req.params.id)); });
   app.post("/api/u/ai/announce-text", { preHandler: requireWebUser }, async (req) => { await pilotOf(req); return { text: await ai.text("announce", String(req.body?.idea || "").slice(0, 1000)) }; });
   app.put("/api/u/prompts/:id", { preHandler: requireWebUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
     const me = await pilotOf(req);
@@ -1116,9 +1118,10 @@ export async function buildApp({ db, ami } = {}) {
     return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(`<!doctype html><meta charset="utf-8"><title>${r.mail.subject.replace(/[<>&]/g, "")}</title><body style="margin:0">${html}</body>`);
   });
   app.post("/api/ai-settings/report/test", { preHandler: requireUser }, async (req) => admin.sendMonthlyReport({ to: String(req.body?.to || "").trim() || null, force: true }));
-  app.get("/api/ai", { preHandler: requireUser }, async () => { const s = await ai.settings(); return { enabled: s.enabled, voices: AI_VOICES }; });
+  app.get("/api/ai", { preHandler: requireUser }, async () => { const s = await ai.settings(); return { enabled: s.enabled, voices: AI_VOICES, musics: s.enabled ? await ai.musics().catch(() => []) : [] }; });
+  app.get("/api/ai/music/:id", { preHandler: requireUser }, async (req, reply) => reply.type("audio/wav").header("cache-control", "private, max-age=3600").send(await ai.music(req.params.id)));
   app.post("/api/ai/speech", { preHandler: requireUser }, async (req) => {
-    const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice);
+    const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice, req.body?.music || "");
     return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / 16000) * 10) / 10 };
   });
   app.post("/api/ai/announce-text", { preHandler: requireUser }, async (req) => ({ text: await ai.text("announce", String(req.body?.idea || "").slice(0, 1000)) }));
