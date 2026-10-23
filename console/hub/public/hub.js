@@ -103,6 +103,15 @@ function bindForm(form, handler) {
   };
   form.addEventListener("submit", run);
   if (btn) { btn.type = "button"; btn.addEventListener("click", run); }
+  // Sans bouton « submit », le navigateur ne valide plus par Entrée : on le fait nous-mêmes (sauf dans un texte sur plusieurs lignes)
+  form.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing || e.shiftKey || !btn) return;
+    const t = e.target;
+    if (t.tagName === "TEXTAREA" || t.tagName === "BUTTON" || t.tagName === "SELECT" || t.type === "checkbox" || t.type === "radio" || t.type === "file") return;
+    if (t.tagName !== "INPUT") return;
+    e.preventDefault();
+    run(e);
+  });
 }
 // Œil pour afficher / masquer les mots de passe
 const EYE = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
