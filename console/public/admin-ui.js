@@ -704,6 +704,7 @@ async function pageAi() {
       <div class="actions"><a class="btn ghost" href="/api/ai-settings/report/preview" target="_blank" rel="noopener">Aperçu du mois dernier</a><button type="button" class="btn ghost" id="rptest">M'envoyer un essai</button><button class="btn">Enregistrer</button></div></form></div>
     <div class="panel"><div class="ph"><h2>Essayer</h2></div><div class="pad stack">
       <div class="row"><input id="aitry" class="grow" value="On est fermés lundi pour inventaire" maxlength="300"><button type="button" class="btn ghost" id="aitryb" ${on ? "" : "disabled"}>Rédiger une annonce</button></div>
+      <p class="hint" style="margin:0">Pour créer une vraie annonce lue par une voix IA, avec ou sans fond musical : <a href="#/gestion/annonces/nouveau">Gestion d'appels › Annonces › Ajouter</a>.</p>
       <div id="aitryr"></div></div></div>`;
   onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
   // Standardiste IA : transferts (nom, description, destination)
