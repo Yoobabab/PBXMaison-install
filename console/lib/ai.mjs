@@ -152,7 +152,7 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
   let musicList = null;
   const musicCache = new Map();
   async function musics() {
-    if (musicList && Date.now() - musicList.at < 10 * 60_000) return musicList.items;
+    if (musicList?.items.length && Date.now() - musicList.at < 10 * 60_000) return musicList.items;   // liste vide : on redemande à chaque fois
     const r = await call("/v1/ai/music", undefined);
     musicList = { at: Date.now(), items: (r.music || []).map((x) => ({ id: String(x.id), name: String(x.name || ""), seconds: Number(x.seconds) || 0 })) };
     return musicList.items;
