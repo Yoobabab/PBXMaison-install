@@ -17,6 +17,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
 import { signTicket, emailKey, HUB_USERS, TENANTS } from "../lib/sso.mjs";
 import { canonicalJson, verifySignature } from "../../pbx/lib/verify-config.mjs";
 import { encodeToken } from "../../pbx/lib/license-token.mjs";
+import { listServerMusic, addServerMusic, removeServerMusic, renameServerMusic, serverMusicFile, SERVER_MUSIC_MAX } from "../lib/music.mjs";
 import { registerThemeRoutes, readTheme, brandingLock, setBrandingLock, writeTheme, saveAsset, removeAsset, saveWalls, removeWalls, WALL_SIZES, PALETTE, DEFAULT_THEME, ASSETS, shades, hexToHsl } from "../lib/theme.mjs";
 
 const ETC = process.env.HUB_ETC || "/etc/callikoe/hub";
@@ -364,6 +365,38 @@ export async function buildApp({ db } = {}) {
     writeTheme({ ...DEFAULT_THEME });
     await audit(req, "Apparence : thème Callikoe rétabli");
     return themeView();
+  });
+  // IA › fonds musicaux des annonces : ceux fournis d'office (portail) + ceux ajoutés ici, proposés à tous les PBX du serveur
+  app.get("/api/music", { preHandler: requireUser }, async () => {
+    let catalog = [], catalog_error = "";
+    try {
+      const r = await fetch(`${(process.env.HUB_PORTAL_URL || "https://portail.callikoe.fr").replace(/\/+$/, "")}/v1/ai/music-catalog`, { signal: AbortSignal.timeout(8000) });
+      catalog = (await r.json()).music || [];
+    } catch { catalog_error = "Portail injoignable : liste des musiques fournies d'office indisponible pour le moment."; }
+    return { catalog, catalog_error, server: listServerMusic(), max: SERVER_MUSIC_MAX };
+  });
+  app.get("/api/music/:id/audio", { preHandler: requireUser }, async (req, reply) => {
+    const f = serverMusicFile(req.params.id);
+    if (!f) throw new UserError("Fond musical inconnu.", null, 404);
+    return reply.type("audio/wav").header("cache-control", "private, max-age=3600").send(fs.createReadStream(f));
+  });
+  app.register(async (scope) => {
+    scope.addContentTypeParser("audio/wav", { parseAs: "buffer", bodyLimit: 1024 * 1024 }, (req, body, done) => done(null, body));
+    scope.post("/api/music", { preHandler: requireRole("super", "admin"), bodyLimit: 1024 * 1024 }, async (req) => {
+      let m;
+      try { m = addServerMusic(String(req.query?.name || ""), Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)); } catch (e) { throw new UserError(e.message); }
+      await audit(req, `IA : fond musical « ${m.name} » ajouté`);
+      return m;
+    });
+  });
+  app.put("/api/music/:id", { preHandler: requireRole("super", "admin") }, async (req) => {
+    try { return renameServerMusic(req.params.id, req.body?.name); } catch (e) { throw new UserError(e.message); }
+  });
+  app.delete("/api/music/:id", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const m = listServerMusic().find((x) => x.id === req.params.id);
+    try { removeServerMusic(req.params.id); } catch (e) { throw new UserError(e.message); }
+    await audit(req, `IA : fond musical « ${m?.name || req.params.id} » retiré`);
+    return { ok: true };
   });
   // Fonds d'écran des téléphones de bureau : dessinés par la page Apparence (couleur + logo), une image par taille d'écran
   app.register(async (scope) => {

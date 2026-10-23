@@ -31,6 +31,7 @@ const ICONS = {
   phone: '<rect x="6" y="3" width="12" height="18" rx="2"/><path d="M10 18h4"/>',
   trunk: '<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="16" cy="17" r="1"/>',
   lic: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/>',
+  ai: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
   sip: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
@@ -47,7 +48,7 @@ function setNav(active, label = "") {
   const on = !!state.user;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []), ["#/licences", "Licences", "lic"]];
+  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []), ["#/licences", "Licences", "lic"], ["#/ia", "IA", "ai"]];
   // Paramètres : regroupés dans un menu repliable (ouvert quand on est sur une de ses pages)
   const settings = [...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/apparence", "Apparence", "paint"], ["#/surveillance", "Surveillance", "watch"],
     ["#/protection", "Protection anti-intrusion", "shield"], ["#/pays", "IP Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
@@ -455,6 +456,85 @@ async function renderNew() {
 // ---------------------------------------------------------------- Licences : liste, tri, filtres, création, renouvellement, attribution, suppression
 const LIC_STATUS = { valide: ["ok", "À jour"], bientot: ["wait", "Expire bientôt"], expiree: ["bad", "Expirée"], revoquee: ["off", "Supprimée"] };
 let licFilter = "", licQuery = "", licSort = { k: "exp", dir: 1 };
+// ---------------------------------------------------------------- IA : fonds musicaux des annonces
+/** Fichier audio → WAV 8 kHz mono, 60 s max après le silence du début, volume égalisé, fondus (dans le navigateur) */
+async function toMusicWav(file) {
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  let audio; try { audio = await ac.decodeAudioData(await file.arrayBuffer()); } finally { ac.close(); }
+  const sr = audio.sampleRate, ch = [...Array(audio.numberOfChannels)].map((_, i) => audio.getChannelData(i));
+  let s0 = 0; while (s0 < audio.length && ch.every((c) => Math.abs(c[s0]) < 0.01)) s0++;
+  const dur = Math.min(60, (audio.length - s0) / sr);
+  if (dur < 5) throw new Error("musique trop courte (5 s minimum)");
+  const off = new OfflineAudioContext(1, Math.floor(dur * 8000), 8000);
+  const src = off.createBufferSource(); src.buffer = audio;
+  const lp = off.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3400;
+  src.connect(lp).connect(off.destination); src.start(0, s0 / sr, dur);
+  const x = (await off.startRendering()).getChannelData(0);
+  let e = 0, n = 0, peak = 0; for (const v of x) { if (Math.abs(v) > 0.01) { e += v * v; n++; } peak = Math.max(peak, Math.abs(v)); }
+  const g = Math.min(n ? 0.1 / Math.sqrt(e / n) : 1, peak ? 0.95 / peak : 1);   // ≈ −20 dB, sans saturer
+  const fi = 0.3 * 8000, fo = 2 * 8000, L = x.length, b = new DataView(new ArrayBuffer(44 + L * 2));
+  const w = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); b.setUint32(4, 36 + L * 2, true); w(8, "WAVEfmt "); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, 8000, true); b.setUint32(28, 16000, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, "data"); b.setUint32(40, L * 2, true);
+  for (let i = 0; i < L; i++) { const f = Math.min(1, i / fi, (L - i) / fo); b.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(x[i] * g * f * 32767))), true); }
+  return new Uint8Array(b.buffer);
+}
+const musicName = (f) => f.replace(/\.[^.]+$/, "").replace(/^ES_/, "").replace(/_/g, " ").replace(/\b(We|You|They|I) (re|ve|ll|m)\b/g, "$1'$2")
+  .replace(/\(?\s*Instrumental Version\s*\)?/i, " ").replace(/\s+/g, " ").trim().replace(/ \d$/, "").replace(/ - /, " — ").slice(0, 80);
+async function renderAi(msg = "") {
+  setNav("ai", "IA");
+  clearInterval(listTimer);
+  let d;
+  try { d = await api("GET", "/api/music"); } catch (e) { app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`; return; }
+  const edit = can("super", "admin");
+  const row = (m, mine) => `<tr><td><strong>🎵 ${esc(m.name)}</strong></td><td>${Math.round(m.seconds)} s</td>
+    <td style="text-align:right;white-space:nowrap">${mine ? `<button type="button" class="btn ghost sm" data-play="${esc(m.id)}">▶ Écouter</button>${edit ? ` <button type="button" class="btn ghost sm" data-ren="${esc(m.id)}">Renommer</button> <button type="button" class="btn ghost sm" data-rm="${esc(m.id)}">Retirer</button>` : ""}` : '<span class="pill ok">Fournie d\'office</span>'}</td></tr>`;
+  app.innerHTML = `<div class="bar"><div class="grow"><h1>IA</h1><p class="sub">Fonds musicaux proposés sous les annonces en voix IA, dans la console et le softphone de tous les PBX de ce serveur (Gestion d'appels › Annonces › Ajouter).</p></div></div>
+    ${takeFlash()}${msg ? `<div class="flash ok">${esc(msg)}</div>` : ""}
+    <div class="panel"><div class="ph"><h2>Musiques de ce serveur</h2><span class="s">${d.server.length} / ${d.max}</span></div><div class="pad stack">
+      ${edit ? `<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><label class="btn">＋ Ajouter des musiques<input type="file" id="mfiles" accept="audio/*,.wav,.mp3" multiple hidden></label>
+        <span class="hint" id="mst">MP3 ou WAV, plusieurs d'un coup : la première minute est gardée, mise au format téléphone et au même volume. N'ajoute que des musiques dont la licence permet de les diffuser au téléphone.</span></div>` : ""}
+      ${d.server.length ? `<div class="table-wrap"><table><tbody id="mmine">${d.server.map((m) => row(m, true)).join("")}</tbody></table></div>` : `<p class="hint" style="margin:0">Aucune musique ajoutée sur ce serveur pour l'instant.</p>`}
+    </div></div>
+    <div class="panel"><div class="ph"><h2>Fournies d'office</h2><span class="s">${d.catalog.length}</span></div><div class="pad stack">
+      ${d.catalog_error ? `<p class="hint" style="margin:0">${esc(d.catalog_error)}</p>` : d.catalog.length ? `<div class="table-wrap"><table><tbody>${d.catalog.map((m) => row(m, false)).join("")}</tbody></table></div>` : `<p class="hint" style="margin:0">Aucune.</p>`}
+      <p class="hint" style="margin:0">Toujours disponibles sur tous les PBX (dès que l'IA du PBX est activée), sans rien faire.</p></div></div>`;
+  let playing = null;
+  $("#mmine")?.addEventListener("click", async (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const m = d.server.find((x) => x.id === (b.dataset.play || b.dataset.ren || b.dataset.rm)); if (!m) return;
+    try {
+      if (b.dataset.play) {
+        const was = playing?.dataset.id;
+        if (playing) { playing.pause(); playing = null; app.querySelectorAll("[data-play]").forEach((x) => (x.textContent = "▶ Écouter")); }
+        if (was === m.id) return;
+        playing = new Audio(`/api/music/${encodeURIComponent(m.id)}/audio`); playing.dataset.id = m.id;
+        playing.onended = () => { b.textContent = "▶ Écouter"; playing = null; }; playing.play(); b.textContent = "■ Arrêter";
+      } else if (b.dataset.ren) {
+        const v = prompt("Nouveau nom :", m.name); if (!v) return;
+        await api("PUT", `/api/music/${encodeURIComponent(m.id)}`, { name: v }); renderAi("Nom changé.");
+      } else if (b.dataset.rm) {
+        if (!confirm(`Retirer « ${m.name} » ? Les annonces déjà créées avec cette musique la gardent.`)) return;
+        await api("DELETE", `/api/music/${encodeURIComponent(m.id)}`); renderAi("Musique retirée.");
+      }
+    } catch (err) { flash = { cls: "bad", text: err.message }; renderAi(); }
+  });
+  $("#mfiles")?.addEventListener("change", async (e) => {
+    const files = [...e.target.files], st = $("#mst"); e.target.value = "";
+    let ok = 0; const bad = [];
+    for (const [i, f] of files.entries()) {
+      st.textContent = `Conversion et envoi ${i + 1} / ${files.length} : ${f.name}…`;
+      try {
+        const wav = await toMusicWav(f);
+        const r = await fetch(`/api/music?name=${encodeURIComponent(musicName(f.name))}`, { method: "POST", credentials: "same-origin", headers: { "content-type": "audio/wav" }, body: wav });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Erreur ${r.status}`);
+        ok++;
+      } catch (err) { bad.push(`${f.name} (${err.message})`); }
+    }
+    renderAi(`${ok} musique${ok > 1 ? "s" : ""} ajoutée${ok > 1 ? "s" : ""}.${bad.length ? ` Refusé : ${bad.join(", ")}` : ""}`);
+  });
+}
+
 async function renderLicenses() {
   setNav("lic", "Licences");
   clearInterval(listTimer);
@@ -1027,6 +1107,7 @@ function route() {
   if (h === "#/cle" && can("super")) return renderSigning();
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
   if (h === "#/licences") return renderLicenses();
+  if (h === "#/ia") return renderAi();
   if (h === "#/apparence") return renderTheme();
   if (h === "#/telephonie") return renderTelephonie();
   if (h === "#/surveillance") return renderWatch();

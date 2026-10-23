@@ -229,6 +229,8 @@ hub_init() {
   install -d -o callikoe-hub -g callikoe-hub -m 0755 "$HUB_VAR"
   # Apparence (couleur, logo, fond d'écran) : écrite par la console du serveur, lue par les consoles de tous les PBX
   install -d -o callikoe-hub -g callikoe-hub -m 0755 /var/lib/callikoe/theme
+  # Fonds musicaux des annonces ajoutés dans la console du serveur (IA) : lus par les consoles de tous les PBX
+  install -d -o callikoe-hub -g callikoe-hub -m 0755 /var/lib/callikoe/music
   # Configuration du serveur : contient le jeton du portail pro (serveur d'un partenaire) → lisible par root et la console du serveur seulement
   chgrp callikoe-hub "$SRV_CFG" && chmod 0640 "$SRV_CFG"
   # Clé de signature des ouvertures de PBX : privée pour la console du serveur, publique pour les PBX
@@ -837,6 +839,7 @@ cmd_sauvegarder() {
     [[ -f "$HUB_VAR/portal-key.pem" ]] && cp -a "$HUB_VAR/portal-key.pem" "$tmp/hub/var/"
     [[ -d "$HUB_VAR/configs" ]] && cp -a "$HUB_VAR/configs" "$tmp/hub/var/"
     [[ -d /var/lib/callikoe/theme ]] && cp -a /var/lib/callikoe/theme "$tmp/hub/theme"
+    [[ -d /var/lib/callikoe/music ]] && cp -a /var/lib/callikoe/music "$tmp/hub/music"
     runuser -u postgres -- pg_dump --no-owner callikoe_hub > "$tmp/hub/hub.sql" 2>/dev/null || warn "Comptes de la console du serveur non sauvegardés"
     ok "Console du serveur (comptes, clés)"
   fi
@@ -871,6 +874,7 @@ cmd_restaurer() {
       [[ -f "$HUB_VAR/portal-key.pem" ]] || { [[ -f "$tmp/hub/var/portal-key.pem" ]] && install -o callikoe-hub -g callikoe-hub -m 0600 "$tmp/hub/var/portal-key.pem" "$HUB_VAR/portal-key.pem"; }
       [[ -d "$tmp/hub/var/configs" ]] && { install -d -o callikoe-hub -g callikoe-hub -m 0700 "$HUB_VAR/configs"; cp -an "$tmp/hub/var/configs/." "$HUB_VAR/configs/"; chown -R callikoe-hub:callikoe-hub "$HUB_VAR/configs"; }
       [[ -d "$tmp/hub/theme" ]] && { cp -a "$tmp/hub/theme/." /var/lib/callikoe/theme/; chown -R callikoe-hub:callikoe-hub /var/lib/callikoe/theme; }
+      [[ -d "$tmp/hub/music" ]] && { install -d -o callikoe-hub -g callikoe-hub -m 0755 /var/lib/callikoe/music; cp -a "$tmp/hub/music/." /var/lib/callikoe/music/; chown -R callikoe-hub:callikoe-hub /var/lib/callikoe/music; }
       systemctl restart callikoe-hub
     fi
     local nusers; nusers="$(runuser -u postgres -- psql -tAq -d callikoe_hub -c "SELECT count(*) FROM hub_users" 2>/dev/null || echo 0)"

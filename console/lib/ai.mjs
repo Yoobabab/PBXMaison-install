@@ -6,6 +6,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { listServerMusic, serverMusicFile, MUSIC_DIR } from "./music.mjs";
 
 export const DEFAULT_AI = { enabled: false, voicemail: true, relay: "" };
 export const VOICES = { coral: "Chaleureuse", sage: "Posée", alloy: "Neutre", verse: "Dynamique", ash: "Grave", nova: "Claire" };
@@ -151,14 +152,21 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
   // Fonds musicaux des annonces : gardés sur le portail (licence), récupérés à la demande et gardés en mémoire
   let musicList = null;
   const musicCache = new Map();
-  async function musics() {
+  // + ceux du serveur multi-tenant (dossier partagé, ajoutés dans sa console › IA)
+  const musicDir = env.CX_MUSIC_DIR || MUSIC_DIR;
+  async function portalMusics() {
     if (musicList?.items.length && Date.now() - musicList.at < 10 * 60_000) return musicList.items;   // liste vide : on redemande à chaque fois
     const r = await call("/v1/ai/music", undefined);
     musicList = { at: Date.now(), items: (r.music || []).map((x) => ({ id: String(x.id), name: String(x.name || ""), seconds: Number(x.seconds) || 0 })) };
     return musicList.items;
   }
+  async function musics() {
+    const local = listServerMusic(musicDir).map((m) => ({ id: m.id, name: m.name, seconds: m.seconds }));
+    try { return [...await portalMusics(), ...local]; } catch (e) { if (local.length) return local; throw e; }
+  }
   async function music(id) {
     id = String(id || "");
+    if (id.startsWith("srv-")) { const f = serverMusicFile(id, musicDir); if (!f) throw new AiError("Fond musical inconnu (retiré ?).", 404); return toPbxWav(fs.readFileSync(f)); }
     if (!/^[a-z0-9-]{1,40}$/.test(id)) throw new AiError("Fond musical inconnu.", 404);
     if (!musicCache.has(id)) {
       const wav = toPbxWav(Buffer.from((await call(`/v1/ai/music/${id}`, undefined)).audio, "base64"));
