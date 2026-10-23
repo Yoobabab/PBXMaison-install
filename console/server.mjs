@@ -1118,7 +1118,12 @@ export async function buildApp({ db, ami } = {}) {
     return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(`<!doctype html><meta charset="utf-8"><title>${r.mail.subject.replace(/[<>&]/g, "")}</title><body style="margin:0">${html}</body>`);
   });
   app.post("/api/ai-settings/report/test", { preHandler: requireUser }, async (req) => admin.sendMonthlyReport({ to: String(req.body?.to || "").trim() || null, force: true }));
-  app.get("/api/ai", { preHandler: requireUser }, async () => { const s = await ai.settings(); return { enabled: s.enabled, voices: AI_VOICES, musics: s.enabled ? await ai.musics().catch(() => []) : [] }; });
+  app.get("/api/ai", { preHandler: requireUser }, async () => {
+    const s = await ai.settings();
+    let musics = [], musics_error = "";
+    if (s.enabled) { try { musics = await ai.musics(); } catch (e) { musics_error = e.message; } }
+    return { enabled: s.enabled, voices: AI_VOICES, musics, musics_error };
+  });
   app.get("/api/ai/music/:id", { preHandler: requireUser }, async (req, reply) => reply.type("audio/wav").header("cache-control", "private, max-age=3600").send(await ai.music(req.params.id)));
   app.post("/api/ai/speech", { preHandler: requireUser }, async (req) => {
     const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice, req.body?.music || "");

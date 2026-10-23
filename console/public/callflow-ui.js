@@ -705,7 +705,10 @@ function renderPromptForm(head, id) {
     h.$("#paisec").hidden = false;
     h.$("#paivoice").innerHTML = Object.entries(x.voices).map(([k, l]) => `<option value="${esc(k)}">Voix ${esc(l.toLowerCase())}</option>`).join("");
     const st = h.$("#paist");
-    if (x.musics?.length) {
+    if (!x.musics?.length) {
+      h.$("#paimrow").hidden = false; h.$("#paimusic").hidden = true;
+      h.$("#paimrow .hint").textContent = x.musics_error ? `Fonds musicaux indisponibles : ${x.musics_error}` : "Aucun fond musical pour l'instant : IRT les ajoute dans son espace vendeur (IA des PBX › Fonds musicaux).";
+    } else {
       const mus = h.$("#paimusic"), mplay = h.$("#paimplay"), maudio = h.$("#paimaudio");
       h.$("#paimrow").hidden = false;
       mus.innerHTML += x.musics.map((m) => `<option value="${esc(m.id)}">🎵 ${esc(m.name)}</option>`).join("");
