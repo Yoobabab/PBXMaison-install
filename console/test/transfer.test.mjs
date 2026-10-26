@@ -35,7 +35,15 @@ test("utilisateurs : aller-retour au format Callikoe", () => {
 test("utilisateurs : fichier 3CX (export puis import d'un fichier 3CX)", () => {
   const t = usersRows([user("201")], "3cx");
   assert.deepEqual(t.headers.slice(0, 4), ["Number", "FirstName", "LastName", "EmailAddress"]);
-  assert.equal(t.rows[0][7], '<role name="receptionists" />'); assert.equal(t.rows[0][15], "Yealink T43U"); assert.equal(t.rows[0][14], "44DBD229FA7B");
+  // En-tête identique à un export 3CX (sinon 3CX refuse : « required columns are not found »)
+  assert.equal(t.headers.join(","), "Number,FirstName,LastName,EmailAddress,MobileNumber,OutboundCallerID,DID,Role,Department,ClickToCallAuth,WMApprove,WebMeetingFriendlyName,MAC,Template,Model,Router,Language,Ringtone,QRingtone,PhoneSettings,VMEnable,VMLanguage,VMPlayMsgDateTime,VMPIN,VMEmailOptions,VMNoPin,VMPlayCallerID,RecordCalls,RecordExternal,ForbidRecording,RecordCanSee,RecordCanDelete,RecordStartStop,RecordNotify,Disabled,HideFWrules,DisableExternalCalls,HideInPhonebook,CallScreening,PinProtected,PinTimeout,Transcription,AllowLanOnly,SIPID,DeliverAudio,HotDesk,SRTPMode,EmailMissedCalls,MS365SignInDisabled,MS365CalendarDisabled,MS365ContactsDisabled,MS365TeamsDisabled,GoogleSignInDisabled,GoogleContactsDisabled,GoogleCalendarDisabled,BLF,AiAgent,AiAgentSettings");
+  const col = (h) => t.rows[0][t.headers.indexOf(h)];
+  assert.equal(t.rows[0].length, 58);
+  assert.equal(col("Role"), '<role name="receptionists" />'); assert.equal(col("Model"), "Yealink T43U"); assert.equal(col("MAC"), "44DBD229FA7B");
+  assert.equal(col("Department"), "DEFAULT"); assert.equal(col("BLF"), "<PhoneDevice><BLFS /></PhoneDevice>"); assert.equal(col("PinTimeout"), 60);
+  // Le fichier exporté se relit (import 3CX → Callikoe)
+  const [back] = parseUsers(readTable(writeCsv(t.headers, t.rows, "3cx")));
+  assert.equal(back.input.number ?? back.number, "201");
   const file = 'Number,FirstName,LastName,EmailAddress,MobileNumber,DID,Role,VMEnable,VMEmailOptions,MAC,Model\r\n' +
     '105,Paul,Martin,paul@x.fr,+33 6 11 22 33 44,0123456780:*0123456781,"<role name=""system_admins"" />",1,3,805EC0AABBCC,Yealink T46U\r\n' +
     '106,Léa,Petit,,,,"<role name=""users"" />",0,0,,Cisco 7960\r\n';

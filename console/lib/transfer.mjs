@@ -51,7 +51,8 @@ export function writeCsv(headers, rows, format = "callikoe") {
   const sep = format === "3cx" ? "," : ";";
   // Texte qui commence par = + - @ : apostrophe devant, sinon Excel le prend pour une formule
   const q = (v) => { let s = String(v ?? ""); if (/^[=+\-@]/.test(s) && !/^\+\d[\d ]*$/.test(s)) s = `'${s}`; return /[",;\r\n]/.test(s) || s !== s.trim() ? `"${s.replace(/"/g, '""')}"` : s; };
-  const body = [headers, ...rows].map((r) => r.map(q).join(sep)).join("\r\n") + "\r\n";
+  const nl = format === "3cx" ? "\n" : "\r\n";   // 3CX : fins de ligne Unix, comme ses propres exports
+  const body = [headers, ...rows].map((r) => r.map(q).join(sep)).join(nl) + nl;
   return format === "3cx" ? body : "﻿" + body;
 }
 
@@ -88,8 +89,24 @@ const USER_COLS = [
   ["dids", "SDA"], ["role", "Rôle"], ["vm", "Messagerie"], ["vm_pin", "Code messagerie"], ["vm_email", "Messages par e-mail"],
   ["disabled", "Désactivé"], ["hidden", "Masqué de l'annuaire"], ["block_external", "Appels externes bloqués"], ["model", "Modèle de téléphone"], ["mac", "Adresse MAC"],
 ];
-const USER_3CX = ["Number", "FirstName", "LastName", "EmailAddress", "MobileNumber", "OutboundCallerID", "DID", "Role", "VMEnable", "VMPIN", "VMEmailOptions",
-  "Disabled", "HideInPhonebook", "DisableExternalCalls", "MAC", "Model"];
+// Colonnes exactes de l'écran Utilisateurs › Importer de 3CX (v20), dans le même ordre ; 3CX refuse le fichier s'il en manque une (ex. « Department »)
+const USER_3CX = ["Number", "FirstName", "LastName", "EmailAddress", "MobileNumber", "OutboundCallerID", "DID", "Role", "Department", "ClickToCallAuth", "WMApprove",
+  "WebMeetingFriendlyName", "MAC", "Template", "Model", "Router", "Language", "Ringtone", "QRingtone", "PhoneSettings", "VMEnable", "VMLanguage", "VMPlayMsgDateTime",
+  "VMPIN", "VMEmailOptions", "VMNoPin", "VMPlayCallerID", "RecordCalls", "RecordExternal", "ForbidRecording", "RecordCanSee", "RecordCanDelete", "RecordStartStop",
+  "RecordNotify", "Disabled", "HideFWrules", "DisableExternalCalls", "HideInPhonebook", "CallScreening", "PinProtected", "PinTimeout", "Transcription", "AllowLanOnly",
+  "SIPID", "DeliverAudio", "HotDesk", "SRTPMode", "EmailMissedCalls", "MS365SignInDisabled", "MS365CalendarDisabled", "MS365ContactsDisabled", "MS365TeamsDisabled",
+  "GoogleSignInDisabled", "GoogleContactsDisabled", "GoogleCalendarDisabled", "BLF", "AiAgent", "AiAgentSettings"];
+// Valeurs par défaut d'une extension exportée par 3CX (réglages que Callikoe n'a pas)
+const USER_3CX_DEFAULTS = { Department: "DEFAULT", ClickToCallAuth: 0, WMApprove: 0, VMPlayMsgDateTime: 0, VMNoPin: 1, VMPlayCallerID: 0, RecordCalls: 0,
+  RecordExternal: 0, ForbidRecording: 0, RecordCanSee: 0, RecordCanDelete: 0, RecordStartStop: 1, RecordNotify: 0, HideFWrules: 0, CallScreening: 0, PinProtected: 0,
+  PinTimeout: 60, AllowLanOnly: 0, DeliverAudio: 1, HotDesk: 0, SRTPMode: 0, EmailMissedCalls: 0, BLF: "<PhoneDevice><BLFS /></PhoneDevice>" };
+// Nom de réunion web 3CX : lettres et chiffres, unique sur le PBX
+const meetingName = (u, used) => {
+  let n = `${u.first_name || ""}${u.last_name || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "") || `poste${u.id}`;
+  if (used.has(n)) n += u.id;
+  used.add(n);
+  return n;
+};
 const USER_ALIASES = {
   number: ["poste", "number", "numero", "extension", "ext", "extensionnumber"], first_name: ["prenom", "firstname"], last_name: ["nom", "lastname"],
   email: ["email", "emailaddress", "mail", "courriel"], mobile: ["mobile", "mobilenumber", "portable"], outbound_cid: ["numeropresente", "outboundcallerid", "callerid"],
@@ -119,9 +136,14 @@ function vmMailOf(v) {
 export function usersRows(users, format = "callikoe") {
   const model = (u) => MODELS.find((m) => m.id === u.phone?.model);
   if (format === "3cx") {
-    return { headers: USER_3CX, rows: users.map((u) => [u.id, u.first_name, u.last_name, u.email, u.mobile, u.outbound_cid, (u.dids || []).join(":"),
-      `<role name="${ROLE_3CX[u.options?.role || "user"]}" />`, u.voicemail.enabled ? 1 : 0, u.voicemail.pin || "", vmMailIndex(u.voicemail),
-      u.options.disabled ? 1 : 0, u.options.hidden ? 1 : 0, u.options.block_external ? 1 : 0, (u.phone?.mac || "").toUpperCase(), model(u) ? modelLabel3cx(model(u)) : ""]) };
+    const used = new Set();
+    return { headers: USER_3CX, rows: users.map((u) => {
+      const v = { ...USER_3CX_DEFAULTS, Number: u.id, FirstName: u.first_name, LastName: u.last_name, EmailAddress: u.email, MobileNumber: u.mobile,
+        OutboundCallerID: u.outbound_cid, DID: (u.dids || []).join(":"), Role: `<role name="${ROLE_3CX[u.options?.role || "user"]}" />`, WebMeetingFriendlyName: meetingName(u, used),
+        MAC: (u.phone?.mac || "").toUpperCase(), Model: model(u) ? modelLabel3cx(model(u)) : "", VMEnable: u.voicemail.enabled ? 1 : 0, VMPIN: u.voicemail.pin || "",
+        VMEmailOptions: vmMailIndex(u.voicemail), Disabled: u.options.disabled ? 1 : 0, HideInPhonebook: u.options.hidden ? 1 : 0, DisableExternalCalls: u.options.block_external ? 1 : 0 };
+      return USER_3CX.map((h) => v[h] ?? "");
+    }) };
   }
   return { headers: USER_COLS.map(([, l]) => l), rows: users.map((u) => [u.id, u.first_name, u.last_name, u.email, fmtNum(u.mobile), fmtNum(u.outbound_cid),
     (u.dids || []).map(fmtNum).join(", "), ROLE_NAMES[u.options?.role || "user"], yn(u.voicemail.enabled), u.voicemail.pin || "", VM_MAIL[vmMailIndex(u.voicemail)],
