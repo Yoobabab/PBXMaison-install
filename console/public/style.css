@@ -1037,3 +1037,12 @@ td.nowrap{white-space:nowrap}
 .sch-quick{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 12px;font-size:14px}
 .sch-quick input[type=time]{width:auto;padding:6px 8px}
 .sch-dids{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+
+/* Import d'une sauvegarde 3CX complète */
+.tx-full{margin-bottom:12px}
+.tx-fullin{display:flex;align-items:center;gap:14px}.tx-fullin .grow{flex:1;min-width:0}
+@media (max-width:700px){.tx-fullin{flex-wrap:wrap}}
+.tx-full h2{margin:0 0 4px;font-size:16px}.tx-full p{margin:0;color:var(--muted);font-size:13.5px}
+.tx-sec{grid-column:auto;padding:0;border-radius:10px}
+.tx-sec>summary{padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tx-sec .tx-sum{display:inline-flex;gap:6px}

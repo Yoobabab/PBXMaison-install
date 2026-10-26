@@ -1070,6 +1070,13 @@ export async function buildApp({ db, ami } = {}) {
     audit(req, `export ${req.params.kind}`, true, `${r.count} ligne(s)`);
     return r;
   });
+  // Sauvegarde 3CX complète : le navigateur extrait le …Db.xml du .zip et l'envoie ici (aperçu, puis import)
+  app.post("/api/transfer-3cx", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
+    const apply = !!req.body?.apply;
+    const r = await transfer.import3cx(String(req.body?.xml || ""), { apply, consoleRoles: !currentUser(req)?.ext && req.role !== "client", by: currentUser(req).email });
+    if (apply) audit(req, "import d'une sauvegarde 3CX", true, r.sections.map((s) => `${s.label} : ${s.lines.filter((l) => l.done).length}`).join(", ").slice(0, 300));
+    return r;
+  });
   app.post("/api/transfer/:kind/import", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
     transferGuard(req);
     const apply = !!req.body?.apply;

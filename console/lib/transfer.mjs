@@ -10,6 +10,7 @@ import { validateContact } from "./contacts.mjs";
 import { validateRule, rangesText } from "./outbound.mjs";
 import { validateObject } from "./callflow.mjs";
 import { MODELS, normalizeMac } from "./phones.mjs";
+import { convert3cx } from "./import3cx.mjs";
 
 export const KINDS = {
   users: { label: "Utilisateurs", formats: ["callikoe", "3cx"] },
@@ -445,7 +446,8 @@ export function createTransfer({ pbx, admin }) {
   }
 
   /** opts : { apply, consoleRoles (installateur : peut donner Gestionnaire / Administrateur), by } */
-  async function importKind(kind, text, { apply = false, consoleRoles = false, by = "" } = {}) {
+  // pending (aperçu d'une sauvegarde 3CX) : postes, horaires et trunks qui seront créés avant cette partie
+  async function importKind(kind, text, { apply = false, consoleRoles = false, by = "", pending = null } = {}) {
     check(kind);
     const table = readTable(text);
     if (table.rows.length > 5000) throw new UserError("5 000 lignes au maximum par import.", "file");
@@ -523,8 +525,10 @@ export function createTransfer({ pbx, admin }) {
         try { await pbx.createTrunk({ ...l.input, replace: l.action === "update" }); l.done = true; } catch (e) { l.error = e.message; }
       }
     } else if (kind === "inbound") {
-      const [objects, users] = await Promise.all([pbx.loadObjects(), pbx.loadUsers()]);
+      const [objects0, users] = await Promise.all([pbx.loadObjects(), pbx.loadUsers()]);
+      const objects = [...objects0, ...(pending?.objects || []).filter((p) => !objects0.some((o) => o.kind === p.kind && norm(o.name) === norm(p.name)))];
       const ctx = { users: new Map(users.map((u) => [u.id, u])), objects, cc };
+      for (const id of pending?.users || []) if (!ctx.users.has(id)) ctx.users.set(id, defaultUser(id));
       lines = parseInbound(table, ctx);
       if (lines.some((l) => l.is3cx)) format = "3cx";
       const byName = new Map(objects.filter((o) => o.kind === "rule").map((o) => [norm(o.name), o]));
@@ -545,7 +549,7 @@ export function createTransfer({ pbx, admin }) {
       }
     } else {
       const list = await admin.listOutbound();
-      const trunks = new Set(list.trunks.map((t) => t.id));
+      const trunks = new Set([...list.trunks.map((t) => t.id), ...(pending?.trunks || [])]);
       const byName = new Map(list.rules.map((r) => [norm(r.name), r]));
       lines = parseOutbound(table);
       for (const l of lines) {
@@ -566,5 +570,61 @@ export function createTransfer({ pbx, admin }) {
     };
   }
 
-  return { items, exportKind, importKind };
+  /**
+   * Sauvegarde 3CX complète (texte du fichier …Db.xml) : aperçu ou import de chaque partie, dans l'ordre
+   * trunks → utilisateurs (et leurs renvois) → horaires → règles entrantes → règles sortantes → annuaire.
+   */
+  async function import3cx(xml, { apply = false, consoleRoles = false, by = "" } = {}) {
+    let conv;
+    try { conv = convert3cx(String(xml || ""), { cc: pbx.countryCode(), templates: pbx.templates() }); }
+    catch (e) { throw new UserError(e.message, "file"); }
+    const T = conv.tables;
+    const csv = (k) => writeCsv(T[k].headers, T[k].rows);
+    const sections = [];
+    const run = async (kind, label, opts = {}) => {
+      if (!T[kind].rows.length) return null;
+      const r = await importKind(kind, csv(kind), { apply, consoleRoles, by, ...opts });
+      sections.push({ ...r, label });
+      return r;
+    };
+    const existingSched = (await pbx.loadObjects()).filter((o) => o.kind === "schedule");
+    const pending = {
+      users: T.users.rows.map((r) => r[0]),
+      trunks: T.trunks.rows.map((r) => r[0]),
+      objects: conv.schedules.map((x, i) => ({ kind: "schedule", id: `__3cx${i}`, name: x.name, data: x.data })),
+    };
+    if (consoleRoles) await run("trunks", "Trunks (avec leurs mots de passe)");
+    const users = await run("users", "Utilisateurs");
+    // Renvois des fiches (sans réponse, occupé, absent) : après la création des postes
+    if (conv.forwards.length) {
+      const ok = new Set((users?.lines || []).filter((l) => l.action !== "error").map((l) => l.label.split(" ")[0]));
+      const lines = [];
+      for (const f of conv.forwards) {
+        const l = { line: 0, label: `${f.ext} : ${Object.entries(f.forwarding).map(([k, v]) => k === "timeout" ? `${v} s` : `${{ no_answer: "sans réponse", busy: "occupé", away: "absent" }[k]} → ${v.type === "external" ? v.target : v.type === "extension" ? `poste ${v.target}` : v.type === "voicemail" ? "messagerie" : "raccrocher"}`).join(", ")}`,
+          action: "update", warnings: [], error: ok.has(f.ext) ? "" : "Poste non importé", done: false };
+        if (apply && !l.error) { try { await pbx.updateUser(f.ext, { forwarding: f.forwarding }, by); l.done = true; } catch (e) { l.error = e.message; } }
+        if (l.error) l.action = "error";
+        lines.push(l);
+      }
+      sections.push({ kind: "forwards", label: "Renvois des utilisateurs", applied: apply, lines, counts: { create: 0, update: lines.filter((l) => l.action === "update").length, error: lines.filter((l) => l.action === "error").length } });
+    }
+    // Horaires du bureau
+    if (conv.schedules.length) {
+      const hasGeneral = existingSched.some((o) => o.data.general);
+      const lines = [];
+      for (const x of conv.schedules) {
+        const cur = existingSched.find((o) => norm(o.name) === norm(x.name));
+        const l = { line: 0, label: x.name, action: cur ? "update" : "create", warnings: hasGeneral && x.data.general ? ["Les horaires généraux du PBX restent ceux déjà choisis"] : [], error: "", done: false };
+        if (apply) { try { await pbx.saveObject("schedule", cur?.id || null, { ...x.data, general: x.data.general && !hasGeneral }, by); l.done = true; } catch (e) { l.error = e.message; l.action = "error"; } }
+        lines.push(l);
+      }
+      sections.push({ kind: "schedules", label: "Horaires", applied: apply, lines, counts: { create: lines.filter((l) => l.action === "create").length, update: lines.filter((l) => l.action === "update").length, error: lines.filter((l) => l.action === "error").length } });
+    }
+    await run("inbound", "Règles entrantes (SDA)", { pending });
+    if (consoleRoles) await run("outbound", "Règles sortantes", { pending });
+    await run("contacts", "Annuaire");
+    return { version: conv.version, applied: apply, sections, notes: [...conv.notes, ...(consoleRoles ? [] : ["Trunks et règles sortantes : réservés à l'installateur, non importés."])] };
+  }
+
+  return { items, exportKind, importKind, import3cx };
 }

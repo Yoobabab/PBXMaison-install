@@ -861,7 +861,10 @@ async function pageTransfer() {
   const fmt = {};
   const sel = Object.fromEntries(kinds.map((k) => [k.id, new Set()]));
   H.app.innerHTML = `${head("Import / export", "Récupère tes réglages dans un fichier (s'ouvre dans Excel) ou importe-les d'un autre PBX. Les fichiers exportés par 3CX sont reconnus tout seuls.")}
-    <p class="hint tx-tip">Pour reprendre tout un PBX, importe dans l'ordre : utilisateurs, trunks, puis les règles (elles renvoient vers les postes et les trunks). Chaque import montre d'abord un aperçu : rien n'est enregistré avant ton accord.</p>
+    <section class="panel tx-full"><div class="tx-fullin pad"><span class="tx-ic">${ic(I.up2, 22)}</span><div class="grow"><h2>Reprendre tout un PBX 3CX</h2>
+        <p>La sauvegarde 3CX (.zip) : utilisateurs et leurs renvois, trunks avec leurs mots de passe, horaires, règles entrantes et sortantes, annuaire. Aperçu avant import.</p></div>
+        <label class="btn tx-file">${ic(I.up2, 16)} Choisir la sauvegarde 3CX…<input type="file" id="tx3cx" accept=".zip,application/zip" hidden></label></div></section>
+    <p class="hint tx-tip">Partie par partie : importe dans l'ordre utilisateurs, trunks, puis les règles. Chaque import montre d'abord un aperçu.</p>
     <div class="tx-grid">${kinds.map((k) => `<section class="tx-card" data-k="${k.id}">
       <div class="tx-top"><span class="tx-ic">${ic(TX_ICON[k.id], 22)}</span><div class="grow"><h2>${H.esc(k.label)}</h2><p>${TX_HINT[k.id]}</p></div><span class="tx-n">${lists[k.id].length}</span></div>
       <div class="tx-fmt"><span>Format</span><div class="seg sm">${k.formats.map((f, i) => `<label class="${i ? "" : "on"}"><input type="radio" name="f-${k.id}" value="${f}" ${i ? "" : "checked"}>${f === "3cx" ? "3CX" : "Callikoe (Excel)"}</label>`).join("")}</div>
@@ -873,6 +876,18 @@ async function pageTransfer() {
         <div class="tx-pa"><button type="button" class="btn link" data-tog>Tout cocher</button><span class="grow"></span><button type="button" class="btn sm" data-sel disabled>Exporter la sélection</button></div></div>
     </section>`).join("")}</div>
     <div id="txprev"></div>`;
+  H.$("#tx3cx").onchange = async (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    const box = H.app.querySelector("#txprev");
+    box.innerHTML = '<div class="panel pad"><span class="spin"></span> Lecture de la sauvegarde…</div>';
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      const xml = await zipEntryText(f, (n) => /(^|\/)\d*Db\.xml$/i.test(n));
+      if (!xml) throw new Error("Ce .zip ne contient pas de fichier …Db.xml : est-ce bien une sauvegarde 3CX ?");
+      show3cx(box, f.name, xml, await H.api("POST", "/api/transfer-3cx", { xml }));
+    } catch (err) { box.innerHTML = `<div class="panel pad"><div class="form-msg err" style="display:block">${H.esc(err.message)}</div></div>`; }
+  };
   H.app.querySelectorAll(".tx-card").forEach((card) => {
     const k = card.dataset.k;
     fmt[k] = card.querySelector(".seg input:checked").value;
@@ -910,6 +925,58 @@ async function pageTransfer() {
       catch (e) { box.innerHTML = `<div class="panel pad"><div class="form-msg err" style="display:block">${H.esc(e.message)}</div></div>`; }
     };
   });
+}
+/** Un fichier d'un .zip, lu dans le navigateur (seul ce fichier est envoyé à la console) */
+async function zipEntryText(file, match) {
+  const buf = new Uint8Array(await file.arrayBuffer()), dv = new DataView(buf.buffer);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("Fichier .zip illisible.");
+  let p = dv.getUint32(eocd + 16, true);
+  const n = dv.getUint16(eocd + 10, true);
+  for (let k = 0; k < n && dv.getUint32(p, true) === 0x02014b50; k++) {
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + nl));
+    p += 46 + nl + xl + cl;
+    if (!match(name)) continue;
+    const start = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+    const data = buf.subarray(start, start + csize);
+    if (method === 0) return new TextDecoder().decode(data);
+    if (method !== 8) throw new Error("Compression du .zip non prise en charge.");
+    const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
+    return new TextDecoder().decode(out);
+  }
+  return null;
+}
+/** Aperçu / résultat de l'import d'une sauvegarde 3CX : une partie par bloc */
+function show3cx(box, name, xml, r) {
+  const ready = r.sections.reduce((a, s) => a + s.counts.create + s.counts.update, 0);
+  const sec = (s) => {
+    const done = s.lines.filter((l) => l.done).length;
+    const rows = s.lines.map((l) => {
+      const [cls, t] = r.applied ? (l.done ? ["ok", l.action === "update" ? "Mis à jour" : "Créé"] : ["bad", "Non importé"]) : TX_ACTION[l.action];
+      return `<tr class="${l.action === "error" || (r.applied && !l.done) ? "tx-err" : ""}"><td><b>${H.esc(l.label)}</b></td><td><span class="pill ${cls}">${t}</span></td>
+        <td>${l.error ? `<div class="tx-e">${H.esc(l.error)}</div>` : ""}${l.warnings.map((w) => `<div class="tx-w">${H.esc(w)}</div>`).join("")}${!l.error && !l.warnings.length ? '<span class="s">—</span>' : ""}</td></tr>`;
+    }).join("");
+    return `<details class="tx-sec" ${s.counts.error ? "open" : ""}><summary><b>${H.esc(s.label)}</b> <span class="tx-sum">${r.applied
+      ? `<span class="pill ok">${done} importé${done > 1 ? "s" : ""}</span>${s.lines.length - done ? `<span class="pill bad">${s.lines.length - done} non importé${s.lines.length - done > 1 ? "s" : ""}</span>` : ""}`
+      : `${s.counts.create ? `<span class="pill ok">${s.counts.create} à créer</span>` : ""}${s.counts.update ? `<span class="pill wait">${s.counts.update} à mettre à jour</span>` : ""}${s.counts.error ? `<span class="pill bad">${s.counts.error} en erreur</span>` : ""}`}</span></summary>
+      <div class="table-wrap"><table><thead><tr><th>Élément</th><th>Action</th><th>Détails</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  };
+  box.innerHTML = `<div class="panel tx-prev"><div class="ph"><h2>${r.applied ? "Import terminé" : "Aperçu avant import"} · sauvegarde 3CX</h2><span class="s">${H.esc(name)}${r.version ? ` · 3CX ${H.esc(r.version)}` : ""}</span></div>
+    <div class="pad stack">${r.applied ? "" : '<p class="hint" style="margin:0">Rien n\'est encore enregistré. Les lignes en erreur sont ignorées, les autres sont importées.</p>'}
+      ${r.sections.map(sec).join("") || '<p class="s">Rien à importer dans cette sauvegarde.</p>'}
+      ${r.notes.length ? `<div class="note"><b>À faire à la main</b><ul style="margin:6px 0 0">${r.notes.map((x) => `<li>${H.esc(x)}</li>`).join("")}</ul></div>` : ""}</div>
+    <div class="actions pad">${r.applied ? '<button type="button" class="btn" data-close>Fermer</button>'
+      : `<button type="button" class="btn ghost" data-close>Annuler</button><button type="button" class="btn" data-go ${ready ? "" : "disabled"}>Tout importer</button>`}</div></div>`;
+  box.querySelector("[data-close]").onclick = () => (r.applied ? pageTransfer() : (box.innerHTML = ""));
+  const go = box.querySelector("[data-go]");
+  if (go) go.onclick = async () => {
+    if (!confirm("Importer la sauvegarde 3CX dans ce PBX ?\nLes fiches qui existent déjà (même numéro de poste, même nom de trunk ou de règle) sont mises à jour.")) return;
+    go.disabled = true; go.innerHTML = '<span class="spin"></span> Import en cours…';
+    try { show3cx(box, name, xml, await H.api("POST", "/api/transfer-3cx", { xml, apply: true })); }
+    catch (e) { go.disabled = false; go.textContent = "Réessayer"; alert(e.message); }
+  };
 }
 function showPreview(box, kind, name, text, r) {
   const ready = r.counts.create + r.counts.update;
