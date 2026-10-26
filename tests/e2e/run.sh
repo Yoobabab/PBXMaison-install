@@ -106,7 +106,7 @@ R="$(api PUT /api/extensions/201 '{"forwarding":{"busy":{"type":"external","targ
 echo "$R" | grep -q "international" && pass "Renvoi vers l'international refusé" || fail "international accepté : $R"
 sleep 2
 D="$(sudo /usr/sbin/asterisk -rx 'dialplan show 201@users')"
-echo "$D" | grep -q "PJSIP/201&PJSIP/201-web&Local/0612345678@user-external/n,15" && pass "Asterisk : 201 sonne poste + softphone web + mobile 15 s" || { echo "$D" | head -20 >> "$OUT"; fail "dialplan 201"; }
+echo "$D" | grep -q "PJSIP/201&PJSIP/201-web&Local/201@cx-app/n&Local/0612345678@user-external/n,15" && pass "Asterisk : 201 sonne poste + softphone web + appli + mobile 15 s" || { echo "$D" | head -20 >> "$OUT"; fail "dialplan 201"; }
 echo "$D" | grep -q "user-external,0612345678" && pass "Asterisk : non-réponse de 201 → 06 12 34 56 78" || fail "renvoi non-réponse 201"
 echo "$D" | grep -q "Goto(users,202,1)" && pass "Asterisk : occupé/non connecté → poste 202" || fail "renvoi occupé 201"
 sudo /usr/sbin/asterisk -rx 'dialplan show 202@users' | grep -q "Goto(users,201,1)" && pass "Asterisk : 202 absent → 201" || fail "202 absent"
