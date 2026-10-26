@@ -11,7 +11,7 @@ test("e-mail de message vocal", () => {
 });
 
 test("e-mail d'alerte, choix des messages à envoyer, réglages", () => {
-  assert.match(alertMail({ title: "Trunk décroché", text: "Unyc", severity: "critical", pbxName: "PBX" }).subject, /^\[Critique\] Trunk décroché — PBX$/);
+  assert.match(alertMail({ title: "Trunk décroché", text: "Unyc", severity: "critical", pbxName: "PBX" }).subject, /^\[Urgent\] Trunk décroché — PBX$/);
   const now = Date.parse("2026-10-17T12:00:00Z");
   const list = [
     { key: "a", folder: "new", at: "2026-10-17T11:50:00Z" },

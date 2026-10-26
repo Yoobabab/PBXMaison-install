@@ -40,7 +40,8 @@ export function renderPlanning(root, opts) {
   };
   base.week ||= emptyWeek(); base.week_b ||= emptyWeek(); base.days ||= {}; base.ref_monday ||= mondayOf(today);
   S = { root, opts, p: base, wk: "a", brush: base.scenarios.find((x) => x.id !== base.outside)?.id || base.outside, full: false,
-    month: today.slice(0, 7), pick: null, drawer: null, err: null, today, dirty: false };
+    month: today.slice(0, 7), pick: null, drawer: null, err: null, today, dirty: false, tab: opts.tab || "semaine",
+    quick: { sc: "", r: [["09:00", "12:00"], ["14:00", "18:00"]], days: ["mon", "tue", "wed", "thu", "fri"] } };
   root.innerHTML = `${opts.top || ""}<div class="panel tabbed pl" id="pl"></div><div class="fx-drawer pl-drawer" id="pldr" aria-hidden="true"></div><div class="fx-scrim" id="plscrim"></div>`;
   root.querySelector("#plscrim").onclick = closeDrawer;
   draw();
@@ -93,41 +94,49 @@ function draw() {
     </div>
     ${p.override ? `<div class="flash warn" style="margin:0 16px">Le planning est forcé sur « ${esc(scName(p.override))} » : les plages ci-dessous sont ignorées jusqu'à ce que tu remettes « Automatique ».</div>` : ""}
 
-    <section class="pl-sec"><div class="pl-h"><h3>1. Scénarios</h3><span class="hint">Ce qui se passe quand on appelle : qui sonne, combien de temps, puis où part l'appel.</span></div>
+    <nav class="pl-tabs" role="tablist">${[["scenarios", "Scénarios", p.scenarios.length], ["semaine", "Semaine", ""], ["mois", "Mois", Object.keys(p.days).length || ""]].map(([k, l, n]) => `<button type="button" role="tab" class="${S.tab === k ? "on" : ""}" data-pltab="${k}">${l}${n !== "" ? ` <span class="cnt">${n}</span>` : ""}</button>`).join("")}</nav>
+    ${S.tab === "scenarios" ? `<section class="pl-sec"><div class="pl-h"><span class="hint">Un scénario = qui sonne, combien de temps, puis où part l'appel.</span></div>
       <div class="pl-scs">${p.scenarios.map((x) => `<button type="button" class="pl-sc ${S.err?.sc === x.id ? "bad" : ""}" data-sc="${esc(x.id)}">
         <span class="pl-sch">${dot(x.id)}<strong>${esc(x.name)}</strong>${x.id === p.outside ? '<span class="pill off">en dehors des plages</span>' : ""}</span>
         <span class="s">${esc(chainText(x.id))}</span></button>`).join("")}
         ${p.scenarios.length < PLAN_MAX_SCENARIOS ? '<button type="button" class="pl-sc add" id="pladdsc">+ Nouveau scénario</button>' : ""}</div>
       <label class="pl-inline">En dehors des plages peintes<select id="ploutside">${p.scenarios.map((x) => `<option value="${esc(x.id)}" ${p.outside === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-    </section>
-
-    <section class="pl-sec"><div class="pl-h"><h3>2. La semaine</h3><span class="hint">Choisis un scénario puis peins les heures : clique-glisse, même sur plusieurs jours d'un coup.</span></div>
+    </section>` : S.tab === "mois" ? `<section class="pl-sec"><div class="pl-h"><span class="hint">Un jour modifié ici (férié, fermeture, remplacement) passe avant la semaine. Clique sur un jour.</span></div>
+      <div class="pl-opts"><label class="check"><input type="checkbox" id="plhol" ${p.holidays_fr ? "checked" : ""}> Jours fériés (France, calculés chaque année)</label>
+        ${p.holidays_fr ? `<label class="pl-inline">toute la journée<select id="plholsc"><option value="">Comme un jour normal</option>${p.scenarios.map((x) => `<option value="${esc(x.id)}" ${p.holiday_scenario === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>` : ""}</div>
+      ${monthView()}
+    </section>` : `<section class="pl-sec">${quickBar()}
       <div class="pl-opts">
         <label class="check"><input type="checkbox" id="plalt" ${p.alternate ? "checked" : ""}> Alterner deux semaines (A / B : semaines paires et impaires)</label>
         ${p.alternate ? `<label class="pl-inline">La semaine A commence le lundi<input type="date" id="plref" value="${esc(p.ref_monday)}"></label>
           <span class="s">Cette semaine (${esc(mondayOf(S.today).split("-").reverse().join("/"))}) est une semaine <strong>${isWeekB(p, S.today) ? "B" : "A"}</strong>.</span>` : ""}
       </div>
       ${p.alternate ? `<nav class="fx-tabs pl-wtabs">${[["a", "Semaine A"], ["b", "Semaine B"]].map(([k, l]) => `<button type="button" class="${S.wk === k ? "on" : ""}" data-wk="${k}">${l}</button>`).join("")}</nav>` : ""}
+      <div class="pl-h"><span class="hint">Ou au pinceau : choisis un scénario puis clique-glisse sur la grille.</span></div>
       ${brushBar()}
       <div class="pl-gridwrap">${weekGrid()}</div>
       <div class="pl-gridfoot"><button type="button" class="btn ghost sm" id="plfull">${S.full ? "Afficher 7 h – 21 h" : "Afficher 0 h – 24 h"}</button>
         <button type="button" class="btn ghost sm" id="plclear">Vider ${p.alternate ? `la semaine ${S.wk.toUpperCase()}` : "la semaine"}</button>
         ${p.alternate ? `<button type="button" class="btn ghost sm" id="plcopyab">Copier la semaine ${S.wk === "a" ? "A vers B" : "B vers A"}</button>` : ""}</div>
-    </section>
-
-    <section class="pl-sec"><div class="pl-h"><h3>3. Le mois</h3><span class="hint">Jours fériés, veilles de fête, fermetures, remplacements : un jour modifié ici passe avant la semaine.</span></div>
-      <div class="pl-opts"><label class="check"><input type="checkbox" id="plhol" ${p.holidays_fr ? "checked" : ""}> Jours fériés (France, calculés chaque année)</label>
-        ${p.holidays_fr ? `<label class="pl-inline">toute la journée<select id="plholsc"><option value="">Comme un jour normal</option>${p.scenarios.map((x) => `<option value="${esc(x.id)}" ${p.holiday_scenario === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>` : ""}</div>
-      ${monthView()}
-    </section>
-
-    <section class="pl-sec"><div class="pl-h"><h3>Tester</h3><span class="hint">Où ira un appel tel jour à telle heure ? (avec les modifications pas encore validées)</span></div>
+    </section>`}
+    <section class="pl-sec pl-testsec"><div class="pl-h"><h3>Tester</h3><span class="hint">Où ira un appel tel jour à telle heure ?</span></div>
       <div class="pl-test"><input type="date" id="pltd" value="${esc(S.testD || S.today)}"><input type="time" id="pltt" value="${esc(S.testT || "10:00")}" step="300"><div id="pltr" class="pl-testr"></div></div>
     </section>
     <div class="fx-msg" id="plmsg"></div>`;
   wire();
 }
 
+/** Saisie rapide : taper les horaires et les appliquer à plusieurs jours d'un coup */
+function quickBar() {
+  const q = S.quick, p = S.p;
+  if (!q.sc || !sc(q.sc) || (q.sc === p.outside && !q.picked)) q.sc = p.scenarios.find((x) => x.id !== p.outside)?.id || p.outside;
+  const t = (i, j) => `<input type="time" step="300" data-qt="${i}${j}" value="${esc(q.r[i][j])}" aria-label="${j ? "Fin" : "Début"} de la plage ${i + 1}">`;
+  return `<div class="pl-quick">
+    <label class="pl-inline">Scénario<select id="plqsc">${p.scenarios.map((x) => `<option value="${esc(x.id)}" ${q.sc === x.id ? "selected" : ""}>${esc(x.name || "Sans nom")}</option>`).join("")}</select></label>
+    <span class="pl-qr">de ${t(0, 0)} à ${t(0, 1)}</span><span class="pl-qr">et de ${t(1, 0)} à ${t(1, 1)}</span>
+    <span class="pl-qdays">${PLAN_DAYS.map((d) => `<label class="${q.days.includes(d) ? "on" : ""}"><input type="checkbox" value="${d}" ${q.days.includes(d) ? "checked" : ""}>${DAY_SHORT[d]}</label>`).join("")}</span>
+    <button type="button" class="btn sm" id="plqgo">Appliquer</button></div>`;
+}
 function brushBar() {
   return `<div class="pl-brush" role="radiogroup" aria-label="Pinceau">${S.p.scenarios.map((x) => `<button type="button" class="pl-b ${S.brush === x.id ? "on" : ""}" data-brush="${esc(x.id)}" role="radio" aria-checked="${S.brush === x.id}">${dot(x.id)}${esc(x.name)}</button>`).join("")}
     <button type="button" class="pl-b ${S.brush === "" ? "on" : ""}" data-brush="" role="radio" aria-checked="${S.brush === ""}">⌫ Gomme</button></div>`;
@@ -187,7 +196,20 @@ function monthView() {
 
 // ---------------------------------------------------------------- Événements
 function wire() {
-  const $ = (q) => S.root.querySelector(q);
+  const none = document.createElement("div");
+  const $ = (q) => S.root.querySelector(q) || none;   // éléments de l'onglet affiché seulement
+  S.root.querySelectorAll("[data-pltab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.pltab; draw(); });
+  $("#plqsc").onchange = (e) => { S.quick.sc = e.target.value; S.quick.picked = true; };
+  S.root.querySelectorAll("[data-qt]").forEach((i) => i.onchange = () => { S.quick.r[Number(i.dataset.qt[0])][Number(i.dataset.qt[1])] = i.value; });
+  S.root.querySelectorAll(".pl-qdays input").forEach((i) => i.onchange = () => { S.quick.days = [...S.root.querySelectorAll(".pl-qdays input:checked")].map((x) => x.value); i.parentElement.classList.toggle("on", i.checked); });
+  $("#plqgo").onclick = () => {
+    const q = S.quick, key = S.wk === "b" ? "week_b" : "week";
+    const ranges = q.r.filter(([a, b]) => a && b).map(([a, b]) => [planMin(a), b === "00:00" ? 1440 : planMin(b)]);
+    if (!ranges.length || ranges.some(([a, b]) => b <= a)) return alert("Horaires invalides : l'heure de fin doit être après l'heure de début.");
+    if (!q.days.length) return alert("Coche au moins un jour.");
+    for (const d of q.days) { let sl = []; for (const [a, b] of ranges) sl = paintSlots(sl, a, b, q.sc); p[key][d] = sl; }
+    S.dirty = true; draw();
+  };
   const p = S.p;
   const touch = () => { S.dirty = true; };
   $("#plname")?.addEventListener("input", (e) => { p.name = e.target.value; touch(); });

@@ -5,7 +5,7 @@ import { renderPlanning, planningSummary } from "./planning-ui.js";
 import { resolvePlan, localNow } from "./planning-core.js";
 let h = null;
 const TABS = [["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
-  ["svi", "SVI", "ivr"], ["messageries", "Messageries", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["depannage", "Dépannage", ""], ["traceur", "Traceur", ""], ["renvois", "Renvois actifs", ""], ["planning", "Planning", "planning"]];
+  ["svi", "SVI", "ivr"], ["messageries", "Messageries", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["standardiste", "Standardiste IA", ""], ["depannage", "Dépannage", ""], ["traceur", "Traceur", ""], ["renvois", "Renvois actifs", ""], ["planning", "Planning", "planning"]];
 const HIDDEN_TABS = ["planning", "traceur", "renvois"]; // planning : ouvert depuis Routages ; traceur et renvois : dans Dépannage
 const DIAG_TABS = [["depannage", "Test d'appel"], ["traceur", "Traceur"], ["renvois", "Renvois actifs"]];
 const KIND_TAB = Object.fromEntries(TABS.filter((t) => t[2]).map(([s, , k]) => [k, s]));
@@ -32,13 +32,15 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
     ${DIAG_TABS.some(([k]) => k === tab) ? `<nav class="subtabs">${DIAG_TABS.map(([k, l]) => `<a href="#/gestion/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}`;
   if (tab === "standard") { location.hash = "#/utilisateurs"; return; }   // déplacé : fiche utilisateur › Renvois d'appels
   if (tab === "depannage") return renderDiag(head, id);
+  if (tab === "standardiste") return h.adminPage("standardiste", head);
   if (tab === "traceur") return renderTracer(head, id);
   if (tab === "renvois") return renderForwards(head);
   if (id && kind === "planning") {
-    const plan = id === "nouveau" ? null : cf.objects.find((o) => o.kind === "planning" && o.id === id);
-    if (id !== "nouveau" && !plan) { h.app.innerHTML = `${head}<div class="flash bad">Planning introuvable.</div>`; return; }
+    const isNew = id.startsWith("nouveau");
+    const plan = isNew ? null : cf.objects.find((o) => o.kind === "planning" && o.id === id);
+    if (!isNew && !plan) { h.app.innerHTML = `${head}<div class="flash bad">Planning introuvable.</div>`; return; }
     return renderPlanning(h.app, {
-      cf, plan, mode: "admin", top: `${h.takeFlash()}${head}`, backHref: "#/gestion/routages", backLabel: "Routages",
+      cf, plan, mode: "admin", top: `${h.takeFlash()}${head}`, tab: id === "nouveau-mois" ? "mois" : "semaine", backHref: "#/gestion/routages", backLabel: "Routages",
       traceHref: (did) => `#/gestion/traceur/${encodeURIComponent(did)}`,
       save: (body) => h.api(plan ? "PUT" : "POST", `/api/callflow/planning${plan ? "/" + plan.id : ""}`, body),
       remove: () => h.api("DELETE", `/api/callflow/planning/${plan.id}?force=1`),
@@ -177,7 +179,7 @@ function renderSchedules(head) {
 
 // ---------------------------------------------------------------- Listes
 const INTRO = {
-  flow: "Le plus simple : décris le routage en une phrase ou construis-le en glissant des cadres de gauche à droite (SDA → sonnerie → groupe → messagerie…). Pour des renvois différents selon le jour et l'heure (lundi 9 h-12 h Paul puis son mobile, 14 h-18 h Julie…), crée un planning de la semaine.",
+  flow: "Ce qui se passe quand on appelle chaque numéro (SDA).",
   rule: "Une règle par SDA. La règle par défaut prend les SDA sans règle.",
   schedule: "Heures d'ouverture, fériés et congés.",
   group: "Plusieurs postes sonnent ensemble ou à tour de rôle.",
@@ -234,7 +236,11 @@ function renderList(head, kind) {
   const label = cf.options.kinds[kind];
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed">
     <div class="ph"><p class="hint" style="margin:0;max-width:760px">${INTRO[kind]}</p>
-      ${kind === "prompt" ? `<a class="btn" href="#/gestion/annonces/nouveau">+ Ajouter une annonce</a>` : kind === "flow" ? `<div class="row" style="gap:8px;flex-wrap:wrap"><a class="btn ghost" href="#/gestion/planning/nouveau">+ Planning de la semaine</a><a class="btn" href="#/gestion/routages/nouveau">+ Nouveau routage</a></div>` : `<a class="btn" href="#/gestion/${tab}/nouveau">+ ${kind === "rule" ? "Nouvelle règle" : kind === "schedule" ? "Nouveaux horaires" : `Nouveau ${label.split(" (")[0].replace(/^Groupe/, "groupe").replace(/^File/, "file").replace(/^SVI/, "SVI").replace(/^Messagerie/, "messagerie").toLowerCase()}`}</a>`}</div>
+      ${kind === "prompt" ? `<a class="btn" href="#/gestion/annonces/nouveau">+ Ajouter une annonce</a>` : kind === "flow" ? `<details class="rowmenu newmenu"><summary class="btn">+ Nouveau routage ▾</summary><div class="rm-list">
+        <a href="#/gestion/routages/nouveau"><b>Routage simple</b><span>Une SDA → qui sonne → messagerie…</span></a>
+        <a href="#/gestion/planning/nouveau"><b>Planning de la semaine</b><span>Qui répond selon le jour et l'heure</span></a>
+        <a href="#/gestion/planning/nouveau-mois"><b>Planning du mois</b><span>Fériés, fermetures, remplacements</span></a>
+        <a href="#/gestion/standardiste"><b>Standardiste IA</b><span>Une voix IA répond et transfère</span></a></div></details>` : `<a class="btn" href="#/gestion/${tab}/nouveau">+ ${kind === "rule" ? "Nouvelle règle" : kind === "schedule" ? "Nouveaux horaires" : `Nouveau ${label.split(" (")[0].replace(/^Groupe/, "groupe").replace(/^File/, "file").replace(/^SVI/, "SVI").replace(/^Messagerie/, "messagerie").toLowerCase()}`}</a>`}</div>
     ${list.length ? `<div class="table-wrap"><table><thead><tr>${["rule", "schedule", "prompt", "flow"].includes(kind) ? "" : "<th>Numéro</th>"}<th>Nom</th><th>${kind === "prompt" ? "Écoute" : "Configuration"}</th><th></th></tr></thead><tbody>
       ${list.map((o) => `<tr>${["rule", "schedule", "prompt", "flow"].includes(kind) ? "" : `<td><strong>${esc(o.number)}</strong></td>`}
         <td><a href="#/gestion/${KIND_TAB[o.kind]}/${esc(o.id)}">${esc(o.name)}</a>${kind === "rule" && o.kind === "flow" ? ' <span class="pill off">Routage</span>' : ""}${o.kind === "planning" ? ' <span class="pill off">Planning</span>' : ""}${kind === "schedule" ? `<div>${stateBadge(o)}</div>` : ""}</td>
@@ -484,7 +490,7 @@ function renderForm(head, kind, id) {
     body = `<div class="grid3"><label>Code PIN (4 à 8 chiffres)<input name="pin" inputmode="numeric" value="${esc(d.pin)}" placeholder="Généré si vide"><span class="hint">Pour écouter avec *98 depuis un téléphone.</span></label></div>
       ${membersPicker("members", d.members, { label: "Membres (voyant de messagerie + écoute dans le softphone)" })}`;
   } else if (kind === "schedule") {
-    body = scheduleFields(d);
+    body = scheduleFields(d, o?.id);
   } else if (kind === "rule") {
     body = ruleFields(d, id);
   }
@@ -551,20 +557,28 @@ function collect(form, kind) {
   }
   if (raw.options) out.options = Object.fromEntries(Object.entries(raw.options).map(([k, v]) => [k, dest(v)]).filter(([, v]) => v));
   if (raw.members !== undefined) out.members = raw.members ? raw.members.split(",") : [];
-  if (kind === "schedule") { out.week = readWeek(form); out.holidays = readHolidays(form); delete out.wk; delete out.hol; }
+  if (kind === "schedule") { out.week = readWeek(form); out.holidays = readHolidays(form); out.used_by = [...form.querySelectorAll("[name=_used]:checked")].map((x) => x.value); delete out._used; delete out.wk; delete out.hol; }
   if (kind === "rule") { out.dids = [...form.querySelectorAll("[data-did].on")].map((x) => x.dataset.did).concat(String(raw.dids_extra || "").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean)); delete out.dids_extra; }
   return out;
 }
 
 // Horaires
-function scheduleFields(d) {
+function scheduleFields(d, id) {
   const st = scheduleNow(d);
-  return `<label class="check"><input type="checkbox" name="general" ${d.general ? "checked" : ""}> <strong>Horaires généraux du PBX</strong> <span class="hint">(proposés d'office aux nouveaux routages ; un seul jeu d'horaires peut l'être)</span></label>
+  // Routages et règles entrantes avec des SDA : cochés = suivent ces horaires
+  const users = [...objs("flow"), ...objs("rule")].filter((o) => o.data.dids?.length || o.data.is_default);
+  return `<div class="cf-sec"><span class="dl">Numéros (SDA) qui suivent ces horaires</span>
+      ${users.length ? `<div class="sch-dids">${users.map((o) => `<label class="check"><input type="checkbox" name="_used" value="${o.kind}:${esc(o.id)}" ${id && o.data.schedule === id ? "checked" : ""}> ${o.data.dids?.length ? o.data.dids.map(fmtP).map(esc).join(", ") : "SDA sans règle"} <span class="s">· ${esc(o.name)}${o.data.schedule && o.data.schedule !== id ? ` (suit « ${esc(objs("schedule").find((x) => x.id === o.data.schedule)?.name || "?")} »)` : ""}</span></label>`).join("")}</div>`
+      : '<p class="hint" style="margin:0">Aucun routage avec une SDA pour l\'instant.</p>'}</div>
+    <label class="check"><input type="checkbox" name="general" ${d.general ? "checked" : ""}> <strong>Horaires généraux du PBX</strong> <span class="hint">(proposés d'office aux nouveaux routages ; un seul jeu d'horaires peut l'être)</span></label>
     <div class="cf-sec"><span class="dl">Mode</span>
       <div class="seg" id="ovr">${[["auto", "Automatique (selon les horaires)"], ["open", "Forcer ouvert"], ["closed", "Forcer fermé"]].map(([k, l]) => `<label class="${d.override === k ? "on" : ""}"><input type="radio" name="override" value="${k}" ${d.override === k ? "checked" : ""}>${l}</label>`).join("")}</div>
       <p class="hint">En ce moment : <strong>${st === "open" ? "ouvert" : st === "holiday" ? "jour férié / congés" : "fermé"}</strong> (fuseau ${esc(cf.timezone)}).</p></div>
-    <div class="cf-sec"><span class="dl">Semaine</span><div class="week" id="week">${Object.entries(DAY_SHORT).map(([k]) => `<div class="day" data-day="${k}"></div>`).join("")}</div>
-      <p><button type="button" class="btn ghost sm" id="copymon">Copier le lundi sur mardi → vendredi</button></p></div>
+    <div class="cf-sec"><span class="dl">Semaine</span>
+      <div class="sch-quick">De <input type="time" id="sq1" value="09:00"> à <input type="time" id="sq2" value="12:00"> et de <input type="time" id="sq3" value="14:00"> à <input type="time" id="sq4" value="18:00">
+        <button type="button" class="btn sm" id="sqgo">Appliquer du lundi au vendredi</button><button type="button" class="btn ghost sm" id="sqgo6">Lundi → samedi</button></div>
+      <div class="week" id="week">${Object.entries(DAY_SHORT).map(([k]) => `<div class="day" data-day="${k}"></div>`).join("")}</div>
+</div>
     <div class="cf-sec"><span class="dl">Fermetures</span>
       <label class="check"><input type="checkbox" name="holidays_fr" ${d.holidays_fr ? "checked" : ""}> Fermé les jours fériés (France métropolitaine, calculés chaque année)</label>
       <div id="hols"></div><p><button type="button" class="btn ghost sm" id="addhol">+ Ajouter des congés / une fermeture</button></p></div>`;
@@ -585,7 +599,15 @@ function wireSchedule(form, d) {
     box.querySelector("[data-ar]")?.addEventListener("click", () => { const last = week[day].at(-1)[1]; week[day].push([last < "14:00" ? "14:00" : last, "18:00"]); drawDay(day); });
   };
   Object.keys(DAY_SHORT).forEach(drawDay);
-  form.querySelector("#copymon").onclick = () => { for (const k of ["tue", "wed", "thu", "fri"]) { week[k] = structuredClone(week.mon); drawDay(k); } };
+  // Saisie rapide : les horaires tapés remplacent ceux des jours choisis (2e plage facultative)
+  const quick = (days) => {
+    const v = ["#sq1", "#sq2", "#sq3", "#sq4"].map((q) => form.querySelector(q).value);
+    const r = [[v[0], v[1]], [v[2], v[3]]].filter(([a, b]) => a && b);
+    if (!r.length || r.some(([a, b]) => b <= a)) return alert("Horaires invalides : l'heure de fin doit être après l'heure de début.");
+    for (const k of days) { week[k] = structuredClone(r); drawDay(k); }
+  };
+  form.querySelector("#sqgo").onclick = () => quick(["mon", "tue", "wed", "thu", "fri"]);
+  form.querySelector("#sqgo6").onclick = () => quick(["mon", "tue", "wed", "thu", "fri", "sat"]);
   const drawHols = () => {
     form.querySelector("#hols").innerHTML = hols.map((x, i) => `<div class="holrow"><input type="date" value="${esc(x.from)}" data-hf="${i}"> au <input type="date" value="${esc(x.to)}" data-ht="${i}"><input placeholder="Libellé (ex. Congés d'été)" value="${esc(x.label)}" data-hl="${i}"><button type="button" class="ic" data-hr="${i}" title="Retirer">✕</button></div>`).join("");
     form.querySelectorAll("[data-hf]").forEach((x) => x.onchange = () => { hols[x.dataset.hf].from = x.value; if (!hols[x.dataset.hf].to || hols[x.dataset.hf].to < x.value) { hols[x.dataset.hf].to = x.value; drawHols(); } });

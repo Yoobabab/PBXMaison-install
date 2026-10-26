@@ -20,7 +20,7 @@ export const ALERT_EVENTS = {
   license_expiring: ["Licence bientôt expirée", "warning", "La licence expire dans moins de 30 jours."],
   backup_failed: ["Sauvegarde en échec", "warning", "La sauvegarde automatique ou l'envoi vers le serveur FTP a échoué."],
 };
-export const SEVERITY = { critical: "Critique", warning: "Attention", info: "Information" };
+export const SEVERITY = { critical: "Urgent", warning: "À surveiller", info: "Pour info" };   // importance de l'alerte
 
 export const CRITICAL_SERVICES = { asterisk: "Moteur téléphonique (Asterisk)", postgresql: "Base de données", nginx: "Serveur web", fail2ban: "Protection anti-intrusion" };
 

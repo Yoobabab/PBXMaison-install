@@ -123,6 +123,7 @@ const NI = {
   sys: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   soft: '<path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/>',
   out2: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  reports: '<path d="M5 20V10M10 20V4M15 20v-7M20 20v-11"/>',
   ai: '<path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/><path d="M18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   transfer: '<path d="M7 4v13M3 13l4 4 4-4M17 20V7M13 11l4-4 4 4"/>',
   accounts: '<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><path d="M16 11.5l1.5 1.5 3-3"/>',
@@ -132,12 +133,12 @@ const NAV = [
   ["", [["#/", "Tableau de bord", "home"]]],
   ["Téléphonie", [["#/utilisateurs", "Utilisateurs", "ext"], ["#/telephones", "Téléphones", "phones"], ["#/passerelles", "Passerelles et DECT", "gw"],
     ["#/gestion", "Gestion d'appels", "cf"], ["#/sortants", "Règles sortantes", "out"], ["#/trunks", "Trunks", "trunks"], ["#/codes", "Codes de raccourci", "codes"]]],
-  ["Activité", [["#/journal", "Journal des appels", "cdr"], ["#/enregistrements", "Enregistrements", "rec"], ["#/annuaire", "Annuaire", "book"], ["#/capture", "Capture réseau", "cap"]]],
+  ["Activité", [["#/journal", "Journal des appels", "cdr"], ["#/enregistrements", "Enregistrements", "rec"], ["#/annuaire", "Annuaire", "book"], ["#/rapports", "Rapports", "reports"], ["#/capture", "Capture réseau", "cap"]]],
   ["Administration", [["#/securite", "Sécurité", "sec"], ["#/sauvegardes", "Sauvegardes", "backup"], ["#/mises-a-jour", "Mises à jour", "updates"],
     ["#/comptes", "Comptes", "accounts"], ["#/alertes", "Alertes", "alerts"], ["#/ia", "IA", "ai"], ["#/import-export", "Import / export", "transfer"], ["#/systeme", "Système", "sys"]]],
 ];
 // Accès restreint (client) : ces pages restent réservées à l'installateur
-const CLIENT_HIDDEN = new Set(["cap", "gw", "out", "trunks", "codes", "sec", "backup", "updates", "accounts", "alerts", "licence", "sys", "ai"]);
+const CLIENT_HIDDEN = new Set(["reports", "cap", "gw", "out", "trunks", "codes", "sec", "backup", "updates", "accounts", "alerts", "licence", "sys", "ai"]);
 const NAV_LABEL = Object.fromEntries(NAV.flatMap(([g, items]) => items.map(([, l, k]) => [k, [g, l]])));
 function setNav(active) {
   const on = !!state?.logged_in;
@@ -1894,11 +1895,12 @@ document.addEventListener("click", async (e) => {
 });
 
 // ---------------------------------------------------------------- Gestion d'appels (module callflow-ui.js)
-const cfHelpers = { api, esc, $, app, setNav, formData, showFormError, takeFlash: () => takeFlash(), setFlash: (f) => { flash = f; } };
+const cfHelpers = { api, esc, $, app, setNav, formData, showFormError, takeFlash: () => takeFlash(), setFlash: (f) => { flash = f; }, adminPage: (page, sub) => renderAdmin(adminHelpers, page, sub) };
 
 // Pages d'administration (module admin-ui.js)
 const adminHelpers = { ...cfHelpers, fmtPhone, copyButtons, paginate, wirePager, resetPage, get state() { return state; }, renderNav: () => setNav("updates"),
   /** Rappelle fn toutes les ms jusqu'à ce qu'elle renvoie true (arrêté en changeant de page). */
+  adminPage: (page, sub) => renderAdmin(adminHelpers, page, sub),
   poll: (fn, ms) => { clearInterval(timer); const run = async () => { try { if (await fn()) clearInterval(timer); } catch { /* réessaie */ } }; timer = setInterval(run, ms); run(); } };
 
 // ---------------------------------------------------------------- Routage
@@ -1926,7 +1928,7 @@ async function route() {
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "routages", m[2] || null);
     else if (h === "#/routes") await renderRoutes();
-    else if ((m = h.match(/^#\/(sortants|passerelles|codes|enregistrements|securite|sauvegardes|mises-a-jour|alertes|licence|comptes|capture|import-export|ia)(?:\/(.+))?$/))) await renderAdmin(adminHelpers, m[1], m[2] || null);
+    else if ((m = h.match(/^#\/(sortants|passerelles|codes|enregistrements|securite|sauvegardes|mises-a-jour|alertes|licence|comptes|capture|import-export|ia|rapports)(?:\/(.+))?$/))) await renderAdmin(adminHelpers, m[1], m[2] || null);
     else if (h === "#/appels") await renderCalls();  // accessible depuis le tableau de bord et le journal
     else if (h === "#/journal") await renderCdr();
     else if ((m = h.match(/^#\/annuaire(?:\/(\w+))?$/))) await renderContacts(m[1]);

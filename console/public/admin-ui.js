@@ -464,7 +464,7 @@ async function pageAlerts(sub) {
   const tabs = `<nav class="subtabs" style="margin:0 0 14px">${[["", "Journal"], ["reglages", "Réglages"]].map(([k, l]) => `<a href="#/alertes${k ? "/" + k : ""}" class="${(sub || "") === k ? "on" : ""}">${l}</a>`).join("")}</nav>`;
   H.app.innerHTML = head("Alertes", "Le PBX prévient quand quelque chose d'important se passe : trunk décroché, tentative d'intrusion, disque plein…", `<button class="btn ghost" id="alchk">Vérifier maintenant</button>`) + tabs +
     (showCfg ? `<form id="alf" novalidate><div class="form-msg"></div>
-      <div class="panel" style="margin-bottom:16px"><div class="ph"><h2>Que surveiller ?</h2></div><div class="table-wrap"><table class="altable"><tbody>
+      <div class="panel" style="margin-bottom:16px"><div class="ph"><h2>Que surveiller ?</h2></div><div class="table-wrap"><table class="altable"><thead><tr><th></th><th>Alerte</th><th class="nw" title="Urgent : à traiter tout de suite (appels coupés, disque plein…). À surveiller : à regarder, rien ne presse.">Importance ⓘ</th></tr></thead><tbody>
         ${Object.entries(d.events).map(([k, [t, sev, desc]]) => `<tr><td class="nw"><label class="switch"><input type="checkbox" name="events.${k}" ${s.events[k] ? "checked" : ""} aria-label="${H.esc(t)}"><span></span></label></td>
           <td><b>${H.esc(t)}</b><div class="s">${H.esc(desc)}</div>${k === "disk" || /disk|disque/i.test(k) ? `<label class="al-inline">Seuil<input type="number" name="disk_threshold" min="50" max="99" value="${s.disk_threshold}"> %</label>` : ""}</td>
           <td class="nw">${pill(SEV[sev], d.severity[sev])}</td></tr>`).join("")}
@@ -480,12 +480,12 @@ async function pageAlerts(sub) {
         <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><input id="tmto" type="email" placeholder="Adresse pour le test" style="max-width:260px" value="${H.esc(s.recipients[0] || "")}"><button type="button" class="btn ghost" id="tmgo">Envoyer un e-mail de test</button><span class="hint">Enregistre d'abord les réglages.</span></div>
       </div></div>
       <div class="actions" style="margin-top:16px"><button class="btn">Enregistrer</button></div></form>`
-    : `<div class="kpis">${kpi("alerts" in I ? "alerts" : "clock", "7 derniers jours", recent.length, recent.length ? `${recent.filter((l) => l.severity === "critical").length} critique(s)` : "Rien à signaler", recent.some((l) => l.severity === "critical") ? "warn" : "good")}
+    : `<div class="kpis">${kpi("alerts" in I ? "alerts" : "clock", "7 derniers jours", recent.length, recent.length ? `${recent.filter((l) => l.severity === "critical").length} urgente(s)` : "Rien à signaler", recent.some((l) => l.severity === "critical") ? "warn" : "good")}
         ${kpi("clock", "Dernière alerte", d.log[0] ? fmtDT(d.log[0].at) : "Aucune", d.log[0] ? H.esc(d.log[0].title) : "")}
         ${kpi("check", "Surveillances actives", Object.values(s.events).filter(Boolean).length, `sur ${Object.keys(d.events).length}`)}</div>
-      <div class="panel"><div class="filters"><div class="seg" id="allvl">${[["", "Toutes"], ["critical", "Critiques"], ["warning", "Attention"]].map(([k, l]) => `<label class="${lvl === k ? "on" : ""}"><input type="radio" name="allvl" value="${k}" ${lvl === k ? "checked" : ""}>${l}</label>`).join("")}</div>
+      <div class="panel"><div class="filters"><div class="seg" id="allvl">${[["", "Toutes"], ["critical", "Urgentes"], ["warning", "À surveiller"]].map(([k, l]) => `<label class="${lvl === k ? "on" : ""}"><input type="radio" name="allvl" value="${k}" ${lvl === k ? "checked" : ""}>${l}</label>`).join("")}</div>
         <span class="grow"></span>${d.log.length ? '<button class="btn ghost sm" id="alclr">Vider le journal</button>' : ""}</div>
-        ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Niveau</th><th>Alerte</th><th class="hide-sm">Dernière fois</th><th>Nombre</th></tr></thead><tbody>
+        ${shown.length ? `<div class="table-wrap"><table><thead><tr><th>Importance</th><th>Alerte</th><th class="hide-sm">Dernière fois</th><th>Nombre</th></tr></thead><tbody>
           ${shown.map((g) => `<tr><td class="nw">${pill(SEV[g.severity] || "off", d.severity[g.severity] || g.severity)}</td>
             <td><b>${H.esc(g.title)}</b><div class="s">${H.esc(g.text)}</div></td>
             <td class="hide-sm nw">${fmtDT(g.last)}${g.count > 1 ? `<div class="s">depuis le ${fmtDT(g.first)}</div>` : ""}</td>
@@ -692,7 +692,7 @@ function rcDests(rc, cur, fallback = false) {
 }
 async function pageAi() {
   H.setNav("ai");
-  const [d, rep, rc] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report"), H.api("GET", "/api/ai-settings/receptionist")]);
+  const d = await H.api("GET", "/api/ai-settings");
   const r = d.relay, on = d.settings.enabled;
   const euro = (n) => `${(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
   const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce", report: "bilans et rapports", flow: "routages écrits en français", ivr: "choix du SVI parlé", standardiste: "appels du standardiste IA", standardiste_min: "minutes de standardiste IA" };
@@ -708,8 +708,31 @@ async function pageAi() {
       ${sw("voicemail", d.settings.voicemail, "Transcrire et résumer les messages vocaux", "Chaque nouveau message est écrit en texte avec un résumé d'une phrase : dans l'e-mail, le softphone et l'appli. Environ 0,3 centime la minute.")}
       <div class="note">À prévoir côté client (RGPD) : informer les appelants que les messages sont transcrits automatiquement, par exemple dans l'annonce du répondeur. Les messages passent par le relais Callikoe puis OpenAI, sans y être conservés au-delà du traitement.</div>
       <div class="actions"><button class="btn">Enregistrer</button></div></form></div>
+    <div class="panel"><div class="ph"><h2>Ailleurs dans la console</h2></div><div class="pad stack">
+      <p style="margin:0"><a href="#/gestion/standardiste"><b>Standardiste IA</b></a> : dans Gestion d'appels, avec les routages.</p>
+      <p style="margin:0"><a href="#/rapports"><b>Rapport mensuel au client</b></a> : dans Activité › Rapports.</p></div></div>
+    <div class="panel"><div class="ph"><h2>Essayer</h2></div><div class="pad stack">
+      <div class="row"><input id="aitry" class="grow" value="On est fermés lundi pour inventaire" maxlength="300"><button type="button" class="btn ghost" id="aitryb" ${on ? "" : "disabled"}>Rédiger une annonce</button></div>
+      <p class="hint" style="margin:0">Pour créer une vraie annonce lue par une voix IA, avec ou sans fond musical : <a href="#/gestion/annonces/nouveau">Gestion d'appels › Annonces › Ajouter</a>.</p>
+      <div id="aitryr"></div></div></div>`;
+  onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
+  H.$("#aitry").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); H.$("#aitryb").click(); } };
+  H.$("#aitryb").onclick = async (e) => {
+    e.target.disabled = true; H.$("#aitryr").innerHTML = '<span class="spin"></span>';
+    try { const x = await H.api("POST", "/api/ai/announce-text", { idea: H.$("#aitry").value }); H.$("#aitryr").innerHTML = `<div class="note">« ${H.esc(x.text)} »</div>`; }
+    catch (err) { H.$("#aitryr").innerHTML = `<div class="flash bad">${H.esc(err.message)}</div>`; }
+    e.target.disabled = false;
+  };
+}
+
+
+/** Gestion d'appels › Standardiste IA (top = en-tête et onglets de Gestion d'appels) */
+async function pageReceptionist(top) {
+  const [d, rc] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/receptionist")]);
+  const on = d.settings.enabled;
+  H.app.innerHTML = `${top}${on ? "" : `<div class="flash warn">L'IA est désactivée sur ce PBX : active-la dans <a href="#/ia">Administration › IA</a> pour que le standardiste réponde.</div>`}
     <div class="panel"><div class="ph"><h2><span class="ai-badge">IA</span> Standardiste IA</h2></div><form id="rcf" class="pad stack" novalidate><div class="form-msg"></div>
-      <p class="hint" style="margin:0">Une voix IA répond au téléphone : elle renseigne l'appelant, le transfère vers le bon service ou prend un message. Pour l'utiliser, choisis la destination <b>« Standardiste IA »</b> dans une règle entrante, un routage ou un SVI (par exemple quand c'est fermé ou quand personne ne répond). Environ 5 à 10 centimes la minute d'appel.</p>
+      <p class="hint" style="margin:0">Une voix IA répond au téléphone : elle renseigne l'appelant, le transfère vers le bon service ou prend un message. Pour l'utiliser, choisis la destination <b>« Standardiste IA »</b> dans un routage, une règle entrante ou un SVI. Environ 5 à 10 centimes la minute d'appel.</p>
       <div class="grid2"><label>Nom de l'entreprise<input name="company" value="${H.esc(rc.settings.company)}" maxlength="80" placeholder="Boulangerie Martin"></label>
         <label>Voix<select name="voice">${Object.entries(rc.voices).map(([k, l]) => `<option value="${k}" ${rc.settings.voice === k ? "selected" : ""}>${H.esc(l)}</option>`).join("")}</select></label></div>
       <label>Phrase d'accueil (facultatif)<input name="greeting" value="${H.esc(rc.settings.greeting)}" maxlength="200" placeholder="Boulangerie Martin, bonjour ! Que puis-je pour vous ?"></label>
@@ -717,20 +740,7 @@ async function pageAi() {
       <div><span class="dl">Transferts possibles</span><div id="rctr" class="rc-trs"></div><button type="button" class="btn ghost sm" id="rcadd">+ Ajouter un transfert</button></div>
       <div class="grid2"><label>Messages envoyés à<input name="message_to" value="${H.esc(rc.settings.message_to.join(", "))}" placeholder="accueil@client.fr"><span class="hint">Chaque message pris par l'IA arrive par e-mail et dans « À rappeler » du softphone.</span></label>
         <label>Si l'IA est indisponible<select name="fallback">${rcDests(rc, rc.settings.fallback, true)}</select></label></div>
-      <div class="actions"><button class="btn">Enregistrer</button></div></form></div>
-    <div class="panel"><div class="ph"><h2>Rapport mensuel au client</h2></div><form id="rpf" class="pad stack" novalidate><div class="form-msg"></div>
-      <p class="hint" style="margin:0">Le 1er de chaque mois, le client reçoit par e-mail le bilan du mois écoulé : appels reçus, pris, manqués, attente, jours et heures chargés, appels par personne${on ? ", avec l'analyse et les conseils de l'IA" : ""}. Aux couleurs et au logo du serveur (option Marque blanche), sinon aux couleurs Callikoe.</p>
-      ${sw("enabled", rep.enabled, "Envoyer le rapport chaque mois")}
-      <div class="grid2"><label>Destinataires<input name="recipients" value="${H.esc(rep.recipients.join(", "))}" placeholder="gerant@client.fr, compta@client.fr"><span class="hint">Séparés par des virgules (10 au plus).</span></label>
-        <label>Signé par<input name="signature" value="${H.esc(rep.signature)}" maxlength="80" placeholder="Ex. Télécom Ouest — votre installateur"></label></div>
-      ${sw("ai", rep.ai, "Ajouter l'analyse et les conseils de l'IA", on ? "Environ 1 centime par rapport." : "L'IA doit être activée ci-dessus.")}
-      <p class="s" style="margin:0">${rep.last ? `Dernier envoi : ${H.esc(rep.last.label)}, le ${fmtDT(rep.last.at)} à ${H.esc(rep.last.to.join(", "))}.` : "Pas encore envoyé."}</p>
-      <div class="actions"><a class="btn ghost" href="/api/ai-settings/report/preview" target="_blank" rel="noopener">Aperçu du mois dernier</a><button type="button" class="btn ghost" id="rptest">M'envoyer un essai</button><button class="btn">Enregistrer</button></div></form></div>
-    <div class="panel"><div class="ph"><h2>Essayer</h2></div><div class="pad stack">
-      <div class="row"><input id="aitry" class="grow" value="On est fermés lundi pour inventaire" maxlength="300"><button type="button" class="btn ghost" id="aitryb" ${on ? "" : "disabled"}>Rédiger une annonce</button></div>
-      <p class="hint" style="margin:0">Pour créer une vraie annonce lue par une voix IA, avec ou sans fond musical : <a href="#/gestion/annonces/nouveau">Gestion d'appels › Annonces › Ajouter</a>.</p>
-      <div id="aitryr"></div></div></div>`;
-  onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
+      <div class="actions"><button class="btn">Enregistrer</button></div></form></div>`;
   // Standardiste IA : transferts (nom, description, destination)
   let trs = rc.settings.transfers.map((t) => ({ ...t }));
   const drawTr = () => {
@@ -749,21 +759,30 @@ async function pageAi() {
   onSubmit(H.$("#rcf"), async (f) => {
     const [ft, fg] = String(f.fallback || "hangup:").split(":");
     await H.api("PUT", "/api/ai-settings/receptionist", { company: f.company, voice: f.voice, greeting: f.greeting, info: f.info, message_to: f.message_to, transfers: trs, fallback: { type: ft, target: fg || "" } });
-    ok("Standardiste IA enregistré."); pageAi();
+    ok("Standardiste IA enregistré."); pageReceptionist(top);
   });
-  onSubmit(H.$("#rpf"), async (f) => { await H.api("PUT", "/api/ai-settings/report", { enabled: f.enabled, ai: f.ai, recipients: f.recipients, signature: f.signature }); ok("Rapport mensuel enregistré."); pageAi(); });
+}
+
+/** Activité › Rapports : rapport mensuel envoyé au client */
+async function pageReports() {
+  H.setNav("reports");
+  const [d, rep] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report")]);
+  const on = d.settings.enabled;
+  H.app.innerHTML = head("Rapports", "Bilans d'appels envoyés par e-mail au client.") + `
+    <div class="panel"><div class="ph"><h2>Rapport mensuel au client</h2></div><form id="rpf" class="pad stack" novalidate><div class="form-msg"></div>
+      <p class="hint" style="margin:0">Le 1er de chaque mois, le client reçoit par e-mail le bilan du mois écoulé : appels reçus, pris, manqués, attente, jours et heures chargés, appels par personne${on ? ", avec l'analyse et les conseils de l'IA" : ""}. Aux couleurs et au logo du serveur (option Marque blanche), sinon aux couleurs Callikoe.</p>
+      ${sw("enabled", rep.enabled, "Envoyer le rapport chaque mois")}
+      <div class="grid2"><label>Destinataires<input name="recipients" value="${H.esc(rep.recipients.join(", "))}" placeholder="gerant@client.fr, compta@client.fr"><span class="hint">Séparés par des virgules (10 au plus).</span></label>
+        <label>Signé par<input name="signature" value="${H.esc(rep.signature)}" maxlength="80" placeholder="Ex. Télécom Ouest — votre installateur"></label></div>
+      ${sw("ai", rep.ai, "Ajouter l'analyse et les conseils de l'IA", on ? "Environ 1 centime par rapport." : "L'IA doit être activée ci-dessus.")}
+      <p class="s" style="margin:0">${rep.last ? `Dernier envoi : ${H.esc(rep.last.label)}, le ${fmtDT(rep.last.at)} à ${H.esc(rep.last.to.join(", "))}.` : "Pas encore envoyé."}</p>
+      <div class="actions"><a class="btn ghost" href="/api/ai-settings/report/preview" target="_blank" rel="noopener">Aperçu du mois dernier</a><button type="button" class="btn ghost" id="rptest">M'envoyer un essai</button><button class="btn">Enregistrer</button></div></form></div>`;
+  onSubmit(H.$("#rpf"), async (f) => { await H.api("PUT", "/api/ai-settings/report", { enabled: f.enabled, ai: f.ai, recipients: f.recipients, signature: f.signature }); ok("Rapport mensuel enregistré."); pageReports(); });
   H.$("#rptest").onclick = async (e) => {
     const to = prompt("Envoyer un essai du rapport (mois dernier) à :", H.state?.email || "");
     if (!to) return;
     e.target.disabled = true;
     try { const x = await H.api("POST", "/api/ai-settings/report/test", { to }); alert(`Rapport de ${x.label} envoyé à ${x.to.join(", ")}.`); } catch (err) { alert(err.message); }
-    e.target.disabled = false;
-  };
-  H.$("#aitry").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); H.$("#aitryb").click(); } };
-  H.$("#aitryb").onclick = async (e) => {
-    e.target.disabled = true; H.$("#aitryr").innerHTML = '<span class="spin"></span>';
-    try { const x = await H.api("POST", "/api/ai/announce-text", { idea: H.$("#aitry").value }); H.$("#aitryr").innerHTML = `<div class="note">« ${H.esc(x.text)} »</div>`; }
-    catch (err) { H.$("#aitryr").innerHTML = `<div class="flash bad">${H.esc(err.message)}</div>`; }
     e.target.disabled = false;
   };
 }
@@ -894,5 +913,7 @@ export async function renderAdmin(helpers, page, sub) {
     case "capture": return pageCapture();
     case "import-export": return pageTransfer();
     case "ia": return pageAi();
+    case "standardiste": return pageReceptionist(sub);
+    case "rapports": return pageReports();
   }
 }

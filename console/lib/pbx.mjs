@@ -1157,6 +1157,16 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await db.query(`INSERT INTO pbxmaison_objects (kind, id, number, name, data, updated_by) VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (kind, id) DO UPDATE SET number = EXCLUDED.number, name = EXCLUDED.name, data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by`,
     [kind, newId, v.number, v.name, JSON.stringify(v.data), by || ""]);
+    // Horaires : SDA (routages et règles entrantes) qui les suivent, choisies depuis la fiche des horaires
+    if (kind === "schedule" && Array.isArray(input?.used_by)) {
+      const want = new Set(input.used_by.map(String).filter((x) => /^(flow|rule):[\w-]{1,40}$/.test(x)));
+      const { rows } = await db.query("SELECT kind, id, data->>'schedule' AS schedule FROM pbxmaison_objects WHERE kind IN ('flow', 'rule')");
+      for (const r of rows) {
+        const on = want.has(`${r.kind}:${r.id}`);
+        if (on && r.schedule !== newId) await db.query("UPDATE pbxmaison_objects SET data = jsonb_set(data, '{schedule}', to_jsonb($3::text)), updated_at = now(), updated_by = $4 WHERE kind = $1 AND id = $2", [r.kind, r.id, newId, by || ""]);
+        else if (!on && r.schedule === newId) await db.query("UPDATE pbxmaison_objects SET data = jsonb_set(data, '{schedule}', '\"\"'), updated_at = now(), updated_by = $3 WHERE kind = $1 AND id = $2", [r.kind, r.id, by || ""]);
+      }
+    }
     // Un seul jeu d'horaires « généraux du PBX »
     if (kind === "schedule" && v.data.general) await db.query("UPDATE pbxmaison_objects SET data = jsonb_set(data, '{general}', 'false') WHERE kind = 'schedule' AND id <> $1 AND (data->>'general')::boolean IS TRUE", [newId]);
     await applyDialplan();

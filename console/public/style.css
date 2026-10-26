@@ -1013,3 +1013,27 @@ td.nowrap{white-space:nowrap}
 .gwlinks{display:flex;flex-direction:column;gap:8px}
 .gwlink{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:10px 14px;color:inherit;text-decoration:none}
 .gwlink:hover{border-color:var(--accent)}
+
+/* Gestion d'appels : menu « + Nouveau routage » */
+.newmenu .rm-list{min-width:290px}
+.newmenu .rm-list>a{display:flex;flex-direction:column;gap:2px}
+.newmenu .rm-list>a span{font-size:12.5px;color:var(--muted)}
+
+/* Planning : onglets Scénarios / Semaine / Mois et saisie rapide des horaires */
+.pl-tabs{display:flex;gap:4px;padding:0 16px;border-bottom:1px solid var(--line);margin-top:8px}
+.pl-tabs button{all:unset;cursor:pointer;padding:10px 14px;font-weight:600;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.pl-tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+.pl-tabs .cnt{font-size:11px;background:var(--bg);border-radius:99px;padding:1px 7px;margin-left:4px;color:var(--muted)}
+.pl-quick{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg);margin-bottom:14px}
+.pl-quick input[type=time]{width:auto;padding:6px 8px}
+.pl-qr{display:inline-flex;align-items:center;gap:6px;font-size:14px}
+.pl-qdays{display:inline-flex;gap:4px}
+.pl-qdays label{cursor:pointer;padding:5px 9px;border-radius:8px;border:1px solid var(--line);background:var(--panel,#fff);font-size:13px;font-weight:600;color:var(--muted)}
+.pl-qdays label.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.pl-qdays input{display:none}
+.pl-testsec{border-top:1px solid var(--line)}
+
+/* Horaires : saisie rapide et SDA */
+.sch-quick{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 12px;font-size:14px}
+.sch-quick input[type=time]{width:auto;padding:6px 8px}
+.sch-dids{display:flex;flex-direction:column;gap:6px;margin-top:4px}

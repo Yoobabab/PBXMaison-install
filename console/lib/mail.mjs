@@ -60,7 +60,7 @@ export function voicemailMail({ box, boxName, caller, callerName, at, duration, 
 /** E-mail d'alerte */
 export function alertMail({ title, text, severity, at, pbxName, tz = "Europe/Paris" }) {
   const when = new Date(at || Date.now()).toLocaleString("fr-FR", { timeZone: tz, dateStyle: "short", timeStyle: "short" });
-  const tag = severity === "critical" ? "[Critique] " : severity === "warning" ? "[Attention] " : "";
+  const tag = severity === "critical" ? "[Urgent] " : severity === "warning" ? "[À surveiller] " : "";
   return {
     subject: `${tag}${title} — ${pbxName || "Callikoe"}`,
     text: `${title}\n\n${text}\n\nLe ${when}, sur ${pbxName || "le PBX"}.\nJournal des alertes : console du PBX › Administration › Alertes.`,
