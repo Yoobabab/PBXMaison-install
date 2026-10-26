@@ -1071,9 +1071,10 @@ export async function buildApp({ db, ami } = {}) {
     return r;
   });
   // Sauvegarde 3CX complète : le navigateur extrait le …Db.xml du .zip et l'envoie ici (aperçu, puis import)
-  app.post("/api/transfer-3cx", { preHandler: requireUser, bodyLimit: 16 * 1024 * 1024 }, async (req) => {
+  app.post("/api/transfer-3cx", { preHandler: requireUser, bodyLimit: 60 * 1024 * 1024 }, async (req) => {
     const apply = !!req.body?.apply;
-    const r = await transfer.import3cx(String(req.body?.xml || ""), { apply, consoleRoles: !currentUser(req)?.ext && req.role !== "client", by: currentUser(req).email });
+    const r = await transfer.import3cx(String(req.body?.xml || ""), { apply, consoleRoles: !currentUser(req)?.ext && req.role !== "client", by: currentUser(req).email,
+      files: Array.isArray(req.body?.files) ? req.body.files.map(String) : null, wavs: req.body?.wavs && typeof req.body.wavs === "object" ? req.body.wavs : {} });
     if (apply) audit(req, "import d'une sauvegarde 3CX", true, r.sections.map((s) => `${s.label} : ${s.lines.filter((l) => l.done).length}`).join(", ").slice(0, 300));
     return r;
   });

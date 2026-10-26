@@ -20,7 +20,11 @@ const XML = `﻿<?xml version="1.0" encoding="utf-8"?>
    <VMEmailOptions>Attachment</VMEmailOptions><VMEnabled>True</VMEnabled><VMPIN>1234</VMPIN><Number>101</Number>
    <Properties><DNProperty><Name>MOBILENUMBER</Name><Value>0698765432</Value></DNProperty></Properties></Extension>
   <Extension><Enabled>False</Enabled><FirstName>Bob</FirstName><VMEnabled>False</VMEnabled><Number>102</Number><Properties><DNProperty><Name>DONT_SHOW_EXT_IN_PHBK</Name><Value>1</Value></DNProperty></Properties></Extension>
-  <RingGroup><Name>Accueil</Name><Number>600</Number></RingGroup>
+  <RingGroup><Destination><To>VoiceMail</To><Internal DN="600" /></Destination><Members><Member DN="101" /><Member DN="102" /></Members><Name>Accueil</Name><RingStrategy>Hunt</RingStrategy><RingTime>25</RingTime><Number>600</Number>
+   <Properties><DNProperty><Name>GREETING_DEFAULT</Name><Value>attente.wav</Value></DNProperty></Properties></RingGroup>
+  <IVR><Name>Accueil SVI</Name><PromptFilename>accueil.wav</PromptFilename><Timeout>1</Timeout><TimeoutForwardDN>600</TimeoutForwardDN><TimeoutForwardType>RingGroup</TimeoutForwardType><Number>802</Number>
+   <OutOfOfficeHoursRoute>IVR.803.</OutOfOfficeHoursRoute><BreakTimeRoute>ProceedWithNoExceptions..</BreakTimeRoute></IVR>
+  <IVR><Name>Répondeur</Name><PromptFilename>ferme.wav</PromptFilename><Timeout>1</Timeout><TimeoutForwardType>EndCall</TimeoutForwardType><Number>803</Number></IVR>
   <IVR><Name>PIN</Name><Number>777</Number><Properties><DNProperty><Name>PINPROTECTIONIVR</Name><Value>1</Value></DNProperty></Properties></IVR>
   <ExternalLine><AuthID>33100000001</AuthID><AuthPassword>secret</AuthPassword><DIDNumbers>33100000001:33100000002</DIDNumbers><ExternalNumber>33100000001</ExternalNumber><Gateway>NETW</Gateway>
    <RoutingRules><ExternalLineRule><Conditions><Condition Type="ForwardAll" /></Conditions><ForwardDestinations><AlterDestinationDuringOutOfOfficeHours>True</AlterDestinationDuringOutOfOfficeHours>
@@ -50,7 +54,15 @@ test("sauvegarde 3CX → tableaux d'import Callikoe", () => {
   assert.deepEqual(r.tables.inbound.rows, [["Ligne netw", "0100000001, 0100000002", "Non", "Horaires du bureau (3CX)", "Groupe 600", "Messagerie 101", "", ""]]);
   assert.deepEqual(r.tables.outbound.rows, [["Sortant & national", "", "", "", "netw", "0", "", "Utilisateur"]]);
   assert.deepEqual(r.tables.contacts.rows[0].slice(0, 4), ["Jean", "Test", "ACME", "0412345678"]);
-  assert.deepEqual(r.notes, ["Groupe d'appel 600 « Accueil » : à recréer dans Gestion d'appels."]);
+  const g = r.objects.find((o) => o.number === "600"), ivr = r.objects.find((o) => o.number === "802"), vm = r.objects.find((o) => o.kind === "groupvm");
+  assert.deepEqual(g.input, { strategy: "hunt", ring_time: 25, members: ["101", "102"], greeting: "attente.wav" });
+  assert.deepEqual(g.dests.no_answer, { type: "groupvm", ref: "900", of: "600" });
+  assert.deepEqual(vm, { kind: "groupvm", number: "900", name: "Messagerie Accueil", schedule: "", input: { members: ["101", "102"] }, dests: {} });
+  assert.equal(ivr.schedule, "Horaires du bureau (3CX)");
+  assert.deepEqual(ivr.dests, { invalid: { type: "group", ref: "600" }, closed: { type: "ivr", ref: "803" }, break: { type: "ivr", ref: "803" }, holiday: null });
+  assert.ok(!r.objects.some((o) => o.number === "777"));   // SVI interne de 3CX (code PIN)
+  assert.deepEqual(r.prompts.map((p) => p.file).sort(), ["accueil.wav", "attente.wav", "ferme.wav"]);
+  assert.match(r.notes[0], /messagerie de groupe 900/);
   assert.equal(trunkSlug("Orange Pro Siège"), "orange-pro-siege");
   assert.throws(() => convert3cx("<html/>"), /pas une sauvegarde 3CX/);
 });

@@ -862,7 +862,7 @@ async function pageTransfer() {
   const sel = Object.fromEntries(kinds.map((k) => [k.id, new Set()]));
   H.app.innerHTML = `${head("Import / export", "Récupère tes réglages dans un fichier (s'ouvre dans Excel) ou importe-les d'un autre PBX. Les fichiers exportés par 3CX sont reconnus tout seuls.")}
     <section class="panel tx-full"><div class="tx-fullin pad"><span class="tx-ic">${ic(I.up2, 22)}</span><div class="grow"><h2>Reprendre tout un PBX 3CX</h2>
-        <p>La sauvegarde 3CX (.zip) : utilisateurs et leurs renvois, trunks avec leurs mots de passe, horaires, règles entrantes et sortantes, annuaire. Aperçu avant import.</p></div>
+        <p>La sauvegarde 3CX (.zip) : utilisateurs, renvois et téléphones, trunks avec leurs mots de passe, annonces, horaires, groupes, files d'attente, SVI, règles entrantes et sortantes, annuaire. Aperçu avant import.</p></div>
         <label class="btn tx-file">${ic(I.up2, 16)} Choisir la sauvegarde 3CX…<input type="file" id="tx3cx" accept=".zip,application/zip" hidden></label></div></section>
     <p class="hint tx-tip">Partie par partie : importe dans l'ordre utilisateurs, trunks, puis les règles. Chaque import montre d'abord un aperçu.</p>
     <div class="tx-grid">${kinds.map((k) => `<section class="tx-card" data-k="${k.id}">
@@ -883,9 +883,12 @@ async function pageTransfer() {
     box.innerHTML = '<div class="panel pad"><span class="spin"></span> Lecture de la sauvegarde…</div>';
     box.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
-      const xml = await zipEntryText(f, (n) => /(^|\/)\d*Db\.xml$/i.test(n));
-      if (!xml) throw new Error("Ce .zip ne contient pas de fichier …Db.xml : est-ce bien une sauvegarde 3CX ?");
-      show3cx(box, f.name, xml, await H.api("POST", "/api/transfer-3cx", { xml }));
+      const zip = await openZip(f);
+      const xmlName = zip.names.find((n) => /(^|\/)\d*Db\.xml$/i.test(n));
+      if (!xmlName) throw new Error("Ce .zip ne contient pas de fichier …Db.xml : est-ce bien une sauvegarde 3CX ?");
+      const xml = await zip.text(xmlName);
+      const files = zip.names.filter((n) => /^httpprompts\/[^/]+\.wav$/i.test(n)).map((n) => n.slice(12));
+      show3cx(box, f.name, { xml, files, zip }, await H.api("POST", "/api/transfer-3cx", { xml, files }));
     } catch (err) { box.innerHTML = `<div class="panel pad"><div class="form-msg err" style="display:block">${H.esc(err.message)}</div></div>`; }
   };
   H.app.querySelectorAll(".tx-card").forEach((card) => {
@@ -926,30 +929,32 @@ async function pageTransfer() {
     };
   });
 }
-/** Un fichier d'un .zip, lu dans le navigateur (seul ce fichier est envoyé à la console) */
-async function zipEntryText(file, match) {
+/** Lecture d'un .zip dans le navigateur : liste des fichiers et contenu d'un fichier (seuls les fichiers utiles sont envoyés à la console) */
+async function openZip(file) {
   const buf = new Uint8Array(await file.arrayBuffer()), dv = new DataView(buf.buffer);
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
   if (eocd < 0) throw new Error("Fichier .zip illisible.");
   let p = dv.getUint32(eocd + 16, true);
-  const n = dv.getUint16(eocd + 10, true);
+  const n = dv.getUint16(eocd + 10, true), entries = new Map();
   for (let k = 0; k < n && dv.getUint32(p, true) === 0x02014b50; k++) {
     const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
-    const name = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + nl));
+    entries.set(new TextDecoder().decode(buf.subarray(p + 46, p + 46 + nl)), { method, csize, off });
     p += 46 + nl + xl + cl;
-    if (!match(name)) continue;
-    const start = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
-    const data = buf.subarray(start, start + csize);
-    if (method === 0) return new TextDecoder().decode(data);
-    if (method !== 8) throw new Error("Compression du .zip non prise en charge.");
-    const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
-    return new TextDecoder().decode(out);
   }
-  return null;
+  const bytes = async (name) => {
+    const e = entries.get(name); if (!e) return null;
+    const start = e.off + 30 + dv.getUint16(e.off + 26, true) + dv.getUint16(e.off + 28, true);
+    const data = buf.subarray(start, start + e.csize);
+    if (e.method === 0) return data;
+    if (e.method !== 8) throw new Error("Compression du .zip non prise en charge.");
+    return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  };
+  return { names: [...entries.keys()], bytes, text: async (name) => new TextDecoder().decode(await bytes(name)) };
 }
+const b64of = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
 /** Aperçu / résultat de l'import d'une sauvegarde 3CX : une partie par bloc */
-function show3cx(box, name, xml, r) {
+function show3cx(box, name, src, r) {
   const ready = r.sections.reduce((a, s) => a + s.counts.create + s.counts.update, 0);
   const sec = (s) => {
     const done = s.lines.filter((l) => l.done).length;
@@ -974,7 +979,11 @@ function show3cx(box, name, xml, r) {
   if (go) go.onclick = async () => {
     if (!confirm("Importer la sauvegarde 3CX dans ce PBX ?\nLes fiches qui existent déjà (même numéro de poste, même nom de trunk ou de règle) sont mises à jour.")) return;
     go.disabled = true; go.innerHTML = '<span class="spin"></span> Import en cours…';
-    try { show3cx(box, name, xml, await H.api("POST", "/api/transfer-3cx", { xml, apply: true })); }
+    try {
+      const wavs = {};
+      for (const p of r.prompts || []) { const b = await src.zip.bytes(`httpprompts/${p}`); if (b) wavs[p] = b64of(b); }
+      show3cx(box, name, src, await H.api("POST", "/api/transfer-3cx", { xml: src.xml, files: src.files, wavs, apply: true }));
+    }
     catch (e) { go.disabled = false; go.textContent = "Réessayer"; alert(e.message); }
   };
 }

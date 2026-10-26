@@ -574,56 +574,148 @@ export function createTransfer({ pbx, admin }) {
    * Sauvegarde 3CX complète (texte du fichier …Db.xml) : aperçu ou import de chaque partie, dans l'ordre
    * trunks → utilisateurs (et leurs renvois) → horaires → règles entrantes → règles sortantes → annuaire.
    */
-  async function import3cx(xml, { apply = false, consoleRoles = false, by = "" } = {}) {
+  async function import3cx(xml, { apply = false, consoleRoles = false, by = "", files = null, wavs = {} } = {}) {
     let conv;
     try { conv = convert3cx(String(xml || ""), { cc: pbx.countryCode(), templates: pbx.templates() }); }
     catch (e) { throw new UserError(e.message, "file"); }
     const T = conv.tables;
     const csv = (k) => writeCsv(T[k].headers, T[k].rows);
     const sections = [];
+    const section = (kind, label, lines) => sections.push({ kind, label, applied: apply, lines,
+      counts: { create: lines.filter((l) => l.action === "create").length, update: lines.filter((l) => l.action === "update").length, error: lines.filter((l) => l.action === "error").length } });
     const run = async (kind, label, opts = {}) => {
       if (!T[kind].rows.length) return null;
       const r = await importKind(kind, csv(kind), { apply, consoleRoles, by, ...opts });
       sections.push({ ...r, label });
       return r;
     };
-    const existingSched = (await pbx.loadObjects()).filter((o) => o.kind === "schedule");
-    const pending = {
-      users: T.users.rows.map((r) => r[0]),
-      trunks: T.trunks.rows.map((r) => r[0]),
-      objects: conv.schedules.map((x, i) => ({ kind: "schedule", id: `__3cx${i}`, name: x.name, data: x.data })),
-    };
+    const objects0 = await pbx.loadObjects();
+    const existingSched = objects0.filter((o) => o.kind === "schedule");
+    const pendingObj = [
+      ...conv.schedules.map((x, i) => ({ kind: "schedule", id: `__3cx_s${i}`, name: x.name, data: x.data })),
+      ...conv.objects.map((o) => ({ kind: o.kind, id: `__3cx_${o.kind}_${o.number}`, number: o.number, name: o.name, data: {} })),
+    ];
+    const pending = { users: T.users.rows.map((r) => r[0]), trunks: T.trunks.rows.map((r) => r[0]), objects: pendingObj };
+
     if (consoleRoles) await run("trunks", "Trunks (avec leurs mots de passe)");
     const users = await run("users", "Utilisateurs");
+    const okUsers = new Set((users?.lines || []).filter((l) => l.action !== "error").map((l) => l.label.split(" ")[0]));
     // Renvois des fiches (sans réponse, occupé, absent) : après la création des postes
     if (conv.forwards.length) {
-      const ok = new Set((users?.lines || []).filter((l) => l.action !== "error").map((l) => l.label.split(" ")[0]));
       const lines = [];
       for (const f of conv.forwards) {
-        const l = { line: 0, label: `${f.ext} : ${Object.entries(f.forwarding).map(([k, v]) => k === "timeout" ? `${v} s` : `${{ no_answer: "sans réponse", busy: "occupé", away: "absent" }[k]} → ${v.type === "external" ? v.target : v.type === "extension" ? `poste ${v.target}` : v.type === "voicemail" ? "messagerie" : "raccrocher"}`).join(", ")}`,
-          action: "update", warnings: [], error: ok.has(f.ext) ? "" : "Poste non importé", done: false };
+        const l = { line: 0, label: `${f.ext} : ${Object.entries(f.forwarding).map(([k, v]) => k === "timeout" ? `sonne ${v} s` : `${{ no_answer: "sans réponse", busy: "occupé", away: "absent" }[k]} → ${v.type === "external" ? v.target : v.type === "extension" ? `poste ${v.target}` : v.type === "voicemail" ? "messagerie" : "raccrocher"}`).join(", ")}`,
+          action: "update", warnings: [], error: okUsers.has(f.ext) ? "" : "Poste non importé", done: false };
         if (apply && !l.error) { try { await pbx.updateUser(f.ext, { forwarding: f.forwarding }, by); l.done = true; } catch (e) { l.error = e.message; } }
         if (l.error) l.action = "error";
         lines.push(l);
       }
-      sections.push({ kind: "forwards", label: "Renvois des utilisateurs", applied: apply, lines, counts: { create: 0, update: lines.filter((l) => l.action === "update").length, error: lines.filter((l) => l.action === "error").length } });
+      section("forwards", "Renvois des utilisateurs", lines);
     }
-    // Horaires du bureau
+    // Annonces (.wav de la sauvegarde) : reprises telles quelles (3CX les garde déjà au format téléphone)
+    const promptId = new Map();
+    if (conv.prompts.length) {
+      const lines = [];
+      for (const p of conv.prompts) {
+        const cur = objects0.find((o) => o.kind === "prompt" && norm(o.name) === norm(p.name));
+        const inZip = !files || files.includes(p.file);
+        const l = { line: 0, label: p.name, action: cur ? "update" : "create", warnings: [], error: inZip ? "" : "Fichier absent de la sauvegarde", done: false };
+        if (apply && !l.error) {
+          try {
+            const b64 = wavs[p.file];
+            if (!b64) throw new UserError("Fichier audio non reçu");
+            const o = await pbx.savePrompt(cur?.id || null, p.name, Buffer.from(b64, "base64"), by);
+            promptId.set(p.file, o.id); l.done = true;
+          } catch (e) { l.error = e.message; }
+        } else if (!l.error) promptId.set(p.file, cur?.id || `__3cx_p_${p.file}`);
+        if (l.error) l.action = "error";
+        lines.push(l);
+      }
+      section("prompts", "Annonces", lines);
+    }
+    // Horaires (un jeu par service 3CX)
+    const schedId = new Map();
     if (conv.schedules.length) {
       const hasGeneral = existingSched.some((o) => o.data.general);
       const lines = [];
-      for (const x of conv.schedules) {
+      for (const [i, x] of conv.schedules.entries()) {
         const cur = existingSched.find((o) => norm(o.name) === norm(x.name));
         const l = { line: 0, label: x.name, action: cur ? "update" : "create", warnings: hasGeneral && x.data.general ? ["Les horaires généraux du PBX restent ceux déjà choisis"] : [], error: "", done: false };
-        if (apply) { try { await pbx.saveObject("schedule", cur?.id || null, { ...x.data, general: x.data.general && !hasGeneral }, by); l.done = true; } catch (e) { l.error = e.message; l.action = "error"; } }
+        if (apply) { try { const o = await pbx.saveObject("schedule", cur?.id || null, { ...x.data, general: x.data.general && !hasGeneral }, by); schedId.set(x.name, o.id); l.done = true; } catch (e) { l.error = e.message; l.action = "error"; } }
+        else schedId.set(x.name, cur?.id || `__3cx_s${i}`);
         lines.push(l);
       }
-      sections.push({ kind: "schedules", label: "Horaires", applied: apply, lines, counts: { create: lines.filter((l) => l.action === "create").length, update: lines.filter((l) => l.action === "update").length, error: lines.filter((l) => l.action === "error").length } });
+      section("schedules", "Horaires", lines);
+    }
+    // Groupes, files, SVI, messageries de groupe : créés d'abord sans destinations (ils se renvoient les uns vers les autres), puis complétés
+    if (conv.objects.length) {
+      const KIND_FR = { group: "Groupe", queue: "File", ivr: "SVI", groupvm: "Messagerie de groupe" };
+      const allObjects = () => pbx.loadObjects();
+      let objs = apply ? await allObjects() : [...objects0, ...pendingObj.filter((p) => p.kind !== "schedule")];
+      const idOf = (kind, number) => objs.find((o) => o.kind === kind && o.number === number)?.id;
+      const lines = [];
+      const existingUsers = new Set((await pbx.loadUsers()).map((u) => u.id));
+      const hasUser = (id) => existingUsers.has(id) || okUsers.has(id);
+      const destOf = (s) => {
+        if (!s) return null;
+        if (s.type === "hangup") return { type: "hangup", target: "" };
+        if (s.type === "external") return { type: "external", target: s.ref };
+        if (s.type === "user" || s.type === "user_vm") { if (!hasUser(s.ref)) throw new UserError(`Poste ${s.ref} introuvable`); return { type: s.type, target: s.ref }; }
+        const id = idOf(s.type, s.ref);
+        if (!id) throw new UserError(`${KIND_FR[s.type]} ${s.ref} introuvable`);
+        return { type: s.type, target: id };
+      };
+      // 1er passage : création (ou mise à jour) avec nom, numéro et membres
+      for (const o of conv.objects) {
+        const cur = objects0.find((x) => x.kind === o.kind && x.number === o.number);
+        const clash = !cur && (existingUsers.has(o.number) && !okUsers.has(o.number) ? `utilisateur ${o.number}` : objects0.find((x) => x.number === o.number && x.kind !== o.kind)?.name);
+        const l = { line: 0, label: `${KIND_FR[o.kind]} ${o.number} · ${o.name}`, action: cur ? "update" : "create", warnings: [], error: "", done: false, o, cur };
+        if (!/^[1-9]\d{2}$/.test(o.number)) l.error = "Numéro interne : 3 chiffres, de 100 à 999.";
+        else if (clash) l.error = `Numéro ${o.number} déjà pris (${clash}).`;
+        const members = (o.input.members || []).filter(hasUser);
+        if (members.length < (o.input.members || []).length) l.warnings.push(`Membres non importés : ${(o.input.members || []).filter((m) => !hasUser(m)).join(", ")}`);
+        l.base = { name: o.name, number: o.number, ...(o.input.members ? { members } : {}) };
+        if (apply && !l.error) { try { const r = await pbx.saveObject(o.kind, cur?.id || null, l.base, by); l.id = r.id; } catch (e) { l.error = e.message; } }
+        lines.push(l);
+      }
+      if (apply) objs = await allObjects();
+      // 2e passage : annonces, horaires et destinations
+      for (const l of lines) {
+        if (l.error) continue;
+        const o = l.o;
+        try {
+          const input = { ...l.base };
+          for (const f of ["greeting", "moh", "prompt"]) if (o.input[f] !== undefined) {
+            const pid = o.input[f] ? promptId.get(o.input[f]) : "";
+            if (o.input[f] && !pid) l.warnings.push(`Annonce non reprise : ${o.input[f]}`);
+            input[f] = pid && !pid.startsWith("__3cx_") ? pid : "";
+          }
+          for (const f of ["strategy", "ring_time", "member_timeout", "max_wait", "wrapup", "announce_position", "announce_holdtime", "timeout", "retries", "direct_dial"]) if (o.input[f] !== undefined) input[f] = o.input[f];
+          if (o.schedule) { const sid = schedId.get(o.schedule); if (sid) input.schedule = sid.startsWith("__3cx_") ? undefined : sid; }
+          const options = {};
+          for (const [k, s] of Object.entries(o.dests)) {
+            if (k.startsWith("option:")) options[k.slice(7)] = destOf(s);
+            else if (s !== undefined) input[k] = destOf(s);
+          }
+          if (o.kind === "ivr") input.options = options;
+          if (!apply) {
+            const ctx = { users: new Map([...existingUsers, ...okUsers].map((id) => [id, defaultUser(id)])), objects: objs, cc: pbx.countryCode(), selfId: l.cur?.id };
+            if (input.schedule === undefined) delete input.schedule;
+            validateObject(o.kind, { ...input, ...Object.fromEntries(["greeting", "moh", "prompt"].map((f) => [f, undefined])) }, l.cur?.data, ctx);
+          } else {
+            if (input.schedule === undefined) delete input.schedule;
+            await pbx.saveObject(o.kind, l.id, input, by);
+            l.done = true;
+          }
+        } catch (e) { l.error = e.message; }
+      }
+      section("objects", "Groupes, files d'attente, SVI", lines.map(({ o, cur, base, id, ...l }) => ({ ...l, action: l.error ? "error" : l.action })));
     }
     await run("inbound", "Règles entrantes (SDA)", { pending });
     if (consoleRoles) await run("outbound", "Règles sortantes", { pending });
     await run("contacts", "Annuaire");
-    return { version: conv.version, applied: apply, sections, notes: [...conv.notes, ...(consoleRoles ? [] : ["Trunks et règles sortantes : réservés à l'installateur, non importés."])] };
+    return { version: conv.version, applied: apply, sections, prompts: conv.prompts.map((p) => p.file),
+      notes: [...conv.notes, ...(consoleRoles ? [] : ["Trunks et règles sortantes : réservés à l'installateur, non importés."])] };
   }
 
   return { items, exportKind, importKind, import3cx };
