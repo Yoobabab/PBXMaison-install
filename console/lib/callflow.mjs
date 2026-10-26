@@ -231,6 +231,22 @@ export function validateObject(kind, input, current, ctx) {
     if (!d.pin) d.pin = String(Math.floor(100000 + Math.random() * 900000));
     if (input.members !== undefined) d.members = validMembers(input.members, ctx, "members");
   } else if (kind === "schedule") {
+    // Pauses en plus de celles entre deux plages (ex. 18:00-18:30 après la fermeture) : même format que la semaine
+    if (input.pauses !== undefined) {
+      const pauses = {};
+      for (const [day, label] of DAYS) {
+        const list = [];
+        for (const r of input.pauses?.[day] || []) {
+          const [a, b] = [String(r?.[0] || "").trim(), String(r?.[1] || "").trim() === "23:59" ? "24:00" : String(r?.[1] || "").trim()];
+          if (!a && !b) continue;
+          if (!HHMM.test(a) || !(HHMM.test(b) || b === "24:00") || toMin(b) <= toMin(a)) throw new UserError(`${label} : pause invalide (HH:MM, fin après le début).`, `pauses.${day}`);
+          list.push([a, b]);
+        }
+        if (list.length > 4) throw new UserError(`${label} : 4 pauses au plus.`, `pauses.${day}`);
+        if (list.length) pauses[day] = list.sort((x, y) => toMin(x[0]) - toMin(y[0]));
+      }
+      d.pauses = pauses;
+    }
     if (input.week !== undefined) {
       const week = {};
       for (const [day, label] of DAYS) {
@@ -502,6 +518,7 @@ export function scheduleState(schedule, date = new Date(), tz = "Europe/Paris") 
   const now = Number(parts.hour) * 60 + Number(parts.minute);
   const ranges = schedule.week[wd] || [];
   if (ranges.some(([a, b]) => now >= toMin(a) && now < toMin(b))) return "open";
+  if ((schedule.pauses?.[wd] || []).some(([a, b]) => now >= toMin(a) && now < toMin(b))) return "break";
   // Entre deux plages du même jour : pause (déjeuner…)
   if (ranges.length > 1 && now >= toMin(ranges[0][0]) && now < toMin(ranges.at(-1)[1])) return "break";
   return "closed";
@@ -736,6 +753,7 @@ export function buildCallflowDialplan(m) {
     L.push(` same => n,Set(LOCAL(D)=\${STRFTIME(\${EPOCH},${tz},%Y%m%d)})`, ` same => n,GotoIf(\${DIALPLAN_EXISTS(sched-${o.id}-closed,\${D},1)}?holiday)`);
     for (const [day] of DAYS) for (const [a, b] of d.week[day] || []) L.push(` same => n,GotoIfTime(${a}-${minusOne(b)},${day},*,*,${tz}?open)`);
     for (const [day] of DAYS) { const r = d.week[day] || []; if (r.length > 1) L.push(` same => n,GotoIfTime(${r[0][0]}-${minusOne(r.at(-1)[1])},${day},*,*,${tz}?break)`); }
+    for (const [day] of DAYS) for (const [a, b] of d.pauses?.[day] || []) L.push(` same => n,GotoIfTime(${a}-${minusOne(b)},${day},*,*,${tz}?break)`);
     L.push(" same => n,Return(closed)", " same => n(open),Return(open)", " same => n(break),Return(break)", " same => n(holiday),Return(holiday)");
     L.push(`[sched-${o.id}-closed]`);
     for (const [day, label] of closedDays(d, year, year + 2)) L.push(`exten => ${day.replace(/-/g, "")},1,NoOp(${clean(label, 40)})`);
@@ -1107,7 +1125,7 @@ function expandRule(o, m, path, depth) {
   const tag = (s) => (s === now ? " ← maintenant" : "");
   nd.children.push({ label: `Ouvert${tag("open")}`, node: expand(d.open, m, path, depth + 1), current: now === "open" });
   nd.children.push({ label: `Fermé${tag("closed")}`, node: expand(d.closed, m, path, depth + 1), current: now === "closed" });
-  if (Object.values(sched.data.week).some((r) => r.length > 1)) nd.children.push({ label: `Pause${tag("break")}`, node: expand(d.break || d.closed, m, path, depth + 1), current: now === "break" });
+  if (Object.values(sched.data.week).some((r) => r.length > 1) || Object.values(sched.data.pauses || {}).some((r) => r.length)) nd.children.push({ label: `Pause${tag("break")}`, node: expand(d.break || d.closed, m, path, depth + 1), current: now === "break" });
   nd.children.push({ label: `Jour férié / congés${tag("holiday")}`, node: expand(d.holiday || d.closed, m, path, depth + 1), current: now === "holiday" });
   return nd;
 }

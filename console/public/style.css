@@ -1046,3 +1046,9 @@ td.nowrap{white-space:nowrap}
 .tx-sec{grid-column:auto;padding:0;border-radius:10px}
 .tx-sec>summary{padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .tx-sec .tx-sum{display:inline-flex;gap:6px}
+
+/* Horaires : pauses en plus des plages */
+.week .day .pauses{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-left:144px}
+@media (max-width:700px){.week .day .pauses{margin-left:0}}
+.rng.pz{background:var(--warn-soft);border-radius:8px;padding:2px 6px}
+.rng.pz .s{font-size:12px;font-weight:600;color:var(--warn)}

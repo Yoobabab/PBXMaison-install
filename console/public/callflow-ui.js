@@ -197,7 +197,7 @@ function summary(o) {
     case "planning": return `${d.is_default ? '<span class="pill ok">Par défaut</span> ' : ""}${d.dids.map(fmtP).map(esc).join(", ")}<div class="s">${esc(planningSummary(d, cf))}</div>`;
     case "flow": return `${d.is_default ? '<span class="pill ok">Par défaut</span> ' : ""}${d.dids.map(fmtP).map(esc).join(", ")}<div class="s">${esc(flowSummary(cf, h, d))}</div>`;
     case "rule": return `${d.is_default ? '<span class="pill ok">Par défaut</span> ' : ""}${d.dids.map(fmtP).map(esc).join(", ")}<div class="s">${d.schedule ? `Horaires « ${esc(cf.objects.find((x) => x.id === d.schedule)?.name || "?")} »` : "Toujours ouvert"} → ${esc(destText(d.open))}</div>`;
-    case "schedule": return `${esc(describeWeek(d.week))}<div class="s">${d.holidays_fr ? "Jours fériés fermés" : "Jours fériés ouverts"}${d.holidays.length ? ` · ${d.holidays.length} période${d.holidays.length > 1 ? "s" : ""} de congés` : ""}${d.override !== "auto" ? ` · <strong>forcé ${d.override === "open" ? "ouvert" : "fermé"}</strong>` : ""}</div>`;
+    case "schedule": return `${esc(describeWeek(d.week))}${Object.values(d.pauses || {}).some((x) => x.length) ? ` <span class="pill off">+ pauses</span>` : ""}<div class="s">${d.holidays_fr ? "Jours fériés fermés" : "Jours fériés ouverts"}${d.holidays.length ? ` · ${d.holidays.length} période${d.holidays.length > 1 ? "s" : ""} de congés` : ""}${d.override !== "auto" ? ` · <strong>forcé ${d.override === "open" ? "ouvert" : "fermé"}</strong>` : ""}</div>`;
     case "group": return `${mem(d.members)}<div class="s">${esc(cf.options.group_strategies[d.strategy])} · ${d.ring_time} s → ${esc(destText(d.no_answer))}</div>`;
     case "queue": return `${mem(d.members)}<div class="s">${esc(cf.options.queue_strategies[d.strategy])} · attente max ${d.max_wait} s → ${esc(destText(d.no_answer))}</div>`;
     case "ivr": return `${Object.keys(d.options).map((k) => `<strong>${esc(k)}</strong> ${esc(destText(d.options[k]))}`).join(" · ") || '<span class="s">aucune touche</span>'}`;
@@ -262,7 +262,10 @@ function scheduleNow(d) {
   if (d.holidays_fr && frHolidays(Number(parts.year)).includes(day)) return "holiday";
   const now = Number(parts.hour) * 60 + Number(parts.minute);
   const m = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
-  return (d.week[parts.weekday.toLowerCase().slice(0, 3)] || []).some(([a, b]) => now >= m(a) && now < m(b)) ? "open" : "closed";
+  const wd = parts.weekday.toLowerCase().slice(0, 3), r = d.week[wd] || [];
+  if (r.some(([a, b]) => now >= m(a) && now < m(b))) return "open";
+  if ((d.pauses?.[wd] || []).some(([a, b]) => now >= m(a) && now < m(b)) || (r.length > 1 && now >= m(r[0][0]) && now < m(r.at(-1)[1]))) return "break";
+  return "closed";
 }
 function frHolidays(y) {
   const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
@@ -557,7 +560,7 @@ function collect(form, kind) {
   }
   if (raw.options) out.options = Object.fromEntries(Object.entries(raw.options).map(([k, v]) => [k, dest(v)]).filter(([, v]) => v));
   if (raw.members !== undefined) out.members = raw.members ? raw.members.split(",") : [];
-  if (kind === "schedule") { out.week = readWeek(form); out.holidays = readHolidays(form); out.used_by = [...form.querySelectorAll("[name=_used]:checked")].map((x) => x.value); delete out._used; delete out.wk; delete out.hol; }
+  if (kind === "schedule") { out.week = readWeek(form); out.holidays = readHolidays(form); out.used_by = [...form.querySelectorAll("[name=_used]:checked")].map((x) => x.value); out.pauses = Object.fromEntries(Object.entries(form._pauses || {}).filter(([, v]) => v.length)); delete out._used; delete out.wk; delete out.hol; }
   if (kind === "rule") { out.dids = [...form.querySelectorAll("[data-did].on")].map((x) => x.dataset.did).concat(String(raw.dids_extra || "").split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean)); delete out.dids_extra; }
   return out;
 }
@@ -573,7 +576,7 @@ function scheduleFields(d, id) {
     <label class="check"><input type="checkbox" name="general" ${d.general ? "checked" : ""}> <strong>Horaires généraux du PBX</strong> <span class="hint">(proposés d'office aux nouveaux routages ; un seul jeu d'horaires peut l'être)</span></label>
     <div class="cf-sec"><span class="dl">Mode</span>
       <div class="seg" id="ovr">${[["auto", "Automatique (selon les horaires)"], ["open", "Forcer ouvert"], ["closed", "Forcer fermé"]].map(([k, l]) => `<label class="${d.override === k ? "on" : ""}"><input type="radio" name="override" value="${k}" ${d.override === k ? "checked" : ""}>${l}</label>`).join("")}</div>
-      <p class="hint">En ce moment : <strong>${st === "open" ? "ouvert" : st === "holiday" ? "jour férié / congés" : "fermé"}</strong> (fuseau ${esc(cf.timezone)}).</p></div>
+      <p class="hint">En ce moment : <strong>${st === "open" ? "ouvert" : st === "holiday" ? "jour férié / congés" : st === "break" ? "pause" : "fermé"}</strong> (fuseau ${esc(cf.timezone)}).</p></div>
     <div class="cf-sec"><span class="dl">Semaine</span>
       <div class="sch-quick">De <input type="time" id="sq1" value="09:00"> à <input type="time" id="sq2" value="12:00"> et de <input type="time" id="sq3" value="14:00"> à <input type="time" id="sq4" value="18:00">
         <button type="button" class="btn sm" id="sqgo">Appliquer du lundi au vendredi</button><button type="button" class="btn ghost sm" id="sqgo6">Lundi → samedi</button></div>
@@ -586,6 +589,7 @@ function scheduleFields(d, id) {
 const DAY_LONG = { mon: "Lundi", tue: "Mardi", wed: "Mercredi", thu: "Jeudi", fri: "Vendredi", sat: "Samedi", sun: "Dimanche" };
 function wireSchedule(form, d) {
   const week = structuredClone(d.week);
+  const pauses = structuredClone(d.pauses || {});
   const hols = structuredClone(d.holidays || []);
   const drawDay = (day) => {
     const box = form.querySelector(`[data-day=${day}]`);
@@ -597,6 +601,14 @@ function wireSchedule(form, d) {
     box.querySelectorAll("[data-b]").forEach((x) => x.onchange = () => { week[day][x.dataset.b][1] = x.value; });
     box.querySelectorAll("[data-rr]").forEach((x) => x.onclick = () => { week[day].splice(Number(x.dataset.rr), 1); drawDay(day); });
     box.querySelector("[data-ar]")?.addEventListener("click", () => { const last = week[day].at(-1)[1]; week[day].push([last < "14:00" ? "14:00" : last, "18:00"]); drawDay(day); });
+    // Pauses en plus (avant l'ouverture, après la fermeture…) : l'appel suit la destination « Pause » du routage
+    const p = pauses[day] || [];
+    box.insertAdjacentHTML("beforeend", `<div class="pauses">${p.map(([a, b], i) => `<span class="rng pz"><span class="s">Pause</span><input type="time" value="${a}" data-pa="${i}"> – <input type="time" value="${b}" data-pb="${i}"><button type="button" class="ic" data-pr="${i}" title="Retirer la pause">✕</button></span>`).join("")}
+      ${p.length < 4 ? '<button type="button" class="btn link sm" data-padd>+ pause</button>' : ""}</div>`);
+    box.querySelectorAll("[data-pa]").forEach((x) => x.onchange = () => { pauses[day][x.dataset.pa][0] = x.value; });
+    box.querySelectorAll("[data-pb]").forEach((x) => x.onchange = () => { pauses[day][x.dataset.pb][1] = x.value; });
+    box.querySelectorAll("[data-pr]").forEach((x) => x.onclick = () => { pauses[day].splice(Number(x.dataset.pr), 1); drawDay(day); });
+    box.querySelector("[data-padd]")?.addEventListener("click", () => { const end = (week[day] || []).at(-1)?.[1] || "18:00"; (pauses[day] ||= []).push([end, end < "23:30" ? `${String(Number(end.slice(0, 2)) + (end.slice(3) === "30" ? 1 : 0)).padStart(2, "0")}:${end.slice(3) === "30" ? "00" : "30"}` : "24:00"]); drawDay(day); });
   };
   Object.keys(DAY_SHORT).forEach(drawDay);
   // Saisie rapide : les horaires tapés remplacent ceux des jours choisis (2e plage facultative)
@@ -618,7 +630,7 @@ function wireSchedule(form, d) {
   drawHols();
   form.querySelector("#addhol").onclick = () => { const t = new Date().toISOString().slice(0, 10); hols.push({ from: t, to: t, label: "" }); drawHols(); };
   form.querySelectorAll("#ovr input").forEach((i) => i.onchange = () => form.querySelectorAll("#ovr label").forEach((l) => l.classList.toggle("on", l.contains(i) ? i.checked : false)));
-  form._week = week; form._hols = hols;
+  form._week = week; form._hols = hols; form._pauses = pauses;
 }
 const readWeek = (form) => form._week;
 const readHolidays = (form) => form._hols;

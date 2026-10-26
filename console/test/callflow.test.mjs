@@ -187,3 +187,15 @@ test("routage (éditeur visuel) : validation, génération, traceur", () => {
   assert.match(JSON.stringify(r), /Étape 2 · Sonne 30 s/);
   assert.deepEqual(referencesTo("queue", "q1", m.objects).map((x) => x.id), ["i1", "f1"]);
 });
+
+test("horaires : pauses en plus (après la fermeture), validées, dans le dialplan et l'état", () => {
+  const ctx = { users: new Map(), objects: [], cc: "33" };
+  const r = validateObject("schedule", { name: "Bureau", week: { mon: [["08:00", "18:00"]] }, pauses: { mon: [["18:00", "18:30"]], tue: [] } }, null, ctx);
+  const sched = r.data || r;
+  assert.deepEqual(sched.pauses, { mon: [["18:00", "18:30"]] });
+  const at = (iso) => scheduleState(sched, new Date(iso));
+  assert.equal(at("2026-10-26T17:10:00Z"), "break");    // lundi 18 h 10 à Paris
+  assert.equal(at("2026-10-26T17:40:00Z"), "closed");   // 18 h 40
+  assert.equal(at("2026-10-26T10:00:00Z"), "open");
+  assert.throws(() => validateObject("schedule", { name: "X", pauses: { mon: [["18:30", "18:00"]] } }, null, ctx), /pause invalide/);
+});

@@ -116,7 +116,7 @@ export function convert3cx(xml, { cc = "33", templates = [] } = {}) {
     const week = weekOf(hours);
     // Pauses 3CX : Callikoe ne connaît que la pause entre deux plages d'une même journée
     const brk = weekOf(kid(g, "BreakTime") || { children: [] });
-    const outside = [];
+    const pauses = {};
     for (const [d, list] of Object.entries(brk)) {
       const w = week[d];
       for (const [a, b] of list) {
@@ -128,15 +128,14 @@ export function convert3cx(xml, { cc = "33", templates = [] } = {}) {
             else { if (toMin(a) > toMin(x)) cut.push([x, a]); if (toMin(b) < toMin(y)) cut.push([b, y]); }
           }
           week[d] = cut;
-        } else outside.push(`${DAY_FR[d]} ${a}-${b}`);
+        } else (pauses[d] ||= []).push([a, b]);   // avant l'ouverture ou après la fermeture : pause à part
       }
     }
-    if (outside.length) notes.push(`${name} : pauses 3CX en dehors des heures d'ouverture (${[...new Set(outside.map((x) => x.split(" ")[1]))].join(", ")}) traitées comme « fermé ».`);
     const holidays = kids(g, "OfficeHolidays/Holiday").concat(kids(t, "OfficeHolidays/Holiday")).map((h) => {
       const from = (txt(h, "DateTimeRangeBegin") || h.attrs.Begin || "").slice(0, 10), to = (txt(h, "DateTimeRangeEnd") || h.attrs.End || "").slice(0, 10) || from;
       return /^\d{4}-\d\d-\d\d$/.test(from) ? { from, to: /^\d{4}-\d\d-\d\d$/.test(to) ? to : from, label: (txt(h, "Name") || "").slice(0, 60) } : null;
     }).filter(Boolean);
-    schedules.push({ name, data: { name, week, holidays_fr: true, holidays, override: "auto", general: name === OFFICE } });
+    schedules.push({ name, data: { name, week, pauses, holidays_fr: true, holidays, override: "auto", general: name === OFFICE } });
   }
   const schedFor = (dn) => (schedules.some((s) => s.name === deptOf.get(dn)) ? deptOf.get(dn) : schedules[0]?.name || "");
 
