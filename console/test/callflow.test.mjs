@@ -69,7 +69,7 @@ test("plan de numérotation généré", () => {
   const m = model();
   const t = buildCallflowDialplan(m);
   assert.match(t, /exten => 600,1,NoOp\(Groupe 600 Accueil\)/);
-  assert.match(t, /Dial\(PJSIP\/201&PJSIP\/201-web&PJSIP\/202&PJSIP\/202-web,20,tb\(pickup-mark\^s\^1\)\)/); // 203 absent : exclu
+  assert.match(t, /Dial\(PJSIP\/201&PJSIP\/201-web&Local\/201@cx-app\/n&PJSIP\/202&PJSIP\/202-web&Local\/202@cx-app\/n,20,tb\(pickup-mark\^s\^1\)\)/); // 203 absent : exclu
   assert.match(t, /Set\(__CID_ORIG=\$\{CALLERID\(name\)\}\)\n same => n\(cidok\),Set\(CALLERID\(name\)=\[Acc\] \$\{CID_ORIG\}\)/);   // préfixe devant le nom d'origine
   assert.match(t, /Goto\(callflow,900,1\)/);
   assert.match(t, /Queue\(q700,t,,,120\)/);
@@ -136,7 +136,7 @@ test("groupe cyclique, heures de bureau d'un groupe, SDA directe, file avancée"
   const t = buildCallflowDialplan(m);
   assert.match(t, /Set\(MEMBERS=201&202\)/);
   assert.match(t, /Set\(GLOBAL\(RR_600\)=\$\[\$\{I\} \+ 1\]\)/);
-  assert.match(t, /Dial\(PJSIP\/\$\{M\}&PJSIP\/\$\{M\}-web,20/);
+  assert.match(t, /Dial\(PJSIP\/\$\{M\}&PJSIP\/\$\{M\}-web&Local\/\$\{M\}@cx-app\/n,20/);
   assert.match(t, /exten => 600,1[\s\S]*Gosub\(sched-s1,s,1\)[\s\S]*GotoIf\(\$\["\$\{GOSUB_RETVAL\}" = "closed"\]\?of-closed\)/);
   assert.doesNotMatch(t, /\?of-break/); // pause : accepter quand même
   assert.match(t, /n\(of-holiday\),Answer\(\)\n same => n,Playback\(\/var\/lib\/pbxmaison\/sounds\/p1\)\n same => n,Goto\(callflow,900,1\)/);
@@ -177,8 +177,8 @@ test("routage (éditeur visuel) : validation, génération, traceur", () => {
   const t = buildCallflowDialplan(m);
   assert.match(t, /\[did-rules\]\nexten => 0465001545,1,Goto\(flow-f1,s,1\)/);
   assert.match(t, /\[flow-f1\][\s\S]*GotoIf\(\$\["\$\{GOSUB_RETVAL\}" = "closed"\]\?b-closed\)/);
-  assert.match(t, /n\(b-open\),NoOp[\s\S]*Playback\(\/var\/lib\/pbxmaison\/sounds\/p1\)\n same => n,Dial\(PJSIP\/201&PJSIP\/201-web,30/);
-  assert.match(t, /Dial\(PJSIP\/201&PJSIP\/201-web&PJSIP\/202&PJSIP\/202-web,15/); // groupe : 203 absent exclu
+  assert.match(t, /n\(b-open\),NoOp[\s\S]*Playback\(\/var\/lib\/pbxmaison\/sounds\/p1\)\n same => n,Dial\(PJSIP\/201&PJSIP\/201-web&Local\/201@cx-app\/n,30/);
+  assert.match(t, /Dial\(PJSIP\/201&PJSIP\/201-web&Local\/201@cx-app\/n&PJSIP\/202&PJSIP\/202-web&Local\/202@cx-app\/n,15/); // groupe : 203 absent exclu
   assert.match(t, /Queue\(q700,t,,,120\)\n same => n,VoiceMail\(201@default,u\)/);
   assert.match(t, /n\(b-closed\),NoOp\(Bureau fermé\)[\s\S]*Hangup\(\)/);
   assert.doesNotMatch(t, /b-break/);

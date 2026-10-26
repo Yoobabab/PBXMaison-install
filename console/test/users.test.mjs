@@ -48,7 +48,7 @@ test("plan de numérotation généré", () => {
   const c = validateUser({ first_name: "Off", options: { disabled: true } }, defaultUser("203"), ctx());
   const conf = buildUsersDialplan([a, b, c]);
   assert.match(conf, /exten => 201,1,NoOp/);
-  assert.match(conf, /Dial\(PJSIP\/201&PJSIP\/201-web&Local\/0612345678@user-external\/n,20,tTb\(pickup-mark\^s\^1\)\)/);
+  assert.match(conf, /Dial\(PJSIP\/201&PJSIP\/201-web&Local\/201@cx-app\/n&Local\/0612345678@user-external\/n,20,tTb\(pickup-mark\^s\^1\)\)/);
   assert.match(conf, /\[users-hints\]\nexten => 201,hint,PJSIP\/201&PJSIP\/201-web/);
   assert.match(conf, /n\(noanswer\),VoiceMail\(201@default,u\)/);
   assert.match(conf, /exten => 202,1.*\n.*\n.*\n same => n,Goto\(users,201,1\)/);

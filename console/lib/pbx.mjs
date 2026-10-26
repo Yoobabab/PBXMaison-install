@@ -282,7 +282,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const map = new Map();
     for (const row of r.rows) {
       const contacts = (row.contacts || []).filter((c) => !c.expires || Number(c.expires) > now);
-      const key = row.id.replace(/-web$/, "");
+      const key = row.id.replace(/-(web|app)$/, "");
       const list = map.get(key) || [];
       map.set(key, list.concat(contacts.map((c) => {
         // rewrite_contact=yes : l'hôte du contact est l'adresse vue par le PBX ; Via = adresse annoncée par l'appareil.
@@ -292,7 +292,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         // Multi-tenant : le Via du dessus est celui de l'aiguilleur ; l'adresse locale du poste est celle de son Contact
         const localIp = CX_MODE === "tenant" && c.path ? (/@\[?([^\]:;>]+)/.exec(c.uri || "")?.[1] || "") : c.via || "";
         return { uri: c.uri || "", user_agent: c.user_agent || "", ip: sourceIp || localIp, source_ip: sourceIp, source_port: source?.[2] || "",
-          local_ip: localIp, device: row.id.endsWith("-web") ? (/Callikoe-App/i.test(c.user_agent || "") ? { ...identifyDevice(c.user_agent), kind: "mobile", label: "Appli mobile Callikoe" } : { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" }) : identifyDevice(c.user_agent),
+          local_ip: localIp, device: row.id.endsWith("-app") ? { ...identifyDevice(c.user_agent), kind: "mobile", label: "Appli mobile Callikoe" } : row.id.endsWith("-web") ? (/Callikoe-App/i.test(c.user_agent || "") ? { ...identifyDevice(c.user_agent), kind: "mobile", label: "Appli mobile Callikoe" } : { ...identifyDevice(c.user_agent), kind: "web", label: "Softphone web" }) : identifyDevice(c.user_agent),
           connection: connectionType(sourceIp, localIp, []) };
       })));
     }
@@ -343,7 +343,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       [u.id, displayName(u), u.first_name, u.last_name, u.email, u.mobile, u.outbound_cid, u.dids, u.status,
         JSON.stringify(u.forwarding), JSON.stringify(u.options), JSON.stringify(u.voicemail), by || "",
         u.phone ? JSON.stringify(u.phone) : null]);
-    await c.query("UPDATE ps_endpoints SET callerid = $2, set_var = $3 WHERE id IN ($1::text, $1::text || '-web')",
+    await c.query("UPDATE ps_endpoints SET callerid = $2, set_var = $3 WHERE id IN ($1::text, $1::text || '-web', $1::text || '-app')",
       [u.id, `"${displayName(u)}" <${u.id}>`, userOpts(u)]);
   }
 
@@ -361,6 +361,25 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
          dtmf_mode, language, mailboxes, set_var, max_video_streams)
        VALUES ($1, $1, $1, 'from-internal', 'all', '${WEB_CODECS}', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5, 16)`,
       [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
+  }
+  // Appli mobile (appels dans l'appli, sonnerie du système) : <poste>-app, ses propres identifiants, mêmes réglages que le softphone web
+  async function appSipAccount(num) {
+    const u = await getUser(num);
+    const id = `${u.id}-app`;
+    await db.tx(async (c) => {
+      if ((await c.query("SELECT 1 FROM ps_endpoints WHERE id = $1", [id])).rowCount) return;
+      await c.query("DELETE FROM ps_auths WHERE id = $1", [id]);
+      await c.query("DELETE FROM ps_aors WHERE id = $1", [id]);
+      await c.query("INSERT INTO ps_auths (id, auth_type, username, password) VALUES ($1, 'userpass', $1, $2)", [id, genPassword()]);
+      await c.query("INSERT INTO ps_aors (id, max_contacts, remove_existing, qualify_frequency) VALUES ($1, 3, 'yes', 0)", [id]);
+      await c.query(
+        `INSERT INTO ps_endpoints (id, aors, auth, context, disallow, allow, callerid, direct_media, webrtc, dtls_auto_generate_cert,
+           dtmf_mode, language, mailboxes, set_var, max_video_streams)
+         VALUES ($1, $1, $1, 'from-internal', 'all', '${WEB_CODECS}', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5, 16)`,
+        [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
+    });
+    const a = (await db.query("SELECT username, password FROM ps_auths WHERE id = $1", [id])).rows[0];
+    return { username: a.username, password: a.password, extension: u.id, name: displayName(u) };
   }
   async function ensureWebEndpoints() {
     // Proxy enregistré avec « ;lr » : Asterisk coupait la valeur au « ; » (proxy refusé) → « ^3B »
@@ -519,7 +538,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       } catch (e) { throw new UserError(e.message, e.field); }
     }
     await db.tx((c) => saveUser(c, u, by));
-    await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id IN ($1::text, $1::text || '-web')", [num, u.voicemail.enabled ? `${num}@default` : null]);
+    await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id IN ($1::text, $1::text || '-web', $1::text || '-app')", [num, u.voicemail.enabled ? `${num}@default` : null]);
     await applyDialplan();
     return getUser(num);
   }
@@ -592,9 +611,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         if (changed) await saveUser(c, u, by);
       }
       for (const t of ["ps_endpoints", "ps_aors", "ps_auths"]) {
-        await c.query(`DELETE FROM ${t} WHERE id IN ($1::text, $1::text || '-web')`, [num]);
+        await c.query(`DELETE FROM ${t} WHERE id IN ($1::text, $1::text || '-web', $1::text || '-app')`, [num]);
       }
-      await c.query("DELETE FROM ps_contacts WHERE endpoint IN ($1::text, $1::text || '-web')", [num]);
+      await c.query("DELETE FROM ps_contacts WHERE endpoint IN ($1::text, $1::text || '-web', $1::text || '-app')", [num]);
       await c.query("DELETE FROM pbxmaison_extensions WHERE id = $1", [num]);
       await c.query("DELETE FROM pbxmaison_app_devices WHERE extension = $1", [num]);
       await c.query("DELETE FROM pbxmaison_app_tokens WHERE extension = $1", [num]);
@@ -989,7 +1008,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const ringing = routes.inbound.filter((n) => byId.has(n) ? ringsForGroups(byId.get(n)) : true);
     writeAtomic(routesFile, [
       `; Routes — écrit par la console web (${new Date().toISOString()}). Ne pas modifier à la main.`,
-      `INBOUND_TARGET = ${ringing.map((n) => `PJSIP/${n}&PJSIP/${n}-web`).join("&")}`,
+      `INBOUND_TARGET = ${ringing.map((n) => `PJSIP/${n}&PJSIP/${n}-web&Local/${n}@cx-app/n`).join("&")}`,
       `OUTBOUND_TRUNK = ${routes.outbound_trunk}`,
       `OUTBOUND_CID = ${cid}`,
       `OUTBOUND_FORMAT = ${fmt}`,
@@ -1002,7 +1021,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const model = { users: byId, objects, soundsDir: soundsDir(), tz: tz(),
       // SVI qui comprend la parole : la phrase enregistrée est envoyée à la console (IA), qui répond la touche choisie
       speech: { dir: REC_DIR(), url: `http://127.0.0.1:${CX_SETTINGS.port}/internal/ivr-speech?k=${speechKey()}`,
-        aiUrl: `http://127.0.0.1:${CX_SETTINGS.port}/internal/ai-call?k=${speechKey()}`, audiosocket: `127.0.0.1:${audioSocketPort()}` },
+        aiUrl: `http://127.0.0.1:${CX_SETTINGS.port}/internal/ai-call?k=${speechKey()}`, audiosocket: `127.0.0.1:${audioSocketPort()}`,
+        appUrl: `http://127.0.0.1:${CX_SETTINGS.port}/internal/app-call?k=${speechKey()}` },
       receptionist: await db.getSetting("receptionist", null) };
     writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
     const contacts = await loadContacts();
@@ -1020,7 +1040,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     writeAtomic(path.join(dir, "voicemail_users.conf"), `${buildVoicemail(users)}${buildGroupVoicemail(model)}\n`);
     // Voyant de messagerie : boîte personnelle + messageries de groupe dont l'utilisateur est membre
     for (const [id, boxes] of mailboxesByUser(model)) {
-      await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id IN ($1::text, $1::text || '-web') AND mailboxes IS DISTINCT FROM $2", [id, boxes]);
+      await db.query("UPDATE ps_endpoints SET mailboxes = $2 WHERE id IN ($1::text, $1::text || '-web', $1::text || '-app') AND mailboxes IS DISTINCT FROM $2", [id, boxes]);
     }
     // Interception « n'importe quel appel » (code *8) : tous les postes dans le même groupe d'interception
     await db.query("UPDATE ps_endpoints SET call_group = '1', pickup_group = '1' WHERE context = 'from-internal' AND (call_group IS DISTINCT FROM '1' OR pickup_group IS DISTINCT FROM '1')");
@@ -1051,7 +1071,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const out = new Map();
     for (const l of lines) {
       const f = l.split("!");
-      const m = /^PJSIP\/(\d{3})(?:-web)?-[0-9a-f]+$/.exec(f[0] || "");
+      const m = /^PJSIP\/(\d{3})(?:-web|-app)?-[0-9a-f]+$/.exec(f[0] || "");
       if (!m) continue;
       const st = f[4] === "Up" ? "busy" : (f[4] === "Ringing" || f[4] === "Ring") ? "ringing" : "";
       if (st && out.get(m[1]) !== "busy") out.set(m[1], st);
@@ -1293,7 +1313,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     while (Date.now() - t0 < 9000) {
       await new Promise((r) => setTimeout(r, 300));
       for (const c of await chans()) {
-        const m = /^PJSIP\/(\d{3})(-web)?-/.exec(c[0] || "");
+        const m = /^PJSIP\/(\d{3})(-web|-app)?-/.exec(c[0] || "");
         if (!m || m[1] !== ext) continue;
         if (c[4] === "Ringing") rang.set(m[2] ? "web" : "desk", true);
         if (c[4] === "Up") answered = true;
@@ -1501,7 +1521,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
-    speechKey, audioSocketPort, webUserActive, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
+    speechKey, audioSocketPort, webUserActive, appSipAccount, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }
 

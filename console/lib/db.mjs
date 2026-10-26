@@ -109,6 +109,10 @@ export function createDb(cfg) {
         last_used_at timestamptz,
         user_agent text NOT NULL DEFAULT ''
       );
+      ALTER TABLE pbxmaison_app_devices ADD COLUMN IF NOT EXISTS push_token text;
+      ALTER TABLE pbxmaison_app_devices ADD COLUMN IF NOT EXISTS push_type text;
+      ALTER TABLE pbxmaison_app_devices ADD COLUMN IF NOT EXISTS apns_env text;
+      ALTER TABLE pbxmaison_app_devices ADD COLUMN IF NOT EXISTS push_at timestamptz;
       CREATE TABLE IF NOT EXISTS pbxmaison_objects (
         kind text NOT NULL,
         id text NOT NULL,

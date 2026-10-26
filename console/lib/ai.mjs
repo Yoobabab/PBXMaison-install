@@ -208,5 +208,7 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
     if (next.enabled && !s.enabled) { try { await register(next); } catch { /* le statut affichera l'erreur */ } }
     return status();
   }
-  return { settings, saveSettings, status, transcribe, text, speech, musics, music, voicemailInsight, insights, realtimeUrl, AiError };
+  // Relais du portail pour autre chose que l'IA (autorisations de notification de l'appli) : marche même si l'IA est désactivée
+  const relay = (p, body) => call(p, body, { force: true });
+  return { settings, saveSettings, status, transcribe, text, speech, musics, music, voicemailInsight, insights, realtimeUrl, relay, AiError };
 }

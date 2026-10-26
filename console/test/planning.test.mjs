@@ -90,7 +90,7 @@ test("planning : plan de numérotation Asterisk", () => {
   assert.doesNotMatch(dp, /exten => 20260105,1,NoOp\(B\)/);
   assert.match(dp, /\[plan-pl1-hol\][\s\S]*exten => 20261225,1,NoOp\(Noël\)/);
   assert.match(dp, /exten => 20261224,1,NoOp\(Réveillon\)\n same => n,GotoIfTime\(09:00-11:59,\*,\*,\*,Europe\/Paris\?plan-pl1-sc,sca,1\)\n same => n,Goto\(plan-pl1-sc,scx,1\)/);
-  assert.match(dp, /exten => sca,1,NoOp\(Scénario Matin Paul\)[\s\S]*?Dial\(PJSIP\/201&PJSIP\/201-web,20,[\s\S]*?Goto\(user-external,0612345678,1\)/);
+  assert.match(dp, /exten => sca,1,NoOp\(Scénario Matin Paul\)[\s\S]*?Dial\(PJSIP\/201&PJSIP\/201-web&Local\/201@cx-app\/n,20,[\s\S]*?Goto\(user-external,0612345678,1\)/);
   // forcé : plus de calcul d'heure
   const f = buildCallflowDialplan({ users, objects: [{ ...p, data: { ...p.data, override: "b" } }], soundsDir: "/s", tz: "Europe/Paris", year: 2026 });
   assert.match(f, /\[plan-pl1\]\nexten => s,1,NoOp\(Planning Accueil 04\)\n same => n,Set\(CDR\(rule\)=Accueil 04\)\n same => n,Goto\(plan-pl1-sc,scb,1\)/);

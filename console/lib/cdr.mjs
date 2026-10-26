@@ -3,7 +3,7 @@
  * Fonctions pures, testées dans console/test/cdr.test.mjs.
  */
 const endpointOf = (ch) => /^PJSIP\/(.+)-[0-9a-f]+$/.exec(ch || "")?.[1] || "";
-const extOf = (ch) => { const e = endpointOf(ch); return /^\d{3}(-web)?$/.test(e) ? e.slice(0, 3) : ""; };
+const extOf = (ch) => { const e = endpointOf(ch); return /^\d{3}(-web|-app)?$/.test(e) ? e.slice(0, 3) : ""; };
 const parseClid = (clid) => {
   const m = String(clid || "").match(/^"?([^"<]*)"?\s*<([^>]*)>$/);
   return m ? { name: m[1].trim(), number: m[2].trim() } : { name: "", number: String(clid || "") };

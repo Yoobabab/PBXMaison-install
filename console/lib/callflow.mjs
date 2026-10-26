@@ -529,7 +529,7 @@ const nameOf = (o) => clean(o.data.name, 40);
 const byKind = (objects, kind) => objects.filter((o) => o.kind === kind);
 const find = (objects, kind, id) => objects.find((o) => o.kind === kind && o.id === id);
 const promptPath = (dir, o) => `${dir}/${o.data.file.replace(/\.wav$/, "")}`;
-const devices = (ext) => `PJSIP/${ext}&PJSIP/${ext}-web`;
+const devices = (ext) => `PJSIP/${ext}&PJSIP/${ext}-web&Local/${ext}@cx-app/n`;   // poste, softphone web, appli mobile
 
 /** Applications Asterisk qui envoient l'appel vers une destination. */
 export function destApps(d, m) {
@@ -615,7 +615,7 @@ export function buildCallflowDialplan(m) {
         L.push(" same => n,Set(K=0)",
           ` same => n(next),GotoIf($[\${K} >= ${ring.length}]?done)`,
           ` same => n,Set(M=\${CUT(MEMBERS,&,$[(\${I} + \${K}) % ${ring.length} + 1])})`,
-          ` same => n,Dial(PJSIP/\${M}&PJSIP/\${M}-web,${d.ring_time},tb(pickup-mark^s^1))`,
+          ` same => n,Dial(PJSIP/\${M}&PJSIP/\${M}-web&Local/\${M}@cx-app/n,${d.ring_time},tb(pickup-mark^s^1))`,
           ' same => n,GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)',
           " same => n,Set(K=$[${K} + 1])", " same => n,Goto(next)", " same => n(done),NoOp(Personne n'a répondu)");
       } else {
@@ -658,7 +658,7 @@ export function buildCallflowDialplan(m) {
   L.push("", "; Supervision (BLF) des groupes et files : occupé si un membre est en ligne", "[callflow-hints]");
   for (const o of [...byKind(m.objects, "group"), ...byKind(m.objects, "queue")]) {
     const mem = o.data.members.filter((x) => m.users.has(x));
-    if (mem.length) L.push(`exten => ${o.number},hint,${mem.map(devices).join("&")}`);
+    if (mem.length) L.push(`exten => ${o.number},hint,${mem.map((x) => `PJSIP/${x}&PJSIP/${x}-web`).join("&")}`);   // voyant : postes et softphone (pas l'appli)
   }
 
   // SVI : un contexte par menu (WaitExten attend les touches dans le contexte courant)
@@ -709,7 +709,24 @@ export function buildCallflowDialplan(m) {
   L.push("", "[page-headers]", "exten => s,1,Set(PJSIP_HEADER(add,Call-Info)=<sip:pbx>\\;answer-after=0)", " same => n,Set(PJSIP_HEADER(add,Alert-Info)=<http://127.0.0.1>\\;info=alert-autoanswer)", " same => n,Return()");
 
   // Membres des files : Local/<poste>@queue-ring (sonne poste + softphone web)
-  L.push("", "[queue-ring]", "exten => _XXX,1,Dial(PJSIP/${EXTEN}&PJSIP/${EXTEN}-web,,tb(pickup-mark^s^1))", " same => n,Hangup()");
+  L.push("", "[queue-ring]", "exten => _XXX,1,Dial(PJSIP/${EXTEN}&PJSIP/${EXTEN}-web&Local/${EXTEN}@cx-app/n,,tb(pickup-mark^s^1))", " same => n,Hangup()");
+  // Appli mobile : la sonne tout de suite si elle est ouverte, sinon réveille le téléphone (notification) et attend qu'elle soit prête
+  if (m.speech?.appUrl) {
+    const u = m.speech.appUrl;
+    L.push("", "[cx-app]", "exten => _X.,1,Set(CDR_PROP(disable)=1)",
+      ' same => n,GotoIf($["${DB_EXISTS(cxapp/${EXTEN})}" != "1"]?none)',
+      " same => n,Set(CURLOPT(httptimeout)=10)",
+      ` same => n,Set(CXAPP=\${CURL(${u}&ext=\${EXTEN}&call=\${UNIQUEID}&num=\${URIENCODE(\${CALLERID(num)})}&name=\${URIENCODE(\${CALLERID(name)})})})`,
+      ' same => n,GotoIf($["${CXAPP}" = "dial"]?dial)', ' same => n,GotoIf($["${CXAPP}" != "wait"]?none)', " same => n,Set(I=0)",
+      " same => n(wait),Wait(0.5)",
+      ` same => n,GotoIf($["\${CURL(${u}&call=\${UNIQUEID}&poll=1)}" = "ready"]?dial)`,
+      " same => n,Set(I=$[${I} + 1])", ` same => n,GotoIf($[\${I} < ${2 * 20}]?wait)`, " same => n,Goto(none)",
+      " same => n(dial),Set(C=${PJSIP_DIAL_CONTACTS(${EXTEN}-app)})", ' same => n,GotoIf($["${C}" = ""]?none)',
+      " same => n,Dial(${C},,b(cx-app-hdr^s^1(${UNIQUEID})))",
+      " same => n(none),Hangup()",
+      `exten => h,1,Set(R=\${CURL(${u}&call=\${UNIQUEID}&end=1)})`,
+      "", "[cx-app-hdr]", "exten => s,1,Set(PJSIP_HEADER(add,X-Callikoe-Call)=${ARG1})", " same => n,Return()");
+  }
 
   // Horaires : Gosub qui renvoie open, closed ou holiday
   for (const o of byKind(m.objects, "schedule")) {
@@ -796,7 +813,7 @@ function stepLines(st, m, tag) {
         add(`Set(MEMBERS=${ring.join("&")})`); add(`Set(I=$[0\${RR_${g.number}} % ${ring.length}])`); add(`Set(GLOBAL(RR_${g.number})=$[\${I} + 1])`); add("Set(K=0)");
         add(`GotoIf($[\${K} >= ${ring.length}]?done-${tag})`, `next-${tag}`);
         add(`Set(M=\${CUT(MEMBERS,&,$[(\${I} + \${K}) % ${ring.length} + 1])})`);
-        add(`Dial(PJSIP/\${M}&PJSIP/\${M}-web,${time},tb(pickup-mark^s^1))`);
+        add(`Dial(PJSIP/\${M}&PJSIP/\${M}-web&Local/\${M}@cx-app/n,${time},tb(pickup-mark^s^1))`);
         add('GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)');
         add("Set(K=$[${K} + 1])"); add(`Goto(next-${tag})`); add("NoOp()", `done-${tag}`);
         break;

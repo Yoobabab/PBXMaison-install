@@ -26,6 +26,7 @@ import { createTransfer, KINDS as TRANSFER_KINDS, INSTALLER_KINDS } from "./lib/
 import { parseQueueShow, queueStats } from "./lib/supervision.mjs";
 import { CX_MODE, CX_TENANT, ETC } from "./lib/config.mjs";
 import { createAi, diagnosisInput, VOICES as AI_VOICES } from "./lib/ai.mjs";
+import { createAppPush } from "./lib/apppush.mjs";
 import { missedCallers, sameNumberKey } from "./lib/callback.mjs";
 import { periodOf, periodStats, reportInput } from "./lib/report.mjs";
 import { ivrOptions, localMatch } from "./lib/ivrspeech.mjs";
@@ -1089,6 +1090,50 @@ export async function buildApp({ db, ami } = {}) {
     const k = String(req.query?.k || ""), want = pbx.speechKey();
     return ipOk && k.length === want.length && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want));
   };
+  // ---------------------------------------------------------------- Appli mobile : sonnerie même fermée (notifications)
+  const appPush = createAppPush({ db, relay: (p, body) => ai.relay(p, body), log: app.log, pbxName: () => pbxEnv().PBX_NAME || "" });
+  // Postes qui ont un téléphone joignable par notification : notés dans Asterisk (cxapp/<poste>), seuls ceux-là passent par [cx-app]
+  const syncAppFlags = async () => {
+    try {
+      await ami.connect();
+      await ami.send({ Action: "DBDelTree", Family: "cxapp" }).catch(() => {});
+      for (const ext of await appPush.appExtensions()) await ami.send({ Action: "DBPut", Family: "cxapp", Key: ext, Val: "1" });
+    } catch (e) { app.log.warn({ err: e.message }, "Appli : postes avec notification non transmis au moteur"); }
+  };
+  setTimeout(syncAppFlags, 5000).unref();
+  setInterval(syncAppFlags, 10 * 60_000).unref();
+  app.get("/internal/app-call", async (req, reply) => {
+    reply.type("text/plain; charset=utf-8");
+    if (!localKeyOk(req)) return reply.code(403).send("");
+    const q = req.query || {};
+    try {
+      if (q.poll) return appPush.poll(q.call);
+      if (q.end) { appPush.endCall(q.call); return "ok"; }
+      return await appPush.startCall({ ext: q.ext, call: q.call, num: q.num, name: q.name });
+    } catch (e) { app.log.warn({ err: e.message }, "Appli : réveil impossible"); return ""; }
+  });
+  // Appels de l'appli : identifiée par le jeton de l'appareil (pas de session web)
+  const appExt = async (req) => {
+    const ext = await appPush.deviceExt(String(req.body?.device_token || req.query?.d || ""));
+    if (!ext) throw Object.assign(new UserError("Ce téléphone n'est plus relié au poste : scanne un nouveau QR code."), { status: 401 });
+    if (!(await pbx.webUserActive(ext))) throw Object.assign(new UserError("Ce poste est désactivé."), { status: 401 });
+    return ext;
+  };
+  app.post("/app/push", async (req) => {
+    const ext = await appPush.setPushToken(String(req.body?.device_token || ""), { token: req.body?.push_token, type: req.body?.push_type, env: req.body?.apns_env });
+    if (!ext) throw Object.assign(new UserError("Ce téléphone n'est plus relié au poste."), { status: 401 });
+    syncAppFlags();
+    return { ok: true };
+  });
+  app.post("/app/sip", async (req) => {
+    const ext = await appExt(req);
+    const acc = await pbx.appSipAccount(ext);
+    const sv = sipServer(), https = sv.tls, host = sv.host;
+    return { ...acc, ws_url: `${https ? "wss" : "ws"}://${host}/ws`, domain: sv.fqdn || host };
+  });
+  app.post("/app/presence", async (req) => { appPush.presence(await appExt(req), req.body?.state === "background" ? "background" : "active"); return { ok: true }; });
+  app.post("/app/ready", async (req) => ({ ok: appPush.ready(await appExt(req), req.body?.call) }));
+  app.get("/app/call", async (req) => ({ state: appPush.callState(await appExt(req), req.query?.call) }));
   app.get("/internal/ai-call", async (req, reply) => {
     reply.type("text/plain; charset=utf-8");
     if (!localKeyOk(req)) return reply.code(403).send("");

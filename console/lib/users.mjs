@@ -257,7 +257,8 @@ export function buildUsersDialplan(users) {
     } else if (u.status === "away" || u.status === "dnd") {
       add(destLines(u.forwarding[u.status], u, "busy"));
     } else {
-      const target = `PJSIP/${u.id}&PJSIP/${u.id}-web` + (u.options.ring_mobile && u.mobile ? `&Local/${u.mobile}@user-external/n` : "");
+      // + l'appli mobile (réveillée par notification si elle est fermée : [cx-app])
+      const target = `PJSIP/${u.id}&PJSIP/${u.id}-web&Local/${u.id}@cx-app/n` + (u.options.ring_mobile && u.mobile ? `&Local/${u.mobile}@user-external/n` : "");
       add([`Dial(${target},${u.forwarding.timeout},tTb(pickup-mark^s^1))`, 'GotoIf($["${DIALSTATUS}" = "ANSWER" | "${DIALSTATUS}" = "CANCEL"]?end)',
         'GotoIf($["${DIALSTATUS}" = "NOANSWER"]?noanswer)']);
       add(destLines(u.forwarding.busy, u, "busy"));

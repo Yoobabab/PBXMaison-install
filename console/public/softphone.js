@@ -244,6 +244,8 @@ const IN_APP = (() => {
     return sessionStorage.getItem("callikoe_app") === "1" || !!window.ReactNativeWebView;
   } catch { return !!window.CALLIKOE_APP; }
 })();
+// Nouvelle appli (sonnerie du système, appli fermée) : c'est l'appli qui passe et reçoit les appels, pas cette page
+const NATIVE_CALLS = IN_APP && !!window.CALLIKOE_APP?.native_calls;
 const toApp = (type, extra = {}) => { try { window.ReactNativeWebView?.postMessage(JSON.stringify({ type, ...extra })); } catch { /* hors appli */ } };
 // Appli mobile : le son d'un appel passe par l'écouteur (oreille), le bouton Haut-parleur bascule
 let speakerOn = false;
@@ -1538,6 +1540,7 @@ function setReg(s) {
 }
 
 function connect() {
+  if (NATIVE_CALLS) { setReg("on"); return; }   // appels gérés par l'appli (moteur natif)
   if (!window.JsSIP || !me.sip.secure) { setReg("off"); return; }
   JsSIP.debug.disable("JsSIP:*");
   const socket = new JsSIP.WebSocketInterface(me.sip.ws_url);
@@ -1627,6 +1630,7 @@ const videoConstraint = () => ({ width: { ideal: 1280 }, height: { ideal: 720 } 
 function call(raw, { video = false } = {}) {
   const num = clean(raw);
   if (!num) return;
+  if (NATIVE_CALLS) { toApp("dial", { number: num, name: nameOf(num) || "" }); return; }
   if (session) return toast("Un appel est déjà en cours.", "bad");
   if (!ua || regState !== "on") return toast("Le softphone n'est pas connecté au PBX.", "bad");
   audioReady();
