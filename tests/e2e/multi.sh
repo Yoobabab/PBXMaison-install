@@ -465,7 +465,7 @@ R="$(hapi GET /api/licenses)"
 # 7. Sauvegarde du serveur entier → suppression de cli b → restauration (commande PuTTY)
 sudo /opt/pbxmaison/pbx/bin/callikoe-host sauvegarder > bk.out 2>&1 || { tail -n 20 bk.out >> "$OUT"; fail "sauvegarder"; }
 BK="$(sudo cat /var/lib/callikoe/last-backup)"
-sudo tar -tzf "$BK" | grep -q "tenants/clib.tar.gz" && pass "Sauvegarde du serveur : $(basename "$BK") ($(sudo du -h "$BK" | cut -f1))" || fail "archive serveur incomplète"
+sudo tar -tzf "$BK" > bk-list.txt 2>/dev/null; grep -q "tenants/clib.tar.gz" bk-list.txt && pass "Sauvegarde du serveur : $(basename "$BK") ($(sudo du -h "$BK" | cut -f1))" || fail "archive serveur incomplète"
 sudo /opt/pbxmaison/pbx/bin/callikoe-host supprimer clib > /dev/null 2>&1 && fail "suppression sans --confirmer" || pass "Suppression refusée sans --confirmer"
 sudo /opt/pbxmaison/pbx/bin/callikoe-host supprimer clib --confirmer > del.out 2>&1 || { tail -n 20 del.out >> "$OUT"; fail "supprimer"; }
 ! id cx-clib >/dev/null 2>&1 && ! sudo -u postgres psql -Atc "SELECT 1 FROM pg_database WHERE datname='cx_clib'" | grep -q 1 && pass "cli b supprimé (comptes, base, fichiers)" || fail "restes de clib"

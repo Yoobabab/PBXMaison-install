@@ -331,7 +331,15 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${fqdn}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     add_header Strict-Transport-Security "max-age=31536000" always;
-    client_max_body_size 1m;
+    client_max_body_size 12m;
+    # Import d'un PBX (sauvegarde jusqu'à 4 Go) : envoyé directement à la console, sans limite de 12 Mo
+    location = /api/pbx/import {
+        client_max_body_size 4g;
+        proxy_request_buffering off;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+${proxy}
+    }
     location / {
 ${proxy}
         proxy_set_header X-Forwarded-Proto https;
@@ -346,7 +354,15 @@ server {
     listen [::]:80;
     server_name ${fqdn};
     server_tokens off;
-    client_max_body_size 1m;
+    client_max_body_size 12m;
+    # Import d'un PBX (sauvegarde jusqu'à 4 Go) : envoyé directement à la console, sans limite de 12 Mo
+    location = /api/pbx/import {
+        client_max_body_size 4g;
+        proxy_request_buffering off;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+${proxy}
+    }
     location /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
     location / {
 ${proxy}
@@ -529,6 +545,8 @@ cmd_importer() {
     [[ "$src" == "$HUB_VAR/uploads/"* ]] || die "Fichier refusé (emplacement non autorisé)."
   fi
   [[ -f "$src" ]] || die "Sauvegarde introuvable : ${src}"
+  # Fichier envoyé par la console du serveur : effacé dans tous les cas (même si l'import échoue)
+  [[ "$src" == "$HUB_VAR/uploads/"* ]] && trap 'rm -f "'"$src"'"' EXIT
   local tmp; tmp="$(mktemp -d)"
   tar -C "$tmp" -xzf "$src" ./etc/pbx-config.json ./manifest.json 2>/dev/null || { rm -rf "$tmp"; die "Ce fichier n'est pas une sauvegarde de PBX Callikoe (pbxmaison-….tar.gz, faite depuis la console du PBX)."; }
   cmd_creer "$slug" "$(base64 -w0 "$tmp/etc/pbx-config.json")"
@@ -579,13 +597,13 @@ cmd_etat() {
     local conf="$CX/t/$slug/asterisk/asterisk.conf" eng con calls=0 ph=0 phon=0 tr=0 trok=0 env="$CX/t/$slug/pbx.env"
     eng="$(systemctl is-active "callikoe-asterisk@$slug" 2>/dev/null || true)"; con="$(systemctl is-active "callikoe-console@$slug" 2>/dev/null || true)"
     if [[ "$eng" == active ]]; then
-      calls="$(asterisk -C "$conf" -rx "core show channels count" 2>/dev/null | awk '/active call/ {print $1; exit}')"
+      calls="$(asterisk -C "$conf" -rx "core show channels count" 2>/dev/null | awk '/active call/ {print $1; exit}' || true)"
       local contacts regs
-      contacts="$(asterisk -C "$conf" -rx "pjsip show contacts" 2>/dev/null | awk '$1=="Contact:" && $2 !~ /^</ {print $2, $4}')"
+      contacts="$(asterisk -C "$conf" -rx "pjsip show contacts" 2>/dev/null | awk '$1=="Contact:" && $2 !~ /^</ {print $2, $4}' || true)"
       ph="$(echo "$contacts" | awk -F'[/ ]' 'NF>2 && $1 ~ /^[0-9]+$/' | wc -l)"
       phon="$(echo "$contacts" | awk -F'[/ ]' 'NF>2 && $1 ~ /^[0-9]+$/ && $NF ~ /^(Avail|NonQual)$/' | wc -l)"
-      tr="$(asterisk -C "$conf" -rx "pjsip show registrations" 2>/dev/null | awk '$1 ~ /\/sip:/' | wc -l)"
-      trok="$(asterisk -C "$conf" -rx "pjsip show registrations" 2>/dev/null | awk '$1 ~ /\/sip:/ && /Registered/' | wc -l)"
+      tr="$(asterisk -C "$conf" -rx "pjsip show registrations" 2>/dev/null | awk '$1 ~ /\/sip:/' | wc -l || true)"
+      trok="$(asterisk -C "$conf" -rx "pjsip show registrations" 2>/dev/null | awk '$1 ~ /\/sip:/ && /Registered/' | wc -l || true)"
     fi
     (( first )) || printf ','; first=0
     node -e '
@@ -840,6 +858,7 @@ cmd_sauvegarder() {
     [[ -d "$HUB_VAR/configs" ]] && cp -a "$HUB_VAR/configs" "$tmp/hub/var/"
     [[ -d /var/lib/callikoe/theme ]] && cp -a /var/lib/callikoe/theme "$tmp/hub/theme"
     [[ -d /var/lib/callikoe/music ]] && cp -a /var/lib/callikoe/music "$tmp/hub/music"
+    for f in /etc/callikoe/geo.conf /etc/callikoe/protection.conf; do [[ -f "$f" ]] && cp -a "$f" "$tmp/hub/"; done
     runuser -u postgres -- pg_dump --no-owner callikoe_hub > "$tmp/hub/hub.sql" 2>/dev/null || warn "Comptes de la console du serveur non sauvegardés"
     ok "Console du serveur (comptes, clés)"
   fi
@@ -874,6 +893,10 @@ cmd_restaurer() {
       [[ -f "$HUB_VAR/portal-key.pem" ]] || { [[ -f "$tmp/hub/var/portal-key.pem" ]] && install -o callikoe-hub -g callikoe-hub -m 0600 "$tmp/hub/var/portal-key.pem" "$HUB_VAR/portal-key.pem"; }
       [[ -d "$tmp/hub/var/configs" ]] && { install -d -o callikoe-hub -g callikoe-hub -m 0700 "$HUB_VAR/configs"; cp -an "$tmp/hub/var/configs/." "$HUB_VAR/configs/"; chown -R callikoe-hub:callikoe-hub "$HUB_VAR/configs"; }
       [[ -d "$tmp/hub/theme" ]] && { cp -a "$tmp/hub/theme/." /var/lib/callikoe/theme/; chown -R callikoe-hub:callikoe-hub /var/lib/callikoe/theme; }
+      # Pays autorisés et protection anti-intrusion du serveur d'origine
+      for f in geo.conf protection.conf; do [[ -f "$tmp/hub/$f" ]] && install -m 0644 "$tmp/hub/$f" "/etc/callikoe/$f"; done
+      [[ -f "$tmp/hub/protection.conf" ]] && { f2b_jails; systemctl restart fail2ban >/dev/null 2>&1 || true; }
+      [[ -f "$tmp/hub/geo.conf" ]] && { "$APP/pbx/bin/callikoe-geo" appliquer >/dev/null 2>&1 || true; }
       [[ -d "$tmp/hub/music" ]] && { install -d -o callikoe-hub -g callikoe-hub -m 0755 /var/lib/callikoe/music; cp -a "$tmp/hub/music/." /var/lib/callikoe/music/; chown -R callikoe-hub:callikoe-hub /var/lib/callikoe/music; }
       systemctl restart callikoe-hub
     fi
@@ -891,17 +914,22 @@ cmd_restaurer() {
       ok "Console du serveur restaurée (comptes IRT)"
     fi
   fi
-  local slug n line status msg
+  local slug n line status msg suspended
   while read -r slug; do
     [[ -n "$slug" ]] || continue
     n="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String((r.tenants||[]).find(t=>t.slug===process.argv[2]).n))' "$tmp/tenants.json" "$slug")"
     reg_get "$slug" slug >/dev/null 2>&1 && { warn "${slug} existe déjà sur ce serveur : ignoré"; continue; }
+    # Numéro interne déjà pris sur ce serveur (ports, plage audio) : on lui en donne un libre
+    if node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit((r.tenants||[]).some(t=>String(t.n)===process.argv[2])?0:1)' "$REG" "$n"; then
+      n="$(free_n)"; warn "${slug} : numéro interne déjà utilisé sur ce serveur, nouveau numéro ${n}"
+    fi
+    suspended="$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write((r.tenants||[]).find(t=>t.slug===process.argv[2])?.suspended?"1":"")' "$tmp/tenants.json" "$slug")"
     tenant_skeleton "$slug" "$n" "$tmp/etc/$slug"
     node -e '
       const fs=require("fs");const [f,src,slug]=process.argv.slice(1);
       const r=JSON.parse(fs.readFileSync(f,"utf8"));const s=JSON.parse(fs.readFileSync(src,"utf8"));
-      r.tenants=(r.tenants||[]).filter(t=>t.slug!==slug);r.tenants.push(s.tenants.find(t=>t.slug===slug));
-      r.tenants.sort((a,b)=>a.n-b.n);fs.writeFileSync(f+".new",JSON.stringify(r,null,2));fs.renameSync(f+".new",f);' "$REG" "$tmp/tenants.json" "$slug"
+      r.tenants=(r.tenants||[]).filter(t=>t.slug!==slug);r.tenants.push({...s.tenants.find(t=>t.slug===slug),n:Number(process.argv[4])});
+      r.tenants.sort((a,b)=>a.n-b.n);fs.writeFileSync(f+".new",JSON.stringify(r,null,2));fs.renameSync(f+".new",f);' "$REG" "$tmp/tenants.json" "$slug" "$n"
     install -o "cx-$slug" -g "cx-$slug" -m 0600 "$tmp/tenants/$slug.tar.gz" "$TVAR/$slug/staging/restore.tar.gz"
     while IFS= read -r line; do
       status="$(node -e 'try{const j=JSON.parse(process.argv[1]);process.stdout.write(j.status+"\t"+j.message)}catch{}' "$line")"
@@ -910,9 +938,13 @@ cmd_restaurer() {
     rm -f "$TVAR/$slug/staging/restore.tar.gz"
     "$CONF" --tenant "$slug" dns >/dev/null 2>&1 || true
     "$CONF" --tenant "$slug" nginx >/dev/null 2>&1 || true
-    systemctl enable "callikoe-asterisk@$slug" "callikoe-console@$slug" >/dev/null 2>&1
-    systemctl restart "callikoe-asterisk@$slug" "callikoe-console@$slug" || true
-    ok "PBX ${slug} restauré"
+    if [[ -n "$suspended" ]]; then
+      ok "PBX ${slug} restauré (reste suspendu, comme avant)"
+    else
+      systemctl enable "callikoe-asterisk@$slug" "callikoe-console@$slug" >/dev/null 2>&1
+      systemctl restart "callikoe-asterisk@$slug" "callikoe-console@$slug" || true
+      ok "PBX ${slug} restauré"
+    fi
   done < <(node -e 'for(const t of JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).tenants||[])console.log(t.slug)' "$tmp/tenants.json")
   rm -rf "$tmp"
   aiguilleur
