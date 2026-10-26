@@ -330,7 +330,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const users = await loadUsers();
     const didOwners = new Map();
     for (const u of users) for (const d of u.dids) didOwners.set(d, u.id);
-    for (const o of await loadObjects()) if (o.kind === "rule") for (const d of o.data.dids) didOwners.set(d, `la règle entrante « ${o.name} »`);
+    // SDA déjà prises par une règle, un routage, un planning, un groupe, une file ou un SVI
+    for (const o of await loadObjects()) for (const d of o.data.dids || []) didOwners.set(d, `${o.kind === "rule" ? "la règle entrante" : (KINDS[o.kind] || "l'objet").toLowerCase()} « ${o.name} »`);
     return { cc: countryCode(), extensions: new Set([...users.map((u) => u.id), selfId]), didOwners };
   }
 
@@ -548,7 +549,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const forwards = [];
     for (const u of users) {
       if (u.id === num) continue;
-      const rules = Object.entries(RULE_LABELS).filter(([r]) => u.forwarding[r]?.type === "extension" && u.forwarding[r].target === num);
+      const rules = Object.entries({ always: "renvoi immédiat", ...RULE_LABELS }).filter(([r]) => u.forwarding[r]?.type === "extension" && u.forwarding[r].target === num);
       if (rules.length) forwards.push({ id: u.id, name: displayName(u), rules: rules.map(([, l]) => l), replaced_by: u.voicemail.enabled ? "sa messagerie vocale" : "raccrocher" });
     }
     const routes = await getRoutes();
@@ -584,6 +585,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         for (const r of Object.keys(RULE_LABELS)) {
           if (u.forwarding[r]?.type === "extension" && u.forwarding[r].target === num) { u.forwarding[r] = { type: "voicemail", target: "" }; changed = true; }
         }
+        // Renvoi immédiat (et sa dernière destination, reprise par la touche Renvoi) : coupé, sinon tous les appels de ce poste seraient perdus
+        if (u.forwarding.always?.type === "extension" && u.forwarding.always.target === num) { u.forwarding.always = { type: "none", target: "" }; changed = true; }
+        if (u.forwarding.always_last?.type === "extension" && u.forwarding.always_last.target === num) { u.forwarding.always_last = { type: "voicemail", target: "" }; changed = true; }
         if (changed) await saveUser(c, u, by);
       }
       for (const t of ["ps_endpoints", "ps_aors", "ps_auths"]) {

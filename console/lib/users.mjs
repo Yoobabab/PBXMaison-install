@@ -243,7 +243,7 @@ function destLines(d, u, rule) {
 export function buildUsersDialplan(users) {
   const L = [`; Utilisateurs — écrit par la console web (${new Date().toISOString()}). Ne pas modifier à la main.`, "", "[users]"];
   for (const u of users) {
-    const name = displayName(u).replace(/[(),]/g, " ");
+    const name = displayName(u).replace(/[(),$\[\]{}]/g, " ");   // jamais évalué par Asterisk
     L.push(`; ---- ${u.id} ${name}`);
     L.push(`exten => ${u.id},1,NoOp(Utilisateur ${u.id} ${name} — statut ${u.status})`);
     L.push(" same => n,Set(__PBX_HOPS=$[0${PBX_HOPS} + 1])");

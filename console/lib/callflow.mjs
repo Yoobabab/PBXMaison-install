@@ -236,9 +236,10 @@ export function validateObject(kind, input, current, ctx) {
       for (const [day, label] of DAYS) {
         const ranges = [];
         for (const r of input.week?.[day] || []) {
-          const [a, b] = [String(r?.[0] || "").trim(), String(r?.[1] || "").trim()];
+          let [a, b] = [String(r?.[0] || "").trim(), String(r?.[1] || "").trim()];
           if (!a && !b) continue;
-          if (!HHMM.test(a) || !HHMM.test(b)) throw new UserError(`${label} : heures au format HH:MM.`, `week.${day}`);
+          if (b === "23:59") b = "24:00";   // « jusqu'à 23:59 » = jusqu'à minuit (sinon fermé la dernière minute)
+          if (!HHMM.test(a) || !(HHMM.test(b) || b === "24:00")) throw new UserError(`${label} : heures au format HH:MM (fin possible à 24:00). Pour une plage de nuit, coupe-la à minuit sur deux jours.`, `week.${day}`);
           if (toMin(b) <= toMin(a)) throw new UserError(`${label} : l'heure de fin doit être après l'heure de début.`, `week.${day}`);
           ranges.push([a, b]);
         }
@@ -255,7 +256,7 @@ export function validateObject(kind, input, current, ctx) {
       for (const h of Array.isArray(input.holidays) ? input.holidays : []) {
         const from = String(h?.from || "").trim(), to = String(h?.to || h?.from || "").trim();
         if (!from) continue;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || isNaN(Date.parse(from)) || isNaN(Date.parse(to))) throw new UserError("Date invalide (AAAA-MM-JJ).", "holidays");
+        if (!validYmd(from) || !validYmd(to)) throw new UserError(`Date invalide : ${[from, to].find((x) => !validYmd(x)).split("-").reverse().join("/")}.`, "holidays");
         if (to < from) throw new UserError("Congés : la date de fin est avant la date de début.", "holidays");
         if (Date.parse(to) - Date.parse(from) > 366 * 86400_000) throw new UserError("Congés : une période ne peut pas dépasser un an.", "holidays");
         list.push({ from, to, label: clean(h.label, 40) });
@@ -596,7 +597,9 @@ export function buildCallflowDialplan(m) {
     hopGuard(L);
     L.push(" same => n,Set(CDR(dest_kind)=group)", " same => n,Set(__RINGTYPE=groupe)");
     const tails = officeGate(L, o, m);
-    if (d.cid_prefix) L.push(` same => n,Set(CALLERID(name)=${d.cid_prefix} \${CALLERID(name)})`);
+    // Préfixe : toujours devant le nom d'origine (pas « [B] [A] Jean » quand l'appel passe par deux groupes)
+    if (d.cid_prefix) L.push(" same => n,GotoIf($[${LEN(${CID_ORIG})} > 0]?cidok)", " same => n,Set(__CID_ORIG=${CALLERID(name)})",
+      ` same => n(cidok),Set(CALLERID(name)=${d.cid_prefix} \${CID_ORIG})`);
     const gp = d.greeting && find(m.objects, "prompt", d.greeting);
     if (gp?.data?.file) L.push(" same => n,Answer()", ` same => n,Playback(${promptPath(m.soundsDir, gp)})`);
     const ring = ringers(d.members, m.users);
@@ -770,6 +773,7 @@ export function buildCallflowDialplan(m) {
 function stepLines(st, m, tag) {
   const out = [];
   const add = (app, label = "") => out.push([label, app]);
+  let cidN = 0;
   const ringUsers = (users, strategy, time) => {
     const ring = ringers(users, m.users);
     if (!ring.length) { add(`NoOp(Personne ne peut sonner : ${users.join(" ")})`); return; }
@@ -784,7 +788,7 @@ function stepLines(st, m, tag) {
       const d = g.data, time = st.time || d.ring_time;
       add("Set(__RINGTYPE=groupe)");
       { const gp = d.greeting && find(m.objects, "prompt", d.greeting); if (gp?.data?.file) { add("Answer()"); add(`Playback(${promptPath(m.soundsDir, gp)})`); } }
-      if (d.cid_prefix) add(`ExecIf($["\${CID_PFX}" = ""]?Set(CALLERID(name)=${d.cid_prefix} \${CALLERID(name)}))`), add("Set(CID_PFX=1)");
+      if (d.cid_prefix) { const lb = `cid${++cidN}`; add(`GotoIf($[\${LEN(\${CID_ORIG})} > 0]?${lb})`); add("Set(__CID_ORIG=${CALLERID(name)})"); add(`Set(CALLERID(name)=${d.cid_prefix} \${CID_ORIG})`, lb); }
       if (d.strategy === "page") { const r = ringers(d.members, m.users); if (r.length) { add(`Page(${r.map(devices).join("&")},db(page-headers^s^1)i,${time})`); add("Goto(end)"); } break; }
       if (d.strategy === "rotate") {
         const ring = ringers(d.members, m.users);

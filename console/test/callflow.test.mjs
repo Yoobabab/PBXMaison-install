@@ -70,7 +70,7 @@ test("plan de numérotation généré", () => {
   const t = buildCallflowDialplan(m);
   assert.match(t, /exten => 600,1,NoOp\(Groupe 600 Accueil\)/);
   assert.match(t, /Dial\(PJSIP\/201&PJSIP\/201-web&PJSIP\/202&PJSIP\/202-web,20,tb\(pickup-mark\^s\^1\)\)/); // 203 absent : exclu
-  assert.match(t, /Set\(CALLERID\(name\)=\[Acc\] \$\{CALLERID\(name\)\}\)/);
+  assert.match(t, /Set\(__CID_ORIG=\$\{CALLERID\(name\)\}\)\n same => n\(cidok\),Set\(CALLERID\(name\)=\[Acc\] \$\{CID_ORIG\}\)/);   // préfixe devant le nom d'origine
   assert.match(t, /Goto\(callflow,900,1\)/);
   assert.match(t, /Queue\(q700,t,,,120\)/);
   assert.match(t, /\[ivr-800\][\s\S]*Background\(\/var\/lib\/pbxmaison\/sounds\/p1\)[\s\S]*exten => 1,1,NoOp/);
