@@ -773,12 +773,18 @@ function b64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += 
 
 // ---------------------------------------------------------------- Traceur
 async function renderTracer(head, q) {
-  const query = q ? decodeURIComponent(q) : sessionStorage.getItem("cf_trace") || "";
+  let query = sessionStorage.getItem("cf_trace") || "";
+  if (q) { try { query = decodeURIComponent(q); } catch { query = q; } }
   h.app.innerHTML = `${head}<div class="panel tabbed"><div class="pad">
     <form id="tf" class="tracebar"><input id="tq" placeholder="Numéro : SDA (04 12 34 56 78), poste, groupe, SVI… ou numéro externe" value="${esc(query)}" autocomplete="off"><button class="btn">Tracer</button></form>
     <p class="hint">Le traceur suit la configuration (pas un appel réel) : règle entrante, horaires, SVI, groupes, utilisateurs, renvois… et signale les boucles, impasses et personnes injoignables. Pour un numéro externe, il liste tout ce qui renvoie vers lui.</p>
     <div id="tres"></div></div></div>`;
-  h.$("#tf").onsubmit = (e) => { e.preventDefault(); const v = h.$("#tq").value.trim(); if (v) location.hash = `#/gestion/traceur/${encodeURIComponent(v)}`; };
+  h.$("#tf").onsubmit = (e) => {
+    e.preventDefault(); const v = h.$("#tq").value.trim(); if (!v) return;
+    const to = `#/gestion/traceur/${encodeURIComponent(v)}`;
+    if (location.hash === to) renderTracer(head, encodeURIComponent(v));   // même numéro : on retrace (la config a pu changer)
+    else location.hash = to;
+  };
   if (!query) return;
   sessionStorage.setItem("cf_trace", query);
   try {

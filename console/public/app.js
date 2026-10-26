@@ -1544,7 +1544,8 @@ async function renderCdr() {
   wirePager(app, renderCdr);
   const save = () => { app.querySelectorAll("[data-f]").forEach((el) => { f[el.dataset.f] = el.value; }); sessionStorage.setItem("pbxm_cdr", JSON.stringify(f)); resetPage("cdr"); renderCdr(); };
   app.querySelectorAll("select[data-f]").forEach((el) => el.onchange = save);
-  let t; app.querySelector("input[data-f=q]").oninput = () => { clearTimeout(t); t = setTimeout(() => { sessionStorage.setItem("pbxm_cdr_focus", "1"); save(); }, 400); };
+  let t; const h0 = location.hash;   // recherche en attente : abandonnée si on a changé de page entre-temps
+  app.querySelector("input[data-f=q]").oninput = () => { clearTimeout(t); t = setTimeout(() => { if (location.hash !== h0) return; sessionStorage.setItem("pbxm_cdr_focus", "1"); save(); }, 400); };
   if (sessionStorage.getItem("pbxm_cdr_focus")) { sessionStorage.removeItem("pbxm_cdr_focus"); const i = app.querySelector("input[data-f=q]"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
 
@@ -1606,7 +1607,8 @@ async function renderContacts(editId) {
         <td class="acts"><a class="btn ghost sm" href="#/annuaire/${esc(x.id)}">Modifier</a></td></tr>`).join("")}</tbody></table></div>${pg.html}`
       : `<div class="empty">${q ? "Aucun résultat." : "L'annuaire est vide : ajoute des contacts ou importe un fichier CSV (Prénom ; Nom ; Société ; Téléphone ; Mobile ; E-mail)."}</div>`}</div>`;
   wirePager(app, () => renderContacts(editId));
-  let t; $("#bq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { sessionStorage.setItem("pbxm_book_q", e.target.value); resetPage("book"); renderContacts(editId).then(() => { const i = $("#bq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
+  let t; const h0 = location.hash;
+  $("#bq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { if (location.hash !== h0) return; sessionStorage.setItem("pbxm_book_q", e.target.value); resetPage("book"); renderContacts(editId).then(() => { const i = $("#bq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
   $("#imp").onclick = () => $("#impf").click();
   $("#impf").onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -1634,10 +1636,15 @@ async function renderContacts(editId) {
   drawPh();
   $("#cf").onsubmit = async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector("button[type=submit], button:not([type])");
+    if (btn?.disabled) return; if (btn) btn.disabled = true;   // pas de doublon sur un double clic
     try { await api(cur ? "PUT" : "POST", `/api/contacts${cur ? "/" + cur.id : ""}`, { ...formData(e.target), phones }); flash = { text: "Contact enregistré." }; location.hash = "#/annuaire"; }
-    catch (err) { showFormError(e.target, err); }
+    catch (err) { showFormError(e.target, err); if (btn) btn.disabled = false; }
   };
-  $("#cdel")?.addEventListener("click", async () => { if (!confirm("Supprimer ce contact ?")) return; await api("DELETE", `/api/contacts/${cur.id}`); flash = { text: "Contact supprimé." }; location.hash = "#/annuaire"; });
+  $("#cdel")?.addEventListener("click", async () => {
+    if (!confirm("Supprimer ce contact ?")) return;
+    try { await api("DELETE", `/api/contacts/${cur.id}`); flash = { text: "Contact supprimé." }; location.hash = "#/annuaire"; } catch (err) { alert(err.message); }
+  });
 }
 
 // ---------------------------------------------------------------- Système

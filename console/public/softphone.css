@@ -308,7 +308,8 @@ label.ck input{width:auto}
 .mn{font-size:12px;font-weight:600;color:var(--muted);margin:6px 0 2px 6px}
 .mt{font-size:11px;color:var(--muted);margin:2px 6px 6px}
 .dsep{display:flex;justify-content:center;margin:10px 0}
-.dsep span{font-size:12px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:2px 10px;text-transform:capitalize}
+.dsep span{display:inline-block;font-size:12px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:2px 10px}
+.dsep span::first-letter{text-transform:uppercase}
 .composer{display:flex;gap:10px;align-items:flex-end;padding:10px 14px;border-top:1px solid var(--line)}
 .composer textarea{flex:1;resize:none;border-radius:20px;padding:10px 14px;max-height:140px}
 .composer .btn.round.sm{width:42px;height:42px;flex:none}
@@ -589,3 +590,6 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .rp-ag{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
 .rp-syn{border:1px solid var(--line,#ddd);border-left:4px solid var(--accent,#d8141c);border-radius:12px;padding:12px 14px;line-height:1.55}
 .rp-sh{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+
+/* Titre de la page toujours sur une ligne (« Messagerie vocale » sur téléphone) */
+#title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}

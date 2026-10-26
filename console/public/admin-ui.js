@@ -295,7 +295,8 @@ async function pageRecordings(sub) {
   if (f) onSubmit(f, async (v) => { await H.api("PUT", "/api/recording", { ...v, retention_days: Number(v.retention_days) }); ok("Réglages enregistrés."); location.hash = "#/enregistrements"; });
   H.wirePager(H.app, () => pageRecordings(sub));
   const setQ = (k, v) => { sessionStorage.setItem("pbxm_rec_q", JSON.stringify({ ...q, [k]: v })); H.resetPage("rec"); pageRecordings(); };
-  let t; H.$("#rq")?.addEventListener("input", (e) => { clearTimeout(t); t = setTimeout(() => setQ("q", e.target.value), 400); });
+  let t; const h0 = location.hash;
+  H.$("#rq")?.addEventListener("input", (e) => { clearTimeout(t); t = setTimeout(() => { if (location.hash === h0) setQ("q", e.target.value); }, 400); });
   H.$("#rdir")?.addEventListener("change", (e) => setQ("direction", e.target.value));
   H.$("#rdays")?.addEventListener("change", (e) => setQ("days", e.target.value));
   H.app.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
@@ -735,6 +736,7 @@ async function pageAi() {
     try { const x = await H.api("POST", "/api/ai-settings/report/test", { to }); alert(`Rapport de ${x.label} envoyé à ${x.to.join(", ")}.`); } catch (err) { alert(err.message); }
     e.target.disabled = false;
   };
+  H.$("#aitry").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); H.$("#aitryb").click(); } };
   H.$("#aitryb").onclick = async (e) => {
     e.target.disabled = true; H.$("#aitryr").innerHTML = '<span class="spin"></span>';
     try { const x = await H.api("POST", "/api/ai/announce-text", { idea: H.$("#aitry").value }); H.$("#aitryr").innerHTML = `<div class="note">« ${H.esc(x.text)} »</div>`; }

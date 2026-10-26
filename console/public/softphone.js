@@ -751,6 +751,7 @@ function route() {
   const [p, s] = location.hash.replace(/^#\/?/, "").split("/");
   page = TITLES[p] && (!["planning", "supervision"].includes(p) || me.user.manager) && (!["annonces", "rappeler"].includes(p) || me.user.standardist) && (p !== "clavier" || IN_APP) && (p !== "touches" || (!IN_APP && me.user.phone_model)) ? p : "equipe"; sub = s || "";
   $$(".rail [data-r]").forEach((a) => a.classList.toggle("on", a.dataset.r === page));
+  if (p && page !== p) history.replaceState(null, "", "#/equipe");   // page non autorisée : l'adresse suit la page affichée
   $("#title").textContent = TITLES[page];
   if (page === "appels") store.set(`callikoe_seen_${me.user.id}`, new Date().toISOString());
   renderPage(); badges();
@@ -963,7 +964,7 @@ function drawCallDetail(all) {
   if (!selNum) { d.innerHTML = `<div class="empty-st">Sélectionne un appel pour voir le détail.</div>`; return; }
   const items = all.filter((h) => h.number === selNum);
   const c = contacts.find((x) => x.id === selNum);
-  const name = c?.name || items.find((h) => h.name)?.name || "";
+  const name = c?.name || items.find((h) => h.name)?.name || nameOf(selNum) || "";   // même nom que dans la liste (collègues + annuaire)
   const p = c ? presenceOf(c) : null;
   d.innerHTML = `<button class="ghost-ic back-m" id="dback">${I.back()} Retour</button>
     <div class="det-head">${avatar(name || selNum, p?.cls, "xl")}
@@ -982,7 +983,7 @@ function drawCallDetail(all) {
 }
 
 function statusText(h) {
-  return { missed: "Manqué", failed: "Échec", voicemail: "Messagerie", answered_elsewhere: `Répondu par ${nameOf(h.answered_by) || h.answered_by}` }[h.status] || fmtDur(h.duration || 0);
+  return { missed: "Manqué", failed: "Échec", voicemail: "Messagerie", answered_elsewhere: `Répondu par ${esc(nameOf(h.answered_by) || h.answered_by)}` }[h.status] || fmtDur(h.duration || 0);
 }
 
 // ------------------------------------------------------------------ Chat
@@ -1073,8 +1074,8 @@ async function openConv(id) {
     <form class="composer" id="compose"><textarea id="ctext" rows="1" placeholder="Écrire un message… (Entrée pour envoyer, Maj+Entrée pour aller à la ligne)"></textarea><button class="btn round sm" title="Envoyer">${I.send()}</button></form>`;
   wireCalls($("#chatp"));
   $("#cback3").onclick = () => { chatSel = ""; renderPage(); };
-  $("#cren")?.addEventListener("click", async () => { const n = prompt("Nom du groupe :", c.name || ""); if (n === null) return; await api("PUT", `/api/u/chats/${id}`, { name: n }); loadChats().then(() => renderPage()); });
-  $("#cleave")?.addEventListener("click", async () => { if (!confirm("Quitter ce groupe ?")) return; await api("DELETE", `/api/u/chats/${id}/me`); chatSel = ""; loadChats().then(() => renderPage()); });
+  $("#cren")?.addEventListener("click", async () => { const n = prompt("Nom du groupe :", c.name || ""); if (n === null) return; try { await api("PUT", `/api/u/chats/${id}`, { name: n }); } catch (err) { toast(err.message, "bad"); return; } loadChats().then(() => renderPage()); });
+  $("#cleave")?.addEventListener("click", async () => { if (!confirm("Quitter ce groupe ?")) return; try { await api("DELETE", `/api/u/chats/${id}/me`); } catch (err) { toast(err.message, "bad"); return; } chatSel = ""; loadChats().then(() => renderPage()); });
   const ta = $("#ctext");
   ta.oninput = () => { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`; };
   ta.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#compose").requestSubmit(); } };

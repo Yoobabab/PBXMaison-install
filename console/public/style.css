@@ -962,3 +962,6 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 .rc-tr{display:grid;grid-template-columns:26px minmax(120px,1fr) minmax(160px,1.4fr) minmax(160px,1.2fr) 32px;gap:8px;align-items:center}
 .rc-n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:12px}
 @media (max-width:760px){.rc-tr{grid-template-columns:26px 1fr 32px}.rc-tr input[data-f=description],.rc-tr select{grid-column:2/3}}
+
+/* Tableau de bord sur téléphone : le bouton « Fermer maintenant » passe sous le texte */
+@media (max-width:480px){.oc-card{flex-wrap:wrap}.oc-card>.btn,.oc-card>button{flex:1 1 100%}}
