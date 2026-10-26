@@ -4,6 +4,7 @@ import { ROLES, openRolesInfo } from "./roles.js";
 import { renderAdmin } from "./admin-ui.js";
 import { keyLayout, mountKeys } from "./keys-ui.js";
 const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const app = $("#app");
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
@@ -178,6 +179,8 @@ function pbxSwitcher(on) {
   box.querySelector("#pbxswb").onclick = () => { menu.hidden = !menu.hidden; if (!menu.hidden) { draw(); q.focus(); } };
   q.oninput = draw;
 }
+document.addEventListener("click", (e) => { document.querySelectorAll(".rowmenu[open]").forEach((d) => { if (!d.contains(e.target)) d.open = false; }); });
+window.addEventListener("scroll", () => document.querySelectorAll(".rowmenu[open]").forEach((d) => { d.open = false; }), true);
 document.addEventListener("click", (e) => { const b = $(".pbxsw"); if (b && !b.contains(e.target)) b.querySelector(".pbxsw-menu").hidden = true; });
 document.addEventListener("click", (e) => {
   if (e.target.closest("#burger")) document.body.classList.toggle("side-open");
@@ -847,7 +850,7 @@ async function renderUsers() {
   const q = sessionStorage.getItem("pbxm_users_q") || "";
   const onlyFw = sessionStorage.getItem("pbxm_users_fw") === "1";
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Utilisateurs</h1><p class="sub" style="margin:0">Un utilisateur = un poste (téléphone, softphone, DECT), ses renvois et sa messagerie.</p></div>
-    <a class="btn" href="#/utilisateurs/nouveau">+ Ajouter un utilisateur</a></div>
+    <a class="btn ghost" href="#/utilisateurs/plusieurs">+ Ajouter plusieurs</a><a class="btn" href="#/utilisateurs/nouveau">+ Ajouter un utilisateur</a></div>
     <div class="panel">
       <div class="filters"><input id="uq" type="search" placeholder="Rechercher : nom, poste, SDA, numéro de renvoi…" value="${esc(q)}">
         <label class="check"><input type="checkbox" id="ufw" ${onlyFw ? "checked" : ""}> Seulement ceux avec un renvoi actif</label></div>
@@ -882,9 +885,11 @@ async function renderUsers() {
       <td>${statusPill(x)}</td>
       <td class="hide-sm">${x.registered ? `<span class="devs">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}<span class="pill ok">Connecté</span></span>` : '<span class="pill off">Non connecté</span>'}</td>
       <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td>
-      <td class="acts"><button class="btn ghost sm" data-imp="${esc(x.id)}" title="Ouvrir le softphone web de cet utilisateur">Incarner</button>
-        ${x.registered ? `<button class="btn ghost sm" data-resync="${esc(x.id)}" title="Renvoyer la configuration au téléphone">Reprovisionner</button>` : ""}
-        <button class="btn ghost sm" data-udel="${esc(x.id)}" title="Supprimer l'utilisateur">Supprimer</button></td></tr>`).join("");
+      <td class="acts"><details class="rowmenu"><summary class="btn ghost sm" title="Actions">⋯</summary><div class="rm-list">
+        <a href="#/utilisateurs/plusieurs?depuis=${esc(x.id)}">Dupliquer…</a>
+        <button type="button" data-imp="${esc(x.id)}">Incarner (softphone)</button>
+        ${x.registered ? `<button type="button" data-resync="${esc(x.id)}">Reprovisionner le téléphone</button>` : ""}
+        <button type="button" class="danger" data-udel="${esc(x.id)}">Supprimer</button></div></details></td></tr>`).join("");
     rows.querySelectorAll("[data-udel]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation();
       const id = b.dataset.udel;
@@ -897,7 +902,18 @@ async function renderUsers() {
     wireImpersonate(rows);
     wireResync(rows);
     $("#unone").hidden = list.length > 0;
-    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a, .ck")) location.hash = tr.dataset.href; });
+    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a, .ck, .rowmenu")) location.hash = tr.dataset.href; });
+    // Menu d'actions : un seul ouvert à la fois, fermé en cliquant ailleurs
+    rows.querySelectorAll(".rowmenu").forEach((dm) => dm.addEventListener("toggle", () => {
+      if (!dm.open) return;
+      rows.querySelectorAll(".rowmenu[open]").forEach((o) => { if (o !== dm) o.open = false; });
+      // Placé par-dessus la page (le tableau peut défiler) : sous le bouton, ou au-dessus s'il n'y a pas la place
+      const r = dm.querySelector("summary").getBoundingClientRect(), list = dm.querySelector(".rm-list");
+      list.style.left = `${Math.max(8, r.right - 220)}px`;
+      list.style.top = `${r.bottom + 4}px`;
+      const h = list.offsetHeight;
+      if (r.bottom + 4 + h > window.innerHeight - 8) list.style.top = `${Math.max(8, r.top - 4 - h)}px`;
+    }));
     rows.querySelectorAll("[data-sel]").forEach((cb) => cb.onchange = () => { cb.checked ? usel.add(cb.dataset.sel) : usel.delete(cb.dataset.sel); cb.closest("tr").classList.toggle("sel", cb.checked); bar(list); });
     $("#uall").onchange = (e) => { for (const x of list) e.target.checked ? usel.add(x.id) : usel.delete(x.id); draw(); };
     bar(list);
@@ -967,6 +983,79 @@ async function renderUsers() {
     if (location.hash !== "#/utilisateurs" || document.activeElement === $("#uq") || usel.size || ubulk) return;
     renderUsers();
   }, 15000);
+}
+
+/** Plusieurs utilisateurs d'un coup : plage de numéros (ex. 200 à 300), un nom par poste, réglages copiés d'un modèle (facultatif) */
+async function renderUsersBulkNew(from) {
+  setNav("ext");
+  clearInterval(timer);
+  const d = await api("GET", "/api/extensions");
+  const taken = new Set([...d.extensions.map((x) => x.id), ...(d.taken || [])]);
+  const start = Number(from && d.next ? d.next : d.next || 200);
+  app.innerHTML = `<a class="back" href="#/utilisateurs">← Utilisateurs</a><h1>${from ? "Dupliquer un utilisateur" : "Ajouter plusieurs utilisateurs"}</h1>
+    <p class="sub">Choisis la plage de postes, nomme chaque utilisateur (ou colle une liste de noms), puis crée-les en une fois. Postes laissés sans nom : pas créés.</p>
+    <div class="panel"><div class="pad stack">
+      <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <label>Du poste<input id="bfrom" inputmode="numeric" maxlength="3" value="${esc(String(start))}" style="width:110px"></label>
+        <label>au poste<input id="bto" inputmode="numeric" maxlength="3" value="${esc(String(Math.min(999, start + (from ? 0 : 9))))}" style="width:110px"></label>
+        <label style="min-width:260px">Réglages copiés de<select id="bsrc"><option value="">Aucun (réglages par défaut)</option>
+          ${d.extensions.map((x) => `<option value="${esc(x.id)}" ${x.id === from ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label>
+        <button type="button" class="btn ghost" id="bgo">Préparer la liste</button></div>
+      <p class="hint" style="margin:0" id="bsrchint"></p>
+      <details><summary>Coller une liste de noms</summary>
+        <textarea id="bpaste" rows="5" placeholder="Un utilisateur par ligne, dans l'ordre des postes : Prénom Nom (ou Prénom ; Nom ; e-mail, copié d'Excel)"></textarea>
+        <button type="button" class="btn ghost sm" id="bfill" style="margin-top:6px">Remplir la liste</button></details>
+      <div id="blist"></div>
+      <div class="form-msg" id="bmsg"></div>
+      <div class="actions"><a class="btn ghost" href="#/utilisateurs">Annuler</a><button type="button" class="btn" id="bcreate" disabled>Créer</button></div>
+    </div></div>`;
+  const srcHint = () => { const v = $("#bsrc").value; $("#bsrchint").textContent = v ? "Copiés : renvois, statut, options, messagerie (nouveau code), numéro présenté, réglages du téléphone et touches. Non copiés : SDA, adresse MAC, accès à la console. Nouveaux identifiants SIP pour chacun." : ""; };
+  $("#bsrc").onchange = srcHint; srcHint();
+  let nums = [];
+  const count = () => {
+    const n = $$("#blist [data-fn]").filter((i) => i.value.trim() || $(`[data-ln="${i.dataset.fn}"]`).value.trim()).length;
+    $("#bcreate").disabled = !n; $("#bcreate").textContent = n ? `Créer ${n} utilisateur${n > 1 ? "s" : ""}` : "Créer";
+  };
+  const draw = () => {
+    const a = Number($("#bfrom").value), b = Number($("#bto").value);
+    if (!(a >= 100 && a <= 999 && b >= a && b <= 999)) { $("#blist").innerHTML = '<div class="flash bad">Plage invalide : postes à 3 chiffres (100 à 999), « au poste » après « du poste ».</div>'; return; }
+    if (b - a >= 300) { $("#blist").innerHTML = '<div class="flash bad">300 postes au plus à la fois.</div>'; return; }
+    const keep = Object.fromEntries($$("#blist [data-fn]").map((i) => [i.dataset.fn, [i.value, $(`[data-ln="${i.dataset.fn}"]`).value, $(`[data-em="${i.dataset.fn}"]`).value]]));
+    nums = []; for (let n = a; n <= b; n++) nums.push(String(n));
+    $("#blist").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Poste</th><th>Prénom</th><th>Nom</th><th class="hide-sm">E-mail (facultatif)</th></tr></thead><tbody>
+      ${nums.map((n) => taken.has(n) ? `<tr class="dim"><td><strong>${n}</strong></td><td colspan="3"><span class="pill off">Déjà pris</span></td></tr>`
+        : `<tr><td><strong>${n}</strong></td><td><input data-fn="${n}" maxlength="40" value="${esc(keep[n]?.[0] || "")}"></td><td><input data-ln="${n}" maxlength="40" value="${esc(keep[n]?.[1] || "")}"></td>
+          <td class="hide-sm"><input data-em="${n}" type="email" maxlength="120" value="${esc(keep[n]?.[2] || "")}"></td></tr>`).join("")}</tbody></table></div>`;
+    $$("#blist input").forEach((i) => i.oninput = count);
+    count();
+  };
+  $("#bgo").onclick = draw;
+  for (const id of ["#bfrom", "#bto"]) $(id).onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); draw(); } };
+  $("#bfill").onclick = () => {
+    if (!$("#blist [data-fn]")) draw();
+    const lines = $("#bpaste").value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const free = $$("#blist [data-fn]");
+    lines.forEach((l, i) => {
+      const inp = free[i]; if (!inp) return;
+      const parts = l.includes(";") || l.includes("\t") ? l.split(/[;\t]/).map((x) => x.trim()) : (() => { const w = l.split(/\s+/); return [w[0], w.slice(1).join(" ")]; })();
+      inp.value = parts[0] || ""; $(`[data-ln="${inp.dataset.fn}"]`).value = parts[1] || ""; if (parts[2]) $(`[data-em="${inp.dataset.fn}"]`).value = parts[2];
+    });
+    if (lines.length > free.length) $("#bmsg").innerHTML = `<div class="flash bad">${lines.length - free.length} nom(s) en trop : agrandis la plage de postes.</div>`;
+    count();
+  };
+  $("#bcreate").onclick = async (e) => {
+    const users = $$("#blist [data-fn]").map((i) => ({ number: i.dataset.fn, first_name: i.value.trim(), last_name: $(`[data-ln="${i.dataset.fn}"]`).value.trim(), email: $(`[data-em="${i.dataset.fn}"]`).value.trim() }))
+      .filter((u) => u.first_name || u.last_name);
+    if (!users.length) return;
+    e.target.disabled = true; e.target.textContent = `Création de ${users.length} utilisateur${users.length > 1 ? "s" : ""}…`;
+    try {
+      const r = await api("POST", "/api/extensions/bulk/create", { copy_from: $("#bsrc").value, users });
+      const ok = r.results.filter((x) => x.ok), bad = r.results.filter((x) => !x.ok);
+      flash = { cls: bad.length ? "warn" : "", text: `${ok.length} utilisateur${ok.length > 1 ? "s" : ""} créé${ok.length > 1 ? "s" : ""}.${bad.length ? ` Non créés : ${bad.map((x) => `${x.number} (${x.error})`).join(", ")}` : ""}` };
+      location.hash = "#/utilisateurs";
+    } catch (err) { $("#bmsg").innerHTML = `<div class="flash bad">${esc(err.message)}</div>`; e.target.disabled = false; count(); }
+  };
+  draw();
 }
 
 async function renderUserNew(from) {
@@ -1071,7 +1160,7 @@ async function renderUser(id, tab = "general") {
     <div class="bar"><div class="grow"><h1>${esc(u.id)} · ${esc(u.name)}</h1>
       <p class="sub" style="margin:0">${statusPill(u)} ${u.registered ? '<span class="pill ok">Téléphone connecté</span>' : '<span class="pill off">Téléphone non connecté</span>'}
       ${u.updated_by ? `<span class="s">· modifié le ${esc(new Date(u.updated_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }))} par ${esc(u.updated_by)}</span>` : ""}</p></div>
-      <a class="btn ghost" href="#/utilisateurs/nouveau?depuis=${esc(u.id)}">Dupliquer</a>
+      <a class="btn ghost" href="#/utilisateurs/plusieurs?depuis=${esc(u.id)}">Dupliquer</a>
       <span class="usave"><span id="udirty" class="pill wait" ${draftDirty() ? "" : "hidden"}>Modifications non enregistrées</span>
         <button type="button" class="btn ghost" id="ucancel" ${draftDirty() ? "" : "hidden"}>Annuler</button>
         <button type="button" class="btn" id="usave">Enregistrer</button></span></div>
@@ -1733,6 +1822,7 @@ async function route() {
     else if (h === "#/postes" || h === "#/utilisateurs") await renderUsers();
     else if (h === "#/telephones") await renderPhones();
     else if ((m = h.match(/^#\/utilisateurs\/nouveau(?:\?depuis=(\d{3}))?$/))) await renderUserNew(m[1]);
+    else if ((m = h.match(/^#\/utilisateurs\/plusieurs(?:\?depuis=(\d{3}))?$/))) await renderUsersBulkNew(m[1]);
     else if ((m = h.match(/^#\/utilisateurs\/(\d{3})(?:\/(\w+))?$/))) await renderUser(m[1], m[2] || "general");
     else if ((m = h.match(/^#\/gestion(?:\/([\w-]+))?(?:\/(.+))?$/))) await renderCallflow(cfHelpers, m[1] || "routages", m[2] || null);
     else if (h === "#/routes") await renderRoutes();

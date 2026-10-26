@@ -965,3 +965,16 @@ p.kofr.done{border-style:solid;color:var(--muted);font-size:13px;cursor:default;
 
 /* Tableau de bord sur téléphone : le bouton « Fermer maintenant » passe sous le texte */
 @media (max-width:480px){.oc-card{flex-wrap:wrap}.oc-card>.btn,.oc-card>button{flex:1 1 100%}}
+
+/* Ajout de plusieurs utilisateurs : postes déjà pris grisés, champs compacts */
+tr.dim td{opacity:.55}
+#blist td input{width:100%;min-width:110px}
+
+/* Menu d'actions d'une ligne (⋯) */
+.rowmenu{position:relative;display:inline-block}
+.rowmenu>summary{list-style:none;cursor:pointer;min-width:38px;justify-content:center}
+.rowmenu>summary::-webkit-details-marker{display:none}
+.rowmenu .rm-list{position:fixed;z-index:60;min-width:220px;background:var(--panel, #fff);border:1px solid var(--line, #e6e8ee);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:6px;display:flex;flex-direction:column}
+.rowmenu .rm-list>a,.rowmenu .rm-list>button{all:unset;cursor:pointer;padding:9px 12px;border-radius:8px;font-size:14px;color:inherit;text-align:left}
+.rowmenu .rm-list>a:hover,.rowmenu .rm-list>button:hover{background:var(--bg, #f4f5f8)}
+.rowmenu .rm-list>.danger{color:#d8141c}

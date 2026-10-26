@@ -447,6 +447,26 @@ export async function buildApp({ db, ami } = {}) {
       throw Object.assign(new UserError("Seul l'installateur peut donner les rôles Gestionnaire et Administrateur.", "options.role"), { status: 403 });
     return pbx.createExtension(req.body || {}, currentUser(req).email);
   });
+  // Plusieurs utilisateurs d'un coup (ex. 200 à 300), chacun avec son nom, en copiant éventuellement un utilisateur modèle
+  app.post("/api/extensions/bulk/create", { preHandler: requireUser }, async (req) => {
+    const list = Array.isArray(req.body?.users) ? req.body.users : [];
+    if (!list.length) throw new UserError("Ajoute au moins un utilisateur.");
+    if (list.length > 300) throw new UserError("300 utilisateurs au plus à la fois.");
+    const copy = String(req.body?.copy_from || "").trim();
+    if (copy) await pbx.getUser(copy);   // modèle introuvable : erreur claire avant de commencer
+    const results = [];
+    for (const x of list) {
+      const number = String(x?.number || "").trim();
+      try {
+        const r = await pbx.createExtension({ number, first_name: x.first_name, last_name: x.last_name, email: x.email, mobile: x.mobile, ...(copy ? { copy_from: copy } : {}) },
+          currentUser(req).email, { apply: false });
+        results.push({ number, ok: true, id: r.id, name: r.name });
+      } catch (e) { results.push({ number, ok: false, error: e.message }); }
+    }
+    if (results.some((r) => r.ok)) await pbx.applyDialplan();
+    audit(req, "Utilisateurs : création en série", true, `${results.filter((r) => r.ok).length} créé(s)${copy ? ` sur le modèle de ${copy}` : ""}`);
+    return { results };
+  });
   app.get("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
     const user = await pbx.getUser(req.params.id);
     return { user, server: sipServer(), key_offer: { fwd: pbx.phoneKeyInfo(user, "fwd"), standard: pbx.phoneKeyInfo(user, "standard") } };

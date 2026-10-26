@@ -466,7 +466,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     return { auth_id: r.rows[0].username, password: r.rows[0].password };
   }
 
-  async function createExtension(input, by) {
+  async function createExtension(input, by, { apply = true } = {}) {
     const num = String(input.number || "").trim();
     checkExtNumber(num);
     const exists = await db.query("SELECT 1 FROM ps_endpoints WHERE id = $1", [num]);
@@ -485,7 +485,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
         outbound_cid: src.outbound_cid, status: src.status, forwarding: structuredClone(src.forwarding), options: { ...src.options, disabled: false, ring_mobile: src.options.ring_mobile && !!String(input.mobile || "").trim(),
           // Accès à la console jamais copié (Gestionnaire, Administrateur) : à donner exprès
           role: ["console", "admin"].includes(src.options.role) ? "user" : src.options.role },
-        voicemail: { ...src.voicemail, pin: "" },
+        // Messages par e-mail : gardés seulement si la copie a une adresse (sinon la création serait refusée)
+        voicemail: { ...src.voicemail, pin: "", ...(String(input.email || "").trim() ? {} : { email: false }) },
         phone: { ...structuredClone(src.phone), mac: "", admin_password: "", last_provisioned: undefined, extra: [],
           keys: src.phone.keys.filter((k) => !(k.type === "blf" && k.value === num)) },
       };
@@ -510,7 +511,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       await saveUser(c, u, by);
       await createWebEndpoint(c, u);
     });
-    await applyDialplan();
+    if (apply) await applyDialplan();   // création en série : une seule mise à jour du moteur à la fin
     return { id: num, name: displayName(u), auth_id: authId, password };
   }
 
