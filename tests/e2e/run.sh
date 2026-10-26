@@ -117,7 +117,7 @@ echo "$VM" | grep -q "201" && pass "Messagerie vocale : boîtes créées ($(echo
 [[ "$(sudo -u postgres psql -At asterisk -c "SELECT set_var FROM ps_endpoints WHERE id = '202'")" == "USER_OPTS=,1" ]] \
   && pass "Asterisk : 202 marqué « appels externes interdits »" || fail "set_var 202"
 sudo /usr/sbin/asterisk -rx 'dialplan show *97@from-internal' | grep -q "vm-access" && pass "*97 : accès à sa messagerie" || fail "*97"
-sudo grep -q "^INBOUND_TARGET = PJSIP/201&PJSIP/201-web$" /var/lib/pbxmaison/extensions_routes.conf && pass "Route entrante : 202 (absent) retiré de la sonnerie" || { sudo cat /var/lib/pbxmaison/extensions_routes.conf >> "$OUT"; fail "INBOUND_TARGET"; }
+sudo grep -q "^INBOUND_TARGET = PJSIP/201&PJSIP/201-web&Local/201@cx-app/n$" /var/lib/pbxmaison/extensions_routes.conf && pass "Route entrante : 202 (absent) retiré de la sonnerie" || { sudo cat /var/lib/pbxmaison/extensions_routes.conf >> "$OUT"; fail "INBOUND_TARGET"; }
 sudo grep -E "ERROR|WARNING" /var/log/asterisk/messages | grep -iE "pbx_config|extensions|app_voicemail|voicemail\.conf" | tail -5 > ast-err.txt || true
 if [[ -s ast-err.txt ]]; then cat ast-err.txt >> "$OUT"; fail "Erreurs Asterisk au chargement du plan de numérotation"; else pass "Aucune erreur Asterisk au chargement du plan de numérotation"; fi
 
