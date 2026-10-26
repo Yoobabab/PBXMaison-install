@@ -63,7 +63,7 @@ test("plan de numérotation généré", () => {
 
 test("résumé des renvois", () => {
   const b = validateUser({ first_name: "Paul", status: "away", forwarding: { away: { type: "external", target: "0612345678" } } }, defaultUser("202"), ctx());
-  assert.deepEqual(forwardSummary(b), [{ level: "warn", text: "Absent : tout vers 06 12 34 56 78" }]);
+  assert.deepEqual(forwardSummary(b), [{ level: "warn", text: "Absent : tout vers 06 12 34 56 78", short: "vers 06 12 34 56 78" }]);
 });
 
 test("ancienne fiche (nom seul) relue", () => {
