@@ -11,6 +11,7 @@ import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import qrcode from "qrcode-generator";
+import { parseIpList } from "../lib/iplist.mjs";
 import pg from "pg";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken,
   newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "../lib/auth.mjs";
@@ -258,6 +259,24 @@ export async function buildApp({ db } = {}) {
     return runHost(["reactiver", req.params.slug], `Réactivation du PBX ${req.params.slug}`, req);
   });
 
+  // ---------------------------------------------------------------- Mises à jour du serveur (recherche chaque matin, installation d'un clic)
+  app.get("/api/maj", { preHandler: requireUser }, async () => {
+    const r = await hostJson(["maj", "etat"], 30_000);
+    if (!r.ok) throw new UserError(r.error || "État des mises à jour indisponible.");
+    return r.data;
+  });
+  app.post("/api/maj/verifier", { preHandler: requireRole("super", "admin") }, async () => {
+    const r = await hostJson(["maj", "verifier"], 90_000);
+    if (!r.ok) throw new UserError(r.error || "Vérification impossible.");
+    return r.data;
+  });
+  app.post("/api/maj/installer", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const r = await hostJson(["maj", "installer"], 30_000);
+    await audit(req, "Installation de la mise à jour du serveur", !!r.ok && r.data?.ok !== false);
+    if (!r.ok || r.data?.ok === false) throw new UserError(r.data?.error || r.error || "Installation impossible.");
+    return r.data;
+  });
+
   // ---------------------------------------------------------------- Surveillance : appels étranger / surtaxés, changements d'adresse des appareils
   const hostJson = (args, timeout = 60_000) => new Promise((res) => execFile(HOST_CMD[0], [...HOST_CMD.slice(1), ...args], { timeout, maxBuffer: 32 << 20 },
     (e, o, err) => { try { res({ ok: !e, data: JSON.parse(String(o || "").trim().split("\n").pop()) }); } catch { res({ ok: false, error: String(err || o || "").replace(/\x1b\[[0-9;]*m/g, "").trim() }); } }));
@@ -340,6 +359,22 @@ export async function buildApp({ db } = {}) {
       return { ok: true };
     });
   }
+
+  // Liste d'adresses à bloquer importée d'un fichier (JSON, CSV, texte) : blocage définitif, par paquets de 50
+  app.post("/api/telephonie/bloquer-liste", { preHandler: requireRole("super", "admin") }, async (req) => {
+    const r = parseIpList(req.body?.text);
+    const skipped = r.ips.filter((ip) => ip === req.ip || ip.startsWith("127.") || ip === "::1");
+    const ips = r.ips.filter((ip) => !skipped.includes(ip));
+    if (!ips.length) throw new UserError(r.invalid.length ? `Aucune adresse valide (refusées : ${r.invalid.slice(0, 5).join(", ")}).` : "Aucune adresse IP trouvée dans ce fichier.");
+    let banned = 0; const failed = [];
+    for (let i = 0; i < ips.length; i += 50) {
+      const part = ips.slice(i, i + 50);
+      const out = await new Promise((res) => execFile(HOST_CMD[0], [...HOST_CMD.slice(1), "bloquer", ...part], { timeout: 120_000 }, (e, o, err) => res(String(o || "") + String(err || ""))));
+      for (const ip of part) (out.includes(`Adresse ${ip} bloquée`) ? banned++ : failed.push(ip));
+    }
+    await audit(req, `Import d'une liste d'adresses bloquées : ${banned} bloquée(s)`, failed.length === 0, failed.length ? `échec : ${failed.slice(0, 10).join(", ")}` : "");
+    return { banned, failed, invalid: r.invalid, skipped, truncated: r.truncated, total: r.total };
+  });
 
   // ---------------------------------------------------------------- Apparence : couleur, logo, fond d'écran (console du serveur et tous ses PBX)
   // Thème enregistré (même quand l'option Marque blanche manque : il revient dès qu'elle est réactivée)

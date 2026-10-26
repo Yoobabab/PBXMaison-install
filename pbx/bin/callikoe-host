@@ -144,26 +144,27 @@ RandomizedDelaySec=15min
 [Install]
 WantedBy=timers.target
 EOF
-  # Mises à jour automatiques (toutes les 5 minutes, jamais pendant un appel)
+  # Mises à jour : recherche chaque matin (6 h 30, heure de Paris) ; installation d'un clic dans la console du serveur
   cat > /etc/systemd/system/callikoe-update.service <<EOF
 [Unit]
-Description=Callikoe — mise à jour automatique du serveur multi-tenant
+Description=Callikoe — recherche de mise à jour du serveur multi-tenant
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=${APP}/pbx/bin/callikoe-autoupdate
-TimeoutStartSec=30min
+ExecStart=${APP}/pbx/bin/callikoe-autoupdate check
+TimeoutStartSec=5min
 EOF
   cat > /etc/systemd/system/callikoe-update.timer <<'EOF'
 [Unit]
-Description=Callikoe — recherche de mise à jour toutes les 5 minutes
+Description=Callikoe — recherche de mise à jour chaque matin
 
 [Timer]
 OnBootSec=3min
-OnUnitInactiveSec=5min
-RandomizedDelaySec=30s
+OnCalendar=*-*-* 06:30:00 Europe/Paris
+Persistent=true
+RandomizedDelaySec=10min
 
 [Install]
 WantedBy=timers.target
@@ -254,7 +255,7 @@ SQL
   runuser -u postgres -- psql -q -c "REVOKE ALL ON DATABASE callikoe_hub FROM PUBLIC" >/dev/null
   # La console du serveur ne peut lancer que la création et la suppression de PBX
   cat > /etc/sudoers.d/callikoe-hub <<EOF
-callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host journal *, ${APP}/pbx/bin/callikoe-host surveillance *, ${APP}/pbx/bin/callikoe-host pays *, ${APP}/pbx/bin/callikoe-host protection *, ${APP}/pbx/bin/callikoe-host debloquer *, ${APP}/pbx/bin/callikoe-host bloquer *, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *, ${APP}/pbx/bin/callikoe-host licence *
+callikoe-hub ALL=(root) NOPASSWD: ${APP}/pbx/bin/callikoe-host creer *, ${APP}/pbx/bin/callikoe-host supprimer *, ${APP}/pbx/bin/callikoe-host etat, ${APP}/pbx/bin/callikoe-host journal *, ${APP}/pbx/bin/callikoe-host surveillance *, ${APP}/pbx/bin/callikoe-host pays *, ${APP}/pbx/bin/callikoe-host protection *, ${APP}/pbx/bin/callikoe-host debloquer *, ${APP}/pbx/bin/callikoe-host bloquer *, ${APP}/pbx/bin/callikoe-host importer *, ${APP}/pbx/bin/callikoe-host suspendre *, ${APP}/pbx/bin/callikoe-host reactiver *, ${APP}/pbx/bin/callikoe-host licence *, ${APP}/pbx/bin/callikoe-host maj *
 EOF
   chmod 440 /etc/sudoers.d/callikoe-hub
   visudo -cq -f /etc/sudoers.d/callikoe-hub || { rm -f /etc/sudoers.d/callikoe-hub; die "Règle sudo invalide (console du serveur)."; }
@@ -758,10 +759,20 @@ cmd_debloquer() {
   ok "Adresse ${ip} débloquée"
 }
 cmd_bloquer() {
-  local ip="${1:-}"; valid_ip_any "$ip" || die "Adresse IP invalide."
-  [[ "$ip" == "${PUBLIC_IP:-}" || "$ip" == 127.* ]] && die "Impossible de bloquer l'adresse du serveur lui-même."
-  fail2ban-client set callikoe-manual banip "$ip" >/dev/null || die "Blocage impossible (protection anti-intrusion arrêtée ?)."
-  ok "Adresse ${ip} bloquée (permanent)"
+  # Une ou plusieurs adresses (import d'une liste depuis la console du serveur)
+  (( $# )) || die "Adresse IP invalide."
+  local ip rc=0
+  if (( $# == 1 )); then
+    ip="$1"; valid_ip_any "$ip" || die "Adresse IP invalide."
+    [[ "$ip" == "${PUBLIC_IP:-}" || "$ip" == 127.* ]] && die "Impossible de bloquer l'adresse du serveur lui-même."
+    fail2ban-client set callikoe-manual banip "$ip" >/dev/null || die "Blocage impossible (protection anti-intrusion arrêtée ?)."
+    ok "Adresse ${ip} bloquée (permanent)"; return
+  fi
+  for ip in "$@"; do
+    if ! valid_ip_any "$ip" || [[ "$ip" == "${PUBLIC_IP:-}" || "$ip" == 127.* ]]; then warn "Adresse ${ip} refusée"; rc=1; continue; fi
+    if fail2ban-client set callikoe-manual banip "$ip" >/dev/null 2>&1; then ok "Adresse ${ip} bloquée (permanent)"; else warn "Adresse ${ip} : blocage impossible"; rc=1; fi
+  done
+  return $rc
 }
 
 # Désactiver un PBX (abonnement suspendu…) : moteur et console arrêtés, appels refusés par l'aiguilleur ; données gardées
@@ -806,6 +817,29 @@ cmd_liste() {
 }
 
 # Après une mise à jour du code : modèles réécrits et services relancés pour chaque client
+# Mises à jour depuis la console du serveur : maj etat | verifier | installer
+cmd_maj() {
+  local st=/var/lib/callikoe/update.json
+  case "${1:-etat}" in
+    verifier) "$APP/pbx/bin/callikoe-autoupdate" check >/dev/null 2>&1 || true; cmd_maj etat ;;
+    installer)
+      systemctl is-active --quiet callikoe-update-run 2>/dev/null && { echo '{"ok":true,"running":true}'; return 0; }
+      : >> /var/log/callikoe-update.log
+      systemd-run --unit=callikoe-update-run --collect "$APP/pbx/bin/callikoe-autoupdate" install >/dev/null || { echo '{"ok":false,"error":"Lancement impossible"}'; return 1; }
+      echo '{"ok":true,"running":true}' ;;
+    etat)
+      local running=false; systemctl is-active --quiet callikoe-update-run 2>/dev/null && running=true
+      tail -n 40 /var/log/callikoe-update.log 2>/dev/null | node -e '
+        const fs = require("fs"); let log = ""; process.stdin.on("data", (c) => log += c).on("end", () => {
+          let s = {}; try { s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch {}
+          let changelog = ""; try { changelog = fs.readFileSync(process.argv[3], "utf8").slice(0, 4000); } catch {}
+          let version = ""; try { version = fs.readFileSync(process.argv[4], "utf8").trim(); } catch {}
+          console.log(JSON.stringify({ ...s, running: process.argv[2] === "true", log: log.replace(/\x1b\[[0-9;]*m/g, "").split("\n").filter(Boolean).slice(-40), installed_version: version, changelog }));
+        });' "$st" "$running" "$APP/CHANGELOG.md" "$APP/VERSION" ;;
+    *) die "Usage : callikoe-host maj etat | verifier | installer" ;;
+  esac
+}
+
 cmd_mettre_a_jour() {
   cmd_init >/dev/null
   local slug rc=0
@@ -970,6 +1004,7 @@ case "${1:-}" in
   sauvegarder|backup) shift; cmd_sauvegarder "$@" ;;
   restaurer|restore) shift; cmd_restaurer "$@" ;;
   mettre-a-jour) cmd_mettre_a_jour ;;
+  maj) shift; cmd_maj "$@" ;;
   dns) cmd_dns ;;
   aiguilleur) aiguilleur; ok "Tables de l'aiguilleur SIP rechargées" ;;
   console) set -a; . "$CX/install.state"; set +a; cmd_console ;;

@@ -988,3 +988,11 @@ tr.dim td{opacity:.55}
 .cx-splash .sl::after{content:"";position:absolute;inset:28px;border-radius:50%;border:7px solid #fff}
 @keyframes cxpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
 @media (prefers-reduced-motion:reduce){.cx-splash .sl{animation:none}}
+
+/* Pastille du menu (nouvelle version disponible) */
+.nbadge{margin-left:auto;min-width:18px;height:18px;border-radius:9px;background:#111;color:#fff;font:700 11px/18px system-ui,sans-serif;text-align:center;font-style:normal;padding:0 5px;box-shadow:0 0 0 2px rgba(255,255,255,.85)}
+
+/* Annuaire : visible par */
+.vispick{margin-top:10px}
+.vislist{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:6px}
+.vislist.row{flex-direction:row;flex-wrap:wrap;gap:6px 18px;max-height:none}

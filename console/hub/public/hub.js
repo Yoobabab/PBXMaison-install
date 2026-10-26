@@ -40,6 +40,7 @@ const ICONS = {
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   paint: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.9 1.2-1.8-.4-.9.1-2.2 1.3-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="14.5" cy="7" r="1.2"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.7"/><path d="M4 4v4.7h4.7"/><path d="M12 8v4l3 2"/>',
+  upd: '<path d="M20 12a8 8 0 1 1-2.3-5.6L20 8.7"/><path d="M20 4v4.7h-4.7"/>',
 };
 const icon = (k, s = 18) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ""}</svg>`;
 const can = (...roles) => roles.includes(state.user?.role);
@@ -48,11 +49,11 @@ function setNav(active, label = "") {
   const on = !!state.user;
   document.body.classList.toggle("no-side", !on);
   document.body.classList.remove("side-open");
-  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []), ["#/licences", "Licences", "lic"], ["#/ia", "IA", "ai"]];
+  const items = [["#/", "Tableau de bord", "pbx"], ...(can("super", "admin") ? [["#/nouveau", "Nouveau PBX", "add"], ["#/restaurer", "Restaurer un PBX", "restore"]] : []), ["#/licences", "Licences", "lic"], ["#/ia", "IA", "ai"], ["#/mises-a-jour", "Mises à jour", "upd"]];
   // Paramètres : regroupés dans un menu repliable (ouvert quand on est sur une de ses pages)
   const settings = [...(can("super") ? [["#/comptes", "Comptes du serveur", "users"], ["#/cle", "Clé de signature", "key"]] : []), ["#/apparence", "Apparence", "paint"], ["#/surveillance", "Surveillance", "watch"],
     ["#/protection", "Protection anti-intrusion", "shield"], ["#/pays", "IP Pays autorisés", "globe"], ["#/telephonie", "Logs d'erreur", "sip"], ...(can("super", "admin") ? [["#/journal", "Journal", "log"]] : [])];
-  const link = ([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span></a>`;
+  const link = ([h, l, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${icon(k)}<span>${l}</span>${k === "upd" && state.maj?.available ? '<i class="nbadge" title="Nouvelle version disponible">1</i>' : ""}</a>`;
   let setOpen = settings.some(([, , k]) => k === active);
   try { if (!setOpen) setOpen = localStorage.getItem("cxhub_settings") === "1"; } catch { /* */ }
   $("#nav").innerHTML = on ? `<div class="ng">${items.map(link).join("")}</div>
@@ -937,7 +938,9 @@ async function renderProtection() {
           </tbody></table></div>` : `<div class="empty">Aucune adresse bloquée.</div>`}
         ${edit ? `<form id="banf" class="pad" style="border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end" novalidate>
           <label style="flex:1;min-width:200px">Bloquer une adresse définitivement<input name="ip" placeholder="203.0.113.7" autocomplete="off"></label>
-          <button class="btn ghost">Bloquer</button><div class="form-near" style="flex-basis:100%"></div></form>` : ""}
+          <button class="btn ghost">Bloquer</button>
+          <label class="btn ghost" style="cursor:pointer" title="Fichier JSON, CSV ou texte : toutes les adresses IP trouvées sont bloquées définitivement (500 au plus)">Importer une liste…<input type="file" id="banfile" accept=".json,.csv,.txt,.log,text/*,application/json" hidden></label>
+          <div class="form-near" style="flex-basis:100%"></div></form>` : ""}
         <p class="hint pad" style="margin:0;border-top:1px solid var(--line)">Le détail de ce que chaque adresse a tenté est dans <a href="#/telephonie">Logs d'erreur</a>.</p></div>
       <form id="protf" class="panel" novalidate><div class="ph"><h2>Protection automatique</h2></div><div class="pad stack">
         <div class="grid3" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end">
@@ -960,6 +963,19 @@ async function renderProtection() {
     if (ip === t.client_ip) throw Object.assign(new Error("C'est ton adresse actuelle : tu bloquerais tes propres téléphones."), { field: "ip" });
     await api("POST", "/api/telephonie/bloquer", { ip });
     flash = { text: `Adresse ${ip} bloquée.` }; renderProtection();
+  });
+  $("#banfile")?.addEventListener("change", async (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (f.size > 900_000) { flash = { cls: "bad", text: "Fichier trop gros (900 Ko au plus)." }; return renderProtection(); }
+    const text = await f.text();
+    const n = (text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b|[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,7}/gi) || []).length;
+    if (!confirm(`Bloquer définitivement les adresses IP trouvées dans « ${f.name} » (environ ${n}) ?\nTon adresse actuelle (${t.client_ip}) est toujours exclue.`)) return;
+    try {
+      const r = await api("POST", "/api/telephonie/bloquer-liste", { text });
+      flash = { cls: r.failed.length ? "warn" : "", text: `${r.banned} adresse${r.banned > 1 ? "s" : ""} bloquée${r.banned > 1 ? "s" : ""}.${r.truncated ? ` Fichier coupé à 500 adresses (sur ${r.total}).` : ""}${r.skipped.length ? ` Ignorée : ${r.skipped.join(", ")} (ton adresse).` : ""}${r.failed.length ? ` Échec : ${r.failed.slice(0, 5).join(", ")}${r.failed.length > 5 ? "…" : ""}` : ""}${r.invalid.length ? ` Refusées (invalides) : ${r.invalid.slice(0, 5).join(", ")}` : ""}` };
+    } catch (err) { flash = { cls: "bad", text: err.message }; }
+    renderProtection();
   });
   if (edit) bindForm($("#protf"), async (f) => {
     const r = await api("POST", "/api/protection", { maxretry: Number(f.maxretry), findtime: Number(f.findtime), bantime: Number(f.bantime), whitelist: String(f.whitelist || "").split(/\s+/).filter(Boolean) });
@@ -1094,7 +1110,52 @@ async function renderTelephonie() {
 }
 
 // ---------------------------------------------------------------- Routage
-async function loadState() { Object.assign(state, await api("GET", "/api/state")); }
+async function loadState() { Object.assign(state, await api("GET", "/api/state")); if (state.user) loadMaj(); }
+// Mises à jour : la pastille du menu suit l'état (recherché par le serveur chaque matin)
+async function loadMaj() {
+  try { state.maj = await api("GET", "/api/maj"); } catch { state.maj = null; }
+  const a = document.querySelector('#nav a[href="#/mises-a-jour"]');
+  if (a) { a.querySelector(".nbadge")?.remove(); if (state.maj?.available) a.insertAdjacentHTML("beforeend", '<i class="nbadge" title="Nouvelle version disponible">1</i>'); }
+}
+setInterval(() => { if (state.user && !document.hidden) loadMaj(); }, 30 * 60_000);
+const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "—";
+let majTimer = null;
+async function renderUpdates(msg = "") {
+  setNav("upd", "Mises à jour");
+  clearInterval(majTimer); clearTimeout(majTimer);
+  let d;
+  try { d = await api("GET", "/api/maj"); state.maj = d; } catch (e) {
+    // Pendant l'installation, la console du serveur redémarre : on réessaie
+    app.innerHTML = `<div class="flash ${state.maj?.running ? "" : "bad"}">${esc(state.maj?.running ? "Installation en cours : la console redémarre…" : e.message)}</div>`;
+    if (state.maj?.running) majTimer = setTimeout(() => location.hash === "#/mises-a-jour" && renderUpdates(), 5000);
+    return;
+  }
+  setNav("upd", "Mises à jour");
+  const edit = can("super", "admin");
+  app.innerHTML = `${msg ? `<div class="flash">${esc(msg)}</div>` : ""}<div class="bar"><div class="grow"><h1>Mises à jour</h1>
+      <p class="sub" style="margin:0">Le serveur regarde chaque matin s'il y a une nouvelle version. Rien ne s'installe sans toi.</p></div>
+      ${edit ? '<button class="btn ghost" id="mchk">Rechercher maintenant</button>' : ""}</div>
+    <div class="panel"><div class="pad stack">
+      ${d.running ? `<h2 style="margin:0">Installation en cours…</h2><p class="hint" style="margin:0">Les appels en cours ne sont pas coupés : l'installation attend qu'ils soient terminés.</p>`
+        : d.available ? `<h2 style="margin:0">Nouvelle version disponible${d.version && d.version !== "?" ? ` : ${esc(d.version)}` : ""}</h2>
+          <p style="margin:0">${esc(d.message || "")}<span class="hint"> · publiée le ${fmtWhen(d.date)}</span></p>
+          ${edit ? `<div><button class="btn" id="mgo">Installer maintenant</button></div><p class="hint" style="margin:0">Quelques minutes. Aucun appel coupé : si des appels sont en cours, l'installation attend qu'ils se terminent.</p>` : ""}`
+        : `<h2 style="margin:0">Le serveur est à jour</h2>`}
+      <p class="hint" style="margin:0">Version installée : <b>${esc(d.installed_version || "?")}</b>${d.current ? ` (${esc(d.current.slice(0, 7))})` : ""} · dernière recherche : ${fmtWhen(d.checked_at)}${d.error ? ` · <span style="color:var(--bad)">${esc(d.error)}</span>` : ""}</p>
+    </div></div>
+    ${d.log?.length ? `<div class="panel" style="margin-top:16px"><div class="ph"><h2>Journal des mises à jour</h2></div><div class="pad"><div class="joblog">${d.log.slice(-25).map(esc).join("\n")}</div></div></div>` : ""}`;
+  $("#mchk")?.addEventListener("click", async (e) => {
+    e.target.disabled = true; e.target.textContent = "Recherche…";
+    try { const r = await api("POST", "/api/maj/verifier"); renderUpdates(r.available ? "Nouvelle version trouvée." : "Aucune nouvelle version : le serveur est à jour."); }
+    catch (err) { renderUpdates(err.message); }
+  });
+  $("#mgo")?.addEventListener("click", async (e) => {
+    if (!confirm("Installer la nouvelle version sur tout le serveur ?\nLes appels en cours ne sont pas coupés.")) return;
+    e.target.disabled = true;
+    try { await api("POST", "/api/maj/installer"); renderUpdates("Installation lancée."); } catch (err) { renderUpdates(err.message); }
+  });
+  if (d.running) majTimer = setInterval(() => { if (location.hash === "#/mises-a-jour") renderUpdates(); else clearInterval(majTimer); }, 5000);
+}
 function route() {
   const h = location.hash || "#/";
   let m;
@@ -1108,6 +1169,7 @@ function route() {
   if (h === "#/journal" && can("super", "admin")) return renderAudit();
   if (h === "#/licences") return renderLicenses();
   if (h === "#/ia") return renderAi();
+  if (h === "#/mises-a-jour") return renderUpdates();
   if (h === "#/apparence") return renderTheme();
   if (h === "#/telephonie") return renderTelephonie();
   if (h === "#/surveillance") return renderWatch();

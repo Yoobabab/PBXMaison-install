@@ -147,7 +147,8 @@ async function pageSecurity(sub = "apercu") {
   } else if (sub === "ip") {
     body = `<div class="grid2">
       <div class="panel"><div class="ph"><h2>Adresses bloquées</h2><span class="s">${banned.length}</span></div>
-        <form id="banf" class="pad cx-inline" novalidate><label class="grow">Bloquer une adresse<input name="ip" placeholder="203.0.113.7 ou 203.0.113.0/24"></label><button class="btn">Bloquer</button></form>
+        <form id="banf" class="pad cx-inline" novalidate><label class="grow">Bloquer une adresse<input name="ip" placeholder="203.0.113.7 ou 203.0.113.0/24"></label><button class="btn">Bloquer</button>
+          <label class="btn ghost" style="cursor:pointer" title="Fichier JSON, CSV ou texte : toutes les adresses IP trouvées sont bloquées définitivement (500 au plus)">Importer une liste…<input type="file" id="banfile" accept=".json,.csv,.txt,.log,text/*,application/json" hidden></label></form>
         ${banned.length ? `<div class="cx-list">${banned.map((b) => `<div class="cx-row"><span class="mono grow">${H.esc(b.ip)}</span>${b.manual ? pill("bad", "Bloquée à la main (permanent)") : pill("wait", "Bloquée automatiquement")}<button class="btn ghost sm" data-unban="${H.esc(b.ip)}">Débloquer</button></div>`).join("")}</div>` : `<div class="empty">Aucune adresse bloquée.</div>`}
         ${f2b.ok ? "" : `<div class="pad"><div class="flash warn" style="margin:0">${H.esc(f2b.error || "Protection anti-intrusion injoignable.")}</div></div>`}
       </div>
@@ -221,6 +222,19 @@ async function pageSecurity(sub = "apercu") {
   const parseNums = (t) => lines(t).map((l) => { const [n, ...lab] = l.split(";"); return { number: n.trim(), label: lab.join(";").trim() }; });
   H.$("#banf") && onSubmit(H.$("#banf"), async (v) => { await H.api("POST", "/api/security/ban", { ip: v.ip }); ok(`Adresse ${v.ip} bloquée.`); pageSecurity(sub); });
   H.app.querySelectorAll("[data-unban]").forEach((b) => b.addEventListener("click", async () => { await H.api("POST", "/api/security/unban", { ip: b.dataset.unban }); ok("Adresse débloquée."); pageSecurity(sub); }));
+  // Import d'une liste d'adresses à bloquer (JSON, CSV, texte)
+  H.$("#banfile")?.addEventListener("change", async (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (f.size > 900_000) { H.setFlash({ cls: "bad", text: "Fichier trop gros (900 Ko au plus)." }); return pageSecurity(sub); }
+    const text = await f.text();
+    if (!confirm(`Bloquer définitivement les adresses IP trouvées dans « ${f.name} » ?\nTon adresse actuelle est toujours exclue.`)) return;
+    try {
+      const r = await H.api("POST", "/api/security/ban-list", { text });
+      H.setFlash({ cls: r.failed.length ? "warn" : "", text: `${r.banned} adresse${r.banned > 1 ? "s" : ""} bloquée${r.banned > 1 ? "s" : ""}.${r.truncated ? ` Fichier coupé à 500 adresses (sur ${r.total}).` : ""}${r.skipped.length ? ` Ignorée : ${r.skipped.join(", ")} (ton adresse ou le serveur).` : ""}${r.failed.length ? ` Échec : ${r.failed.slice(0, 5).join(", ")}` : ""}${r.invalid.length ? ` Refusées (invalides) : ${r.invalid.slice(0, 5).join(", ")}` : ""}` });
+    } catch (err) { H.setFlash({ cls: "bad", text: err.message }); }
+    pageSecurity(sub);
+  });
   H.$("#f2bf") && onSubmit(H.$("#f2bf"), (v) => save({ f2b: v.f2b, whitelist: lines(v.whitelist) }));
   H.$("#numf") && onSubmit(H.$("#numf"), (v) => save({ in_block: parseNums(v.in_block), out_block: parseNums(v.out_block), block_anonymous: v.block_anonymous }));
   H.$("#rgf") && onSubmit(H.$("#rgf"), (v) => save({ ...v, max_per_hour: Number(v.max_per_hour), max_intl_day: Number(v.max_intl_day), max_user_calls: Number(v.max_user_calls), max_duration: Number(v.max_duration) }));
@@ -397,9 +411,17 @@ const md = (t) => H.esc(t).split("\n").map((l) => l.startsWith("## ") ? `<h3>${l
 async function pageUpdates(check = false) {
   H.setNav("updates");
   const d = await H.api("GET", `/api/updates${check ? "?check=1" : ""}`);
+  // Serveur multi-tenant : tous les PBX sont mis à jour ensemble, depuis la console du serveur
+  if (d.tenant) {
+    H.app.innerHTML = head("Mises à jour", "Ce PBX est mis à jour avec tout le serveur.") +
+      `<div class="cx-hero ok"><span class="cx-hero-ic">${ic(I.check, 30)}</span><div class="grow"><h2>Version installée : ${H.esc(d.current.version)}</h2>
+        <p>Le serveur cherche une nouvelle version chaque matin. Pour l'installer : <b>console du serveur › Mises à jour</b> (une pastille noire apparaît dans son menu quand il y en a une).</p></div></div>`;
+    return;
+  }
   const c = d.current, a = d.available;
   const newer = a?.commit && d.up_to_date === false;
-  H.app.innerHTML = head("Mises à jour", "Callikoe se met à jour sans perdre sa configuration.", `<button class="btn ghost" id="upchk">Rechercher une mise à jour</button>`) +
+  if (H.state) { H.state.update_available = !!newer; H.renderNav?.(); }
+  H.app.innerHTML = head("Mises à jour", "Le PBX cherche une nouvelle version chaque matin. Rien ne s'installe sans toi.", `<button class="btn ghost" id="upchk">Rechercher une mise à jour</button>`) +
     `<div class="cx-hero ${newer ? "new" : d.up_to_date ? "ok" : ""}"><span class="cx-hero-ic">${ic(newer ? I.up2 : I.check, 30)}</span>
       <div class="grow"><h2>${newer ? `Nouvelle version disponible : ${H.esc(a.version)}` : d.up_to_date ? "Callikoe est à jour" : "Version installée"}</h2>
       <p>Installée : <b>${H.esc(c.version)}</b>${c.commit ? ` <span class="mono">(${H.esc(c.commit.slice(0, 7))})</span>` : ""}${c.installed_at ? ` le ${fmtDT(c.installed_at)}` : ""}

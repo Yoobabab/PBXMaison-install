@@ -16,7 +16,7 @@ import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIM
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
-import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, PHONE_TYPES } from "./contacts.mjs";
+import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, contactVisibleTo, PHONE_TYPES } from "./contacts.mjs";
 import { pathNow, ringTargets, parseContacts, deviceStates, inboundVerdict, simulateOutbound } from "./diagnose.mjs";
 import { defaultSecurity } from "./security.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
@@ -908,7 +908,8 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       const all = await loadUsers();
       const viewer = all.find((u) => u.id === pb[1]) || { options: {} };
       const users = all.filter((u) => u.id !== viewer.id && sees(viewer, u)).map((u) => ({ id: u.id, name: displayName(u) }));
-      return { text: yealinkPhonebook(users, await loadContacts()), type: "application/xml" };
+      const viewerUser = all.find((u) => u.id === pb[1]) || null;
+      return { text: yealinkPhonebook(users, (await loadContacts()).filter((c) => contactVisibleTo(c, viewerUser))), type: "application/xml" };
     }
     if (/^y0{6}\d{6}\.cfg$/i.test(file)) return { text: "#!version:1.0.0.1\n## Callikoe : tout est dans <mac>.cfg\n" };
     const req = provRequest(file);
@@ -1028,7 +1029,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     writeAtomic(path.join(dir, "extensions_users.conf"), buildUsersDialplan(users));
     const contacts = await loadContacts();
     const std = await db.getSetting("standard", defaultStandard());
-    writeAtomic(path.join(dir, "extensions_callflow.conf"), buildCallflowDialplan(model) + buildStandardDialplan(std, model) + buildPhonebookDialplan(contacts) + (ext.dialplan || ""));
+    writeAtomic(path.join(dir, "extensions_callflow.conf"), buildCallflowDialplan(model) + buildStandardDialplan(std, model) + buildPhonebookDialplan(contacts.filter((c) => contactVisibleTo(c, null))) + (ext.dialplan || ""));
     writeAtomic(path.join(dir, "queues_callikoe.conf"), buildQueues(model));
     // Musiques d'attente des files : un dossier par file contenant un lien vers l'annonce choisie
     for (const c of mohClasses(model)) {
@@ -1360,11 +1361,13 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
 
   // ------------------------------------------------------------------ Annuaire de l'entreprise
   async function loadContacts() {
-    const r = await db.query("SELECT id::text, first_name, last_name, company, email, notes, phones, updated_at FROM pbxmaison_contacts ORDER BY lower(last_name || first_name || company)");
+    const r = await db.query("SELECT id::text, first_name, last_name, company, email, notes, phones, visibility, updated_at FROM pbxmaison_contacts ORDER BY lower(last_name || first_name || company)");
     return r.rows.map((c) => ({ ...c, name: contactName(c) }));
   }
-  async function listContacts(q = "") {
-    const all = await loadContacts();
+  /** Contacts (tous pour la console ; viewerId : seulement ceux que ce poste peut voir) */
+  async function listContacts(q = "", viewerId = null) {
+    let all = await loadContacts();
+    if (viewerId) { const v = (await loadUsers()).find((u) => u.id === String(viewerId)); all = all.filter((c) => contactVisibleTo(c, v)); }
     const n = String(q || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[\s.]/g, "");
     if (!n) return all;
     return all.filter((c) => `${c.first_name}${c.last_name}${c.company}${c.email}${c.phones.map((p) => p.number).join("")}`.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s/g, "").includes(n));
@@ -1373,12 +1376,12 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const c = validateContact(input || {}, countryCode());
     let r;
     if (id) {
-      r = await db.query(`UPDATE pbxmaison_contacts SET first_name=$2, last_name=$3, company=$4, email=$5, notes=$6, phones=$7, updated_at=now(), updated_by=$8 WHERE id=$1 RETURNING id::text`,
-        [id, c.first_name, c.last_name, c.company, c.email, c.notes, JSON.stringify(c.phones), by || ""]);
+      r = await db.query(`UPDATE pbxmaison_contacts SET first_name=$2, last_name=$3, company=$4, email=$5, notes=$6, phones=$7, updated_at=now(), updated_by=$8${input?.visibility ? ", visibility=$9" : ""} WHERE id=$1 RETURNING id::text`,
+        [id, c.first_name, c.last_name, c.company, c.email, c.notes, JSON.stringify(c.phones), by || "", ...(input?.visibility ? [JSON.stringify(c.visibility)] : [])]);
       if (!r.rowCount) throw Object.assign(new UserError("Contact introuvable."), { status: 404 });
     } else {
-      r = await db.query(`INSERT INTO pbxmaison_contacts (first_name, last_name, company, email, notes, phones, updated_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`,
-        [c.first_name, c.last_name, c.company, c.email, c.notes, JSON.stringify(c.phones), by || ""]);
+      r = await db.query(`INSERT INTO pbxmaison_contacts (first_name, last_name, company, email, notes, phones, updated_by, visibility) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text`,
+        [c.first_name, c.last_name, c.company, c.email, c.notes, JSON.stringify(c.phones), by || "", JSON.stringify(c.visibility)]);
     }
     await applyDialplan();
     return { id: r.rows[0].id, ...c, name: contactName(c) };

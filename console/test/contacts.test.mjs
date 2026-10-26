@@ -28,3 +28,16 @@ test("annuaire Yealink et nom de l'appelant", () => {
   assert.match(d, /exten => 0478123456,1,Set\(CALLERID\(name\)=Jean Dupont Boulangerie & Co\)/);
   assert.match(d, /exten => _X\.,1,Return\(\)/);
 });
+
+test("annuaire : contact visible par tout le monde, certains postes ou certains rôles", async () => {
+  const { validateVisibility, contactVisibleTo, validateContact } = await import("../lib/contacts.mjs");
+  const u = (id, role = "user") => ({ id, options: { role } });
+  assert.deepEqual(validateContact({ last_name: "A", phones: [{ number: "0412345678" }] }).visibility, { scope: "all" });
+  const priv = { visibility: validateVisibility({ scope: "users", users: ["202", "x"] }) };
+  assert.deepEqual(priv.visibility, { scope: "users", users: ["202"] });
+  assert.equal(contactVisibleTo(priv, u("202")), true); assert.equal(contactVisibleTo(priv, u("203")), false); assert.equal(contactVisibleTo(priv, null), false);
+  const mgr = { visibility: validateVisibility({ scope: "roles", roles: ["manager", "nope"] }) };
+  assert.equal(contactVisibleTo(mgr, u("203", "manager")), true); assert.equal(contactVisibleTo(mgr, u("204")), false);
+  assert.throws(() => validateVisibility({ scope: "users", users: [] }), /au moins une personne/);
+  assert.equal(contactVisibleTo({}, null), true);
+});

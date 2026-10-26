@@ -146,7 +146,7 @@ function setNav(active) {
   // Multi-tenant : les comptes se gèrent depuis la console du serveur (clients : rôle « Accès console » dans leur fiche utilisateur)
   const nav = NAV.map(([g, items]) => [g, items.filter(([, , k]) => (state?.role !== "client" || !CLIENT_HIDDEN.has(k)) && !(k === "accounts" && state?.tenant))]).filter(([, items]) => items.length);
   $("#nav").innerHTML = on ? nav.map(([g, items]) => `<div class="ng">${g ? `<span class="ngl">${g}</span>` : ""}${items.map(([h, l, k]) =>
-    `<a href="${h}" class="${k === active ? "on" : ""}" ${k === active ? 'aria-current="page"' : ""}>${nicon(k)}<span>${l}</span></a>`).join("")}</div>`).join("") : "";
+    `<a href="${h}" class="${k === active ? "on" : ""}" ${k === active ? 'aria-current="page"' : ""}>${nicon(k)}<span>${l}</span>${k === "updates" && state?.update_available ? '<i class="nbadge" title="Nouvelle version disponible">1</i>' : ""}</a>`).join("")}</div>`).join("") : "";
   $("#user").innerHTML = on ? `<a class="sf-link" href="/softphone" target="_blank" rel="noopener">${nicon("soft", 17)}<span>Softphone web</span></a>
     <div class="sf-user"><span class="sf-av">${esc((state.email || "?").charAt(0).toUpperCase())}</span><span class="sf-mail" title="${esc(state.email || "")}">${esc(state.email || "")}</span>
     <button id="logout" title="Se déconnecter" aria-label="Se déconnecter">${nicon("out2", 17)}</button></div>` : "";
@@ -849,7 +849,7 @@ async function renderUsers() {
   for (const id of [...usel]) if (!d.extensions.some((x) => x.id === id)) usel.delete(id);
   const q = sessionStorage.getItem("pbxm_users_q") || "";
   const onlyFw = sessionStorage.getItem("pbxm_users_fw") === "1";
-  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Utilisateurs</h1><p class="sub" style="margin:0">Un utilisateur = un poste (téléphone, softphone, DECT), ses renvois et sa messagerie.</p></div>
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Utilisateurs</h1><p class="sub" style="margin:0">Postes, renvois et messageries.</p></div>
     <a class="btn ghost" href="#/utilisateurs/plusieurs">+ Ajouter plusieurs</a><a class="btn" href="#/utilisateurs/nouveau">+ Ajouter un utilisateur</a></div>
     <div class="panel">
       <div class="filters"><input id="uq" type="search" placeholder="Rechercher : nom, poste, SDA, numéro de renvoi…" value="${esc(q)}">
@@ -995,7 +995,7 @@ async function renderUsersBulkNew(from) {
   // Lignes à créer : { n: numéro, fn, ln, em, sel: cochée, free: numéro saisi à la main }
   let rows = [];
   app.innerHTML = `<a class="back" href="#/utilisateurs">← Utilisateurs</a><h1>${from ? "Dupliquer un utilisateur" : "Ajouter plusieurs utilisateurs"}</h1>
-    <p class="sub">Prépare une plage de postes et/ou ajoute des lignes une à une (numéro court + nom), retire celles qui ne servent pas, puis crée tout en une fois. Lignes sans nom : pas créées.</p>
+    <p class="sub">Une plage de postes ou des lignes une à une. Les lignes sans nom ne sont pas créées.</p>
     <div class="panel"><div class="pad stack">
       <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
         <label>Du poste<input id="bfrom" inputmode="numeric" maxlength="3" value="${esc(String(start))}" style="width:110px"></label>
@@ -1211,8 +1211,8 @@ async function renderUser(id, tab = "general") {
       <label>Nom<input name="last_name" value="${esc(u.last_name)}" maxlength="40"></label>
       <label>E-mail<input name="email" type="email" value="${esc(u.email)}" maxlength="120"></label>
       <label>Mobile<input name="mobile" inputmode="tel" value="${esc(fmtPhone(u.mobile) === "—" ? "" : fmtPhone(u.mobile))}" placeholder="06 12 34 56 78"></label>
-      <label>Numéro présenté (appels sortants)<input name="outbound_cid" inputmode="tel" value="${esc(u.outbound_cid ? fmtPhone(u.outbound_cid) : "")}" placeholder="Celui du trunk"><span class="hint">Vide = numéro du trunk. Doit être un numéro de ta ligne, sinon l'opérateur peut refuser l'appel.</span></label>
-      <label>SDA attribuées<textarea name="dids" rows="3" placeholder="04 12 34 56 78">${esc(u.dids.map(fmtPhone).join("\n"))}</textarea><span class="hint">Un numéro par ligne. Les appels vers ces numéros sonnent directement chez cet utilisateur.</span><span class="hint" id="freedids"></span></label>
+      <label>Numéro présenté (appels sortants)<input name="outbound_cid" inputmode="tel" value="${esc(u.outbound_cid ? fmtPhone(u.outbound_cid) : "")}" placeholder="Celui du trunk"><span class="hint">Vide = numéro du trunk.</span></label>
+      <label>SDA attribuées<textarea name="dids" rows="3" placeholder="04 12 34 56 78">${esc(u.dids.map(fmtPhone).join("\n"))}</textarea><span class="hint">Un numéro par ligne.</span><span class="hint" id="freedids"></span></label>
       ${save}</form>
       <div class="pad appbox" style="border-top:1px solid var(--line)">
         <h3 class="sec" style="margin:0 0 8px">Espace utilisateur et softphone web</h3>
@@ -1645,7 +1645,7 @@ async function renderCdr() {
   const pg = paginate("cdr", d.calls);
   const fmtWhen = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
   const sel = (name, opts) => `<select data-f="${name}">${opts.map(([v, l]) => `<option value="${v}" ${f[name] === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
-  app.innerHTML = `<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX : qui a appelé, qui a répondu, combien de temps.</p></div>
+  app.innerHTML = `<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX.</p></div>
     <a class="btn ghost" href="/api/cdr.csv?${qs}">Exporter (CSV, Excel)</a></div>
     <div class="kpis">${[["Appels sur la période", d.total, ({ 1: "aujourd'hui et hier", 7: "7 derniers jours", 30: "30 jours", 90: "90 jours", 366: "1 an" })[f.days] || ""],
       ["Répondus", d.calls.filter((c) => c.status === "answered").length, ""], ["Manqués", d.calls.filter((c) => c.status === "missed").length, "à rappeler"],
@@ -1708,8 +1708,11 @@ async function renderContacts(editId) {
   const cur = editId && editId !== "nouveau" ? all.find((c) => c.id === editId) : null;
   const editing = editId === "nouveau" || cur;
   const pg = paginate("book", contacts);
-  const c = cur || { first_name: "", last_name: "", company: "", email: "", notes: "", phones: [{ type: "work", number: "" }, { type: "mobile", number: "" }] };
-  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Annuaire</h1><p class="sub" style="margin:0">Contacts de l'entreprise : visibles dans le softphone et sur les téléphones Yealink, et nom affiché quand ils appellent.</p></div>
+  const c = cur || { first_name: "", last_name: "", company: "", email: "", notes: "", phones: [{ type: "work", number: "" }, { type: "mobile", number: "" }], visibility: { scope: "all" } };
+  const exts = editing ? (await api("GET", "/api/extensions")).extensions : [];
+  const vis = structuredClone(c.visibility || { scope: "all" });
+  const visLabel = (v) => !v || v.scope === "all" ? "" : v.scope === "users" ? `Privé : ${v.users.join(", ")}` : `Rôles : ${v.roles.map((r) => ROLES.find((x) => x.id === r)?.name || r).join(", ")}`;
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Annuaire</h1><p class="sub" style="margin:0">Contacts de l'entreprise.</p></div>
     <a class="btn ghost" href="/api/contacts.csv">Exporter</a><button class="btn ghost" id="imp">Importer un CSV</button><a class="btn" href="#/annuaire/nouveau">+ Ajouter un contact</a></div>
     <input type="file" id="impf" accept=".csv,text/csv" hidden>
     <div class="kpis">${[["Contacts", all.length, "dans l'annuaire"], ["Sociétés", new Set(all.map((x) => x.company).filter(Boolean)).size, ""], ["Numéros", all.reduce((n, x) => n + x.phones.length, 0, ), "nom affiché quand ils appellent"]]
@@ -1720,13 +1723,16 @@ async function renderContacts(editId) {
         <label>Prénom<input name="first_name" value="${esc(c.first_name)}"></label><label>Nom<input name="last_name" value="${esc(c.last_name)}"></label>
         <label>Société<input name="company" value="${esc(c.company)}"></label><label>E-mail<input name="email" type="email" value="${esc(c.email)}"></label>
         <div class="full" id="phs"></div>
+        <div class="full"><span class="dl">Visible par</span>
+          <div class="seg" id="visseg">${[["all", "Tout le monde"], ["users", "Certaines personnes"], ["roles", "Des rôles"]].map(([k, l]) => `<label class="${vis.scope === k ? "on" : ""}"><input type="radio" name="_vis" value="${k}" ${vis.scope === k ? "checked" : ""}>${l}</label>`).join("")}</div>
+          <div id="vispick" class="vispick"></div></div>
         <label class="full">Notes<textarea name="notes" rows="2">${esc(c.notes)}</textarea></label>
         <div class="form-msg full"></div>
         <div class="actions">${cur ? '<button type="button" class="btn ghost" id="cdel">Supprimer</button>' : ""}<a class="btn ghost" href="#/annuaire">Annuler</a><button class="btn">Enregistrer</button></div>
       </form></div>` : ""}
     <div class="panel"><div class="filters"><input type="search" id="bq" placeholder="Rechercher : nom, société, numéro…" value="${esc(q)}"><span class="s">${contacts.length} contact${contacts.length > 1 ? "s" : ""}</span></div>
     ${contacts.length ? `${pg.html}<div class="table-wrap"><table><thead><tr><th>Nom</th><th>Société</th><th>Numéros</th><th>E-mail</th><th></th></tr></thead><tbody>
-      ${pg.rows.map((x) => `<tr><td><a href="#/annuaire/${esc(x.id)}">${esc(`${x.first_name} ${x.last_name}`.trim() || "—")}</a></td><td>${esc(x.company)}</td>
+      ${pg.rows.map((x) => `<tr><td><a href="#/annuaire/${esc(x.id)}">${esc(`${x.first_name} ${x.last_name}`.trim() || "—")}</a>${visLabel(x.visibility) ? ` <span class="pill off" title="Ce contact n'est visible que par eux">${esc(visLabel(x.visibility))}</span>` : ""}</td><td>${esc(x.company)}</td>
         <td>${x.phones.map((p) => `${esc(fmtPhone(p.number))} <span class="s">${PTYPES[p.type]}</span>`).join("<br>")}</td><td>${esc(x.email)}</td>
         <td class="acts"><a class="btn ghost sm" href="#/annuaire/${esc(x.id)}">Modifier</a></td></tr>`).join("")}</tbody></table></div>${pg.html}`
       : `<div class="empty">${q ? "Aucun résultat." : "L'annuaire est vide : ajoute des contacts ou importe un fichier CSV (Prénom ; Nom ; Société ; Téléphone ; Mobile ; E-mail)."}</div>`}</div>`;
@@ -1758,11 +1764,28 @@ async function renderContacts(editId) {
     $("#padd").onclick = () => { phones.push({ type: "work", number: "" }); drawPh(); };
   };
   drawPh();
+  // Visible par : tout le monde, certaines personnes (postes) ou certains rôles
+  const drawVis = () => {
+    app.querySelectorAll("#visseg label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
+    const box = $("#vispick");
+    if (vis.scope === "users") {
+      vis.users ||= [];
+      box.innerHTML = `<input type="search" id="visq" placeholder="Filtrer : nom ou poste…"><div class="vislist">${exts.map((u) => `<label class="check" data-n="${esc(`${u.id} ${u.name}`.toLowerCase())}"><input type="checkbox" value="${esc(u.id)}" ${vis.users.includes(u.id) ? "checked" : ""}> ${esc(u.id)} · ${esc(u.name)}</label>`).join("")}</div>`;
+      box.querySelectorAll(".vislist input").forEach((i) => i.onchange = () => { vis.users = [...box.querySelectorAll(".vislist input:checked")].map((x) => x.value); });
+      $("#visq").oninput = (e) => { const q = e.target.value.toLowerCase(); box.querySelectorAll(".vislist label").forEach((l) => { l.hidden = !!q && !l.dataset.n.includes(q); }); };
+    } else if (vis.scope === "roles") {
+      vis.roles ||= [];
+      box.innerHTML = `<div class="vislist row">${ROLES.map((r) => `<label class="check"><input type="checkbox" value="${r.id}" ${vis.roles.includes(r.id) ? "checked" : ""}> ${esc(r.name)}</label>`).join("")}</div>`;
+      box.querySelectorAll("input").forEach((i) => i.onchange = () => { vis.roles = [...box.querySelectorAll("input:checked")].map((x) => x.value); });
+    } else box.innerHTML = "";
+  };
+  app.querySelectorAll("#visseg input").forEach((i) => i.onchange = () => { vis.scope = i.value; drawVis(); });
+  drawVis();
   $("#cf").onsubmit = async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector("button[type=submit], button:not([type])");
     if (btn?.disabled) return; if (btn) btn.disabled = true;   // pas de doublon sur un double clic
-    try { await api(cur ? "PUT" : "POST", `/api/contacts${cur ? "/" + cur.id : ""}`, { ...formData(e.target), phones }); flash = { text: "Contact enregistré." }; location.hash = "#/annuaire"; }
+    try { await api(cur ? "PUT" : "POST", `/api/contacts${cur ? "/" + cur.id : ""}`, { ...formData(e.target), _vis: undefined, phones, visibility: vis }); flash = { text: "Contact enregistré." }; location.hash = "#/annuaire"; }
     catch (err) { showFormError(e.target, err); if (btn) btn.disabled = false; }
   };
   $("#cdel")?.addEventListener("click", async () => {
@@ -1832,7 +1855,7 @@ document.addEventListener("click", async (e) => {
 const cfHelpers = { api, esc, $, app, setNav, formData, showFormError, takeFlash: () => takeFlash(), setFlash: (f) => { flash = f; } };
 
 // Pages d'administration (module admin-ui.js)
-const adminHelpers = { ...cfHelpers, fmtPhone, copyButtons, paginate, wirePager, resetPage,
+const adminHelpers = { ...cfHelpers, fmtPhone, copyButtons, paginate, wirePager, resetPage, get state() { return state; }, renderNav: () => setNav("updates"),
   /** Rappelle fn toutes les ms jusqu'à ce qu'elle renvoie true (arrêté en changeant de page). */
   poll: (fn, ms) => { clearInterval(timer); const run = async () => { try { if (await fn()) clearInterval(timer); } catch { /* réessaie */ } }; timer = setInterval(run, ms); run(); } };
 

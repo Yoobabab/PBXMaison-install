@@ -2,7 +2,30 @@
  * Annuaire de l'entreprise : contacts partagés (clients, fournisseurs…). Fonctions pures, testées dans
  * console/test/contacts.test.mjs : validation, import CSV, annuaire Yealink (XML), nom de l'appelant (dialplan).
  */
-import { UserError, nationalNumber } from "./users.mjs";
+import { UserError, nationalNumber, USER_ROLES } from "./users.mjs";
+
+/** Qui voit le contact : { scope: "all" } | { scope: "users", users: ["201", …] } | { scope: "roles", roles: ["manager", …] } */
+export function validateVisibility(v) {
+  const scope = ["users", "roles"].includes(v?.scope) ? v.scope : "all";
+  if (scope === "users") {
+    const users = [...new Set((Array.isArray(v.users) ? v.users : []).map(String).filter((x) => /^\d{2,6}$/.test(x)))].slice(0, 100);
+    if (!users.length) throw new UserError("Choisis au moins une personne qui verra ce contact.", "visibility");
+    return { scope, users };
+  }
+  if (scope === "roles") {
+    const roles = [...new Set((Array.isArray(v.roles) ? v.roles : []).filter((r) => USER_ROLES[r]))];
+    if (!roles.length) throw new UserError("Choisis au moins un rôle qui verra ce contact.", "visibility");
+    return { scope, roles };
+  }
+  return { scope: "all" };
+}
+/** Le contact est-il visible par cet utilisateur ? (sans utilisateur : seulement les contacts de tout le monde) */
+export function contactVisibleTo(c, user) {
+  const v = c.visibility || { scope: "all" };
+  if (v.scope === "users") return !!user && (v.users || []).includes(String(user.id));
+  if (v.scope === "roles") return !!user && (v.roles || []).includes(user.options?.role || "user");
+  return true;
+}
 
 export const PHONE_TYPES = { work: "Bureau", mobile: "Mobile", home: "Domicile", other: "Autre" };
 const clean = (s, max = 60) => String(s ?? "").replace(/[\r\n<>"\\|]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
@@ -25,6 +48,7 @@ export function validateContact(input, cc = "33") {
   }
   if (!c.phones.length) throw new UserError("Ajoute au moins un numéro.", "phones");
   c.phones = c.phones.slice(0, 6);
+  c.visibility = validateVisibility(input.visibility);
   return c;
 }
 

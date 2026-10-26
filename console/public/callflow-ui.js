@@ -27,7 +27,7 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   await load();
   const tab = TABS.find((t) => t[0] === sub) && (sub !== "planning" || id) ? sub : "routages";
   const kind = TABS.find((t) => t[0] === tab)[2];
-  const head = `<div class="bar"><div class="grow"><h1>Gestion d'appels</h1><p class="sub" style="margin:0">Où vont les appels entrants : routages par numéro (avec leurs horaires), groupes, files d'attente, SVI.</p></div></div>
+  const head = `<div class="bar"><div class="grow"><h1>Gestion d'appels</h1><p class="sub" style="margin:0">Où vont les appels entrants.</p></div></div>
     <nav class="tabs">${TABS.filter(([s]) => !HIDDEN_TABS.includes(s) && (s !== "regles" || tab === "regles" || objs("rule").length)).map(([s, l]) => `<a href="#/gestion/${s}" class="${s === tab || (s === "routages" && tab === "planning") || (s === "depannage" && DIAG_TABS.some(([k]) => k === tab)) ? "on" : ""}">${l}</a>`).join("")}</nav>
     ${DIAG_TABS.some(([k]) => k === tab) ? `<nav class="subtabs">${DIAG_TABS.map(([k, l]) => `<a href="#/gestion/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}`;
   if (tab === "standard") { location.hash = "#/utilisateurs"; return; }   // déplacé : fiche utilisateur › Renvois d'appels
@@ -158,7 +158,7 @@ function renderSchedules(head) {
   }).join("");
   const used = (id) => cf.objects.filter((o) => o.data.schedule === id).length;
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed">
-    <div class="ph"><p class="hint" style="margin:0;max-width:760px">Les horaires généraux s'appliquent par défaut aux nouveaux routages. Chaque numéro peut avoir ses propres horaires dans son routage (ou un planning par tranche horaire).</p>
+    <div class="ph"><p class="hint" style="margin:0;max-width:760px">Les horaires généraux s'appliquent par défaut aux nouveaux routages.</p>
       <a class="btn" href="#/gestion/horaires/nouveau">+ Nouveaux horaires</a></div>
     <div class="pad"><h3 class="cf-h" style="margin-top:0">Horaires généraux du PBX</h3>
       ${general ? `<div class="sch-gen"><div class="grow"><strong>${esc(general.name)}</strong> ${stateBadge(general)}<div class="s">${esc(describeWeek(general.data.week))}${general.data.holidays_fr ? " · fermé les jours fériés" : ""}${general.data.holidays.length ? ` · ${general.data.holidays.length} période(s) de congés` : ""}</div></div>
@@ -178,14 +178,14 @@ function renderSchedules(head) {
 // ---------------------------------------------------------------- Listes
 const INTRO = {
   flow: "Le plus simple : décris le routage en une phrase ou construis-le en glissant des cadres de gauche à droite (SDA → sonnerie → groupe → messagerie…). Pour des renvois différents selon le jour et l'heure (lundi 9 h-12 h Paul puis son mobile, 14 h-18 h Julie…), crée un planning de la semaine.",
-  rule: "Une règle par numéro appelé (SDA) : où va l'appel pendant les heures d'ouverture, en dehors et les jours fériés. La règle par défaut prend les SDA sans règle.",
-  schedule: "Plages d'ouverture de la semaine, jours fériés et congés. Choisis-les (ou crées-les) directement dans l'éditeur de routage.",
-  group: "Plusieurs postes sonnent ensemble ou à tour de rôle. Les membres Absents, en Ne pas déranger ou qui refusent les appels de groupe ne sonnent pas.",
-  queue: "L'appelant patiente en musique jusqu'à ce qu'un agent se libère ; la position dans la file peut être annoncée.",
-  ivr: "Standard automatique : « Tapez 1 pour le service commercial… ». L'appelant peut aussi composer directement un numéro de poste.",
-  groupvm: "Une boîte vocale partagée : le voyant s'allume chez tous les membres, qui l'écoutent dans le softphone ou avec *98.",
-  conf: "Salles de réunion : on compose le numéro depuis n'importe quel poste. Depuis le softphone web, la réunion est aussi en vidéo.",
-  prompt: "Messages audio utilisés par les SVI, les files d'attente et les règles (« Nous sommes fermés… »).",
+  rule: "Une règle par SDA. La règle par défaut prend les SDA sans règle.",
+  schedule: "Heures d'ouverture, fériés et congés.",
+  group: "Plusieurs postes sonnent ensemble ou à tour de rôle.",
+  queue: "L'appelant patiente jusqu'à ce qu'un agent se libère.",
+  ivr: "« Tapez 1 pour le service commercial… »",
+  groupvm: "Boîtes vocales partagées (écoute : softphone ou *98).",
+  conf: "Salles de réunion (vidéo depuis le softphone web).",
+  prompt: "Messages audio (« Nous sommes fermés… »).",
 };
 function summary(o) {
   const d = o.data;
@@ -811,7 +811,7 @@ async function renderDiag(head, arg) {
   if (mode === "ai") return renderDiagAi(head);
   const users = cf.users;
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed"><div class="pad stack">
-    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant depuis un poste"], ["ai", "✨ Demander à l'IA"]].map(([k, l]) => `<label class="${mode === k ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${mode === k ? "checked" : ""}>${l}</label>`).join("")}</div>
+    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant"], ["ai", "IA"]].map(([k, l]) => `<label class="${mode === k ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${mode === k ? "checked" : ""}>${l}</label>`).join("")}</div>
     <form id="dgf" class="dg-form" novalidate>
       ${mode === "in" ? `<label class="grow">Numéro appelé<input id="dgnum" placeholder="SDA du client (04 12 34 56 78) ou numéro interne (201, 600…)" value="${esc(arg && mode === "in" ? decodeURIComponent(arg) : sessionStorage.getItem("cf_diag_in") || "")}" autocomplete="off"></label>`
         : `<label>Depuis le poste<select id="dgext">${users.map((u) => `<option value="${esc(u.id)}" ${sessionStorage.getItem("cf_diag_ext") === u.id ? "selected" : ""}>${esc(u.id)} · ${esc(u.name)}</option>`).join("")}</select></label>
@@ -872,7 +872,7 @@ async function renderDiagAi(head) {
   const st = await h.api("GET", "/api/ai").catch(() => ({ enabled: false }));
   const q0 = sessionStorage.getItem("cf_diag_ai") || "";
   h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel tabbed"><div class="pad stack">
-    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant depuis un poste"], ["ai", "✨ Demander à l'IA"]].map(([k, l]) => `<label class="${k === "ai" ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${k === "ai" ? "checked" : ""}>${l}</label>`).join("")}</div>
+    <div class="seg dg-mode">${[["in", "Appel entrant"], ["out", "Appel sortant"], ["ai", "IA"]].map(([k, l]) => `<label class="${k === "ai" ? "on" : ""}"><input type="radio" name="dgm" value="${k}" ${k === "ai" ? "checked" : ""}>${l}</label>`).join("")}</div>
     ${st.enabled ? `<form id="daif" class="stack" novalidate>
       <label>Décris le problème<textarea id="daiq" rows="3" maxlength="1000" placeholder="Ex. : le poste 203 ne sonne pas quand on appelle le 04 65 00 15 40 · les appels sortants ne passent plus depuis ce matin · le client entend un message de fermeture à 10 h">${esc(q0)}</textarea></label>
       <div class="row"><button class="btn">Analyser</button><span class="hint">L'IA lit l'état du PBX (postes, trunks, renvois, Ouvert / Fermé, traceur des numéros cités, dernières alertes), jamais les mots de passe.</span></div>

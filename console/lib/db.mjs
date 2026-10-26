@@ -145,6 +145,8 @@ export function createDb(cfg) {
         email text NOT NULL DEFAULT '', notes text NOT NULL DEFAULT '', phones jsonb NOT NULL DEFAULT '[]',
         created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), updated_by text NOT NULL DEFAULT ''
       );
+      -- Qui voit le contact : tout le monde, certains postes ou certains rôles
+      ALTER TABLE pbxmaison_contacts ADD COLUMN IF NOT EXISTS visibility jsonb NOT NULL DEFAULT '{"scope":"all"}';
       -- Chaque appareil vu sur un poste (téléphone, softphone, appli) : gardé quand il se déconnecte, avec sa dernière adresse publique
       CREATE TABLE IF NOT EXISTS pbxmaison_device_seen (
         ext text NOT NULL, dkey text NOT NULL,

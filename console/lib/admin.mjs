@@ -16,6 +16,7 @@ import { defaultShortcodes, normalizeShortcodes, validateShortcodes, buildShortc
 import { defaultRecording, validateRecording, recordingGlobals, recordingPath, purgeRecordings, recordingUsage, REC_DIR } from "./recording.mjs";
 import { defaultBackup, validateBackup, publicBackup, backupDue, listBackups, backupPath, uploadBackup, BACKUP_DIR, SCHEDULES, PROTOCOLS } from "./backup.mjs";
 import { ALERT_EVENTS, SEVERITY, CRITICAL_SERVICES, defaultAlerts, validateAlerts, publicAlerts, detectAlerts } from "./alerts.mjs";
+import { parseIpList } from "./iplist.mjs";
 import { GATEWAY_MODELS, GATEWAY_TYPES, validateGateway, manualGuide } from "./devices.mjs";
 import { EMERGENCY } from "./pbx.mjs";
 import { smtpReady, transportOf, smtpError, voicemailMail, alertMail, messagesToMail } from "./mail.mjs";
@@ -147,6 +148,22 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     if (!r.lines[0]?.ok) throw sysError(r, ban ? "Blocage impossible" : "Déblocage impossible");
     if (ban) await logAlert("ip_banned", `L'adresse ${a} a été bloquée à la main depuis la console.`);
     return f2bStatus();
+  }
+  /** Liste d'adresses importée d'un fichier : chacune bloquée définitivement (sauf l'adresse de la personne connectée et le serveur) */
+  async function banList(text, clientIp) {
+    if (CX_MODE === "tenant") throw new UserError("Sur ce serveur, les adresses bloquées se gèrent dans la console du serveur (Paramètres › Protection anti-intrusion).");
+    const r = parseIpList(text);
+    const env = pbxEnv();
+    const skipped = r.ips.filter((ip) => ip === clientIp || ip === env.PUBLIC_IP || ip.startsWith("127.") || ip === "::1");
+    const ips = r.ips.filter((ip) => !skipped.includes(ip));
+    if (!ips.length) throw new UserError(r.invalid.length ? `Aucune adresse valide (refusées : ${r.invalid.slice(0, 5).join(", ")}).` : "Aucune adresse IP trouvée dans ce fichier.");
+    let banned = 0; const failed = [];
+    for (const ip of ips) {
+      const x = await runConfigure(["f2b", "ban", ip], { timeout: 20_000 }).catch(() => null);
+      x?.lines?.[0]?.ok ? banned++ : failed.push(ip);
+    }
+    if (banned) await logAlert("ip_banned", `${banned} adresse(s) bloquée(s) depuis une liste importée dans la console.`);
+    return { banned, failed, invalid: r.invalid, skipped, truncated: r.truncated, total: r.total };
   }
   let consoleAllow = [];
   const refreshAllow = async () => { consoleAllow = (await security()).console_allow || []; };
@@ -293,6 +310,12 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
   }
 
   // ---------------------------------------------------------------- Mises à jour
+  /** Pastille du menu « Mises à jour » : une version plus récente a été trouvée par la recherche du matin */
+  async function updateAvailable() {
+    if (process.env.CX_MODE === "tenant") return false;
+    const a = await db.getSetting("update_check", null), cur = installState().COMMIT || "";
+    return !!(a?.commit && cur && a.commit !== cur);
+  }
   async function getUpdates({ check = false } = {}) {
     const st = installState();
     const cur = { version: readVersion(), commit: st.COMMIT || "", ref: st.REF || "main", repo: st.REPO || "Yoobabab/PBXMaison-install", installed_at: st.INSTALLED_AT || "", changelog: readChangelog() };
@@ -312,7 +335,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
       }
     }
     const upToDate = available?.commit && cur.commit ? available.commit === cur.commit : null;
-    return { current: cur, available, up_to_date: upToDate };
+    return { current: cur, available, up_to_date: upToDate, tenant: process.env.CX_MODE === "tenant" };
   }
   async function startUpdate() {
     const st = installState();
@@ -745,6 +768,12 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     tick(aiVoicemails, 20_000);
     tick(fraudWatch, 5 * 60_000);
     tick(reportTick, 30 * 60_000);
+    // Mises à jour (PBX seul) : recherche chaque matin à partir de 6 h ; la console affiche une pastille, rien ne s'installe tout seul
+    if (process.env.CX_MODE !== "tenant") tick(async () => {
+      const last = await db.getSetting("update_check", null);
+      const h = Number(new Date().toLocaleString("en-GB", { timeZone: "Europe/Paris", hour: "2-digit", hour12: false }));
+      if (h >= 6 && (!last?.checked_at || Date.now() - Date.parse(last.checked_at) > 20 * 3600_000)) await getUpdates({ check: true });
+    }, 30 * 60_000);
     tick(sendVoicemails, 15_000);
     tick(sendAlerts, 30_000);
     refreshAllow().catch(() => {});
@@ -753,11 +782,11 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
   return {
     migrate, start, dialplanParts, testMail, sendMail, vmKey, reportSettings, setReportSettings, buildMonthlyReport, sendMonthlyReport, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
-    getSecurity, setSecurity, banIp,
+    getSecurity, setSecurity, banIp, banList,
     getRecording, setRecording, listRecordings, recordingFile, deleteRecording,
     getShortcodes, setShortcodes, pollStatusCodes,
     getBackups, setBackups, runBackup, testRemote, restoreBackup, restoreStatus, stageUpload,
-    getUpdates, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, captureCallFile, deleteCapture,
+    getUpdates, updateAvailable, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, captureCallFile, deleteCapture,
     getAlerts, setAlerts, clearAlerts, logAlert, monitor,
     listGateways, saveGateway, deleteGateway, gatewaySetup,
     getSystem, firewallCheck, systemAction, purgeCdr,

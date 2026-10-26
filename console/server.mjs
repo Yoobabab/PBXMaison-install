@@ -162,6 +162,7 @@ export async function buildApp({ db, ami } = {}) {
       tenant: CX_MODE === "tenant", hub_url: CX_MODE === "tenant" ? (hubInfo().url || "") : "",
       setup_token_present: !!setupToken(),
       logged_in: !!currentUser(req),
+      update_available: currentUser(req) ? await admin.updateAvailable().catch(() => false) : false,
       pbx: env.PBX_ID ? { name: env.PBX_NAME, fqdn: env.PBX_FQDN } : null,
     };
   });
@@ -878,7 +879,7 @@ export async function buildApp({ db, ami } = {}) {
     return { id: r.id, name: r.name, data: r.data };
   });
   app.get("/api/u/calls", { preHandler: requireWebUser }, async (req) => ({ calls: await pbx.userCalls(webUser(req).ext, 150) }));
-  app.get("/api/u/contacts", { preHandler: requireWebUser }, async () => ({ contacts: (await pbx.listContacts()).map(({ notes, ...c }) => (void notes, c)) }));
+  app.get("/api/u/contacts", { preHandler: requireWebUser }, async (req) => ({ contacts: (await pbx.listContacts("", webUser(req).ext)).map(({ notes, visibility, ...c }) => (void notes, void visibility, c)) }));
   // Temps réel (chat, …) : Server-Sent Events, gardé ouvert ; Nginx ne doit pas mettre en tampon (X-Accel-Buffering)
   app.get("/api/u/events", { preHandler: requireWebUser }, (req, reply) => {
     const s = webUser(req);
@@ -1285,6 +1286,7 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/security", { preHandler: requireUser }, async () => admin.getSecurity());
   app.put("/api/security", { preHandler: requireFreshMfa }, async (req) => admin.setSecurity(req.body || {}, clientIp(req)));
   app.post("/api/security/ban", { preHandler: requireUser }, async (req) => admin.banIp(req.body?.ip, true));
+  app.post("/api/security/ban-list", { preHandler: requireFreshMfa }, async (req) => admin.banList(req.body?.text, req.ip));
   app.post("/api/security/unban", { preHandler: requireFreshMfa }, async (req) => admin.banIp(req.body?.ip, false));
 
   // ---------------------------------------------------------------- Enregistrements
