@@ -310,13 +310,15 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
 
   async function listExtensions() {
     await adoptOrphans();
-    const [users, reg] = await Promise.all([loadUsers(), registrations()]);
+    // Appli mobile fermée mais joignable (notification d'appel) : compte comme un appareil connecté
+    const [users, reg, push] = await Promise.all([loadUsers(), registrations(),
+      db.query("SELECT DISTINCT extension FROM pbxmaison_app_devices WHERE push_token IS NOT NULL AND push_token <> ''").then((r) => new Set(r.rows.map((x) => x.extension))).catch(() => new Set())]);
     return users.map((u) => {
       const contacts = reg.get(u.id) || [];
       return {
         id: u.id, name: displayName(u), first_name: u.first_name, last_name: u.last_name, email: u.email,
         status: u.status, status_label: STATUSES[u.status], disabled: u.options.disabled, hidden: !!u.options.hidden, team: u.options.team || "",
-        registered: contacts.length > 0, contacts, dids: u.dids, mobile: u.mobile, phone_model: u.phone.model,
+        registered: contacts.length > 0, reachable: contacts.length > 0 || push.has(u.id), contacts, dids: u.dids, mobile: u.mobile, phone_model: u.phone.model,
         forwards: forwardSummary(u), always: u.forwarding.always, vm: !!u.voicemail.enabled, role: u.options.role || "user",
       };
     });

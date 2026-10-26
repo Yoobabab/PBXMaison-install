@@ -838,7 +838,12 @@ const STATUS_LABELS = { available: "Disponible", away: "Absent", dnd: "Ne pas d�
 const STATUS_CLS = { available: "ok", away: "wait", dnd: "bad" };
 const DEST_LABELS = { voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe", hangup: "Raccrocher" };
 /** Liste des utilisateurs : statut en pastille (le libellé au survol) */
-const statusDot = (u) => { const off = u.disabled || u.options?.disabled; const l = off ? "Désactivé" : STATUS_LABELS[u.status]; return `<span class="sdot ${off ? "off" : STATUS_CLS[u.status]}" title="${esc(l)}" aria-label="${esc(l)}"></span>`; };
+// Aucun appareil connecté (téléphone, DECT, softphone web, appli) : pastille grise, quel que soit le statut choisi
+const statusDot = (u) => {
+  const off = u.disabled || u.options?.disabled, away = !off && u.reachable === false;
+  const l = off ? "Désactivé" : away ? `${STATUS_LABELS[u.status]} · aucun appareil connecté` : STATUS_LABELS[u.status];
+  return `<span class="sdot ${off ? "off" : away ? "none" : STATUS_CLS[u.status]}" title="${esc(l)}" aria-label="${esc(l)}"></span>`;
+};
 /** Liste des utilisateurs : renvoi en une ligne courte, le détail au survol */
 const fwCell = (fw) => {
   if (!fw.length) return '<span class="s">—</span>';
