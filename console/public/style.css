@@ -1052,3 +1052,5 @@ td.nowrap{white-space:nowrap}
 @media (max-width:700px){.week .day .pauses{margin-left:0}}
 .rng.pz{background:var(--warn-soft);border-radius:8px;padding:2px 6px}
 .rng.pz .s{font-size:12px;font-weight:600;color:var(--warn)}
+
+.tx-trk{align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--warn);background:var(--warn-soft);border-radius:10px}

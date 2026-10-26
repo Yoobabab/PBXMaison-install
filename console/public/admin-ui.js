@@ -888,7 +888,7 @@ async function pageTransfer() {
       if (!xmlName) throw new Error("Ce .zip ne contient pas de fichier …Db.xml : est-ce bien une sauvegarde 3CX ?");
       const xml = await zip.text(xmlName);
       const files = zip.names.filter((n) => /^httpprompts\/[^/]+\.wav$/i.test(n)).map((n) => n.slice(12));
-      show3cx(box, f.name, { xml, files, zip }, await H.api("POST", "/api/transfer-3cx", { xml, files }));
+      show3cx(box, f.name, { xml, files, zip, trunks: false }, await H.api("POST", "/api/transfer-3cx", { xml, files, trunks: false }));
     } catch (err) { box.innerHTML = `<div class="panel pad"><div class="form-msg err" style="display:block">${H.esc(err.message)}</div></div>`; }
   };
   H.app.querySelectorAll(".tx-card").forEach((card) => {
@@ -970,11 +970,18 @@ function show3cx(box, name, src, r) {
   };
   box.innerHTML = `<div class="panel tx-prev"><div class="ph"><h2>${r.applied ? "Import terminé" : "Aperçu avant import"} · sauvegarde 3CX</h2><span class="s">${H.esc(name)}${r.version ? ` · 3CX ${H.esc(r.version)}` : ""}</span></div>
     <div class="pad stack">${r.applied ? "" : '<p class="hint" style="margin:0">Rien n\'est encore enregistré. Les lignes en erreur sont ignorées, les autres sont importées.</p>'}
+      ${!r.applied && r.trunks_available ? `<label class="check tx-trk"><input type="checkbox" id="tx3trk" ${src.trunks ? "checked" : ""}> <span><b>Importer aussi les ${r.trunks_available} trunk${r.trunks_available > 1 ? "s" : ""} et les règles sortantes</b><br><span class="s">Ils s'enregistrent tout de suite chez l'opérateur avec les identifiants de 3CX : les appels entrants arriveraient sur Callikoe au lieu de 3CX. À cocher seulement le jour de la bascule.</span></span></label>` : ""}
       ${r.sections.map(sec).join("") || '<p class="s">Rien à importer dans cette sauvegarde.</p>'}
       ${r.notes.length ? `<div class="note"><b>À faire à la main</b><ul style="margin:6px 0 0">${r.notes.map((x) => `<li>${H.esc(x)}</li>`).join("")}</ul></div>` : ""}</div>
     <div class="actions pad">${r.applied ? '<button type="button" class="btn" data-close>Fermer</button>'
       : `<button type="button" class="btn ghost" data-close>Annuler</button><button type="button" class="btn" data-go ${ready ? "" : "disabled"}>Tout importer</button>`}</div></div>`;
   box.querySelector("[data-close]").onclick = () => (r.applied ? pageTransfer() : (box.innerHTML = ""));
+  box.querySelector("#tx3trk")?.addEventListener("change", async (e) => {
+    src.trunks = e.target.checked;
+    box.style.opacity = ".6";
+    try { show3cx(box, name, src, await H.api("POST", "/api/transfer-3cx", { xml: src.xml, files: src.files, trunks: src.trunks })); } catch (err) { alert(err.message); }
+    box.style.opacity = "";
+  });
   const go = box.querySelector("[data-go]");
   if (go) go.onclick = async () => {
     if (!confirm("Importer la sauvegarde 3CX dans ce PBX ?\nLes fiches qui existent déjà (même numéro de poste, même nom de trunk ou de règle) sont mises à jour.")) return;
@@ -982,7 +989,7 @@ function show3cx(box, name, src, r) {
     try {
       const wavs = {};
       for (const p of r.prompts || []) { const b = await src.zip.bytes(`httpprompts/${p}`); if (b) wavs[p] = b64of(b); }
-      show3cx(box, name, src, await H.api("POST", "/api/transfer-3cx", { xml: src.xml, files: src.files, wavs, apply: true }));
+      show3cx(box, name, src, await H.api("POST", "/api/transfer-3cx", { xml: src.xml, files: src.files, wavs, trunks: src.trunks, apply: true }));
     }
     catch (e) { go.disabled = false; go.textContent = "Réessayer"; alert(e.message); }
   };

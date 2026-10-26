@@ -574,7 +574,7 @@ export function createTransfer({ pbx, admin }) {
    * Sauvegarde 3CX complète (texte du fichier …Db.xml) : aperçu ou import de chaque partie, dans l'ordre
    * trunks → utilisateurs (et leurs renvois) → horaires → règles entrantes → règles sortantes → annuaire.
    */
-  async function import3cx(xml, { apply = false, consoleRoles = false, by = "", files = null, wavs = {} } = {}) {
+  async function import3cx(xml, { apply = false, consoleRoles = false, by = "", files = null, wavs = {}, trunks = true } = {}) {
     let conv;
     try { conv = convert3cx(String(xml || ""), { cc: pbx.countryCode(), templates: pbx.templates() }); }
     catch (e) { throw new UserError(e.message, "file"); }
@@ -597,7 +597,7 @@ export function createTransfer({ pbx, admin }) {
     ];
     const pending = { users: T.users.rows.map((r) => r[0]), trunks: T.trunks.rows.map((r) => r[0]), objects: pendingObj };
 
-    if (consoleRoles) await run("trunks", "Trunks (avec leurs mots de passe)");
+    if (consoleRoles && trunks) await run("trunks", "Trunks (avec leurs mots de passe)");
     const users = await run("users", "Utilisateurs");
     const okUsers = new Set((users?.lines || []).filter((l) => l.action !== "error").map((l) => l.label.split(" ")[0]));
     // Renvois des fiches (sans réponse, occupé, absent) : après la création des postes
@@ -712,10 +712,11 @@ export function createTransfer({ pbx, admin }) {
       section("objects", "Groupes, files d'attente, SVI", lines.map(({ o, cur, base, id, ...l }) => ({ ...l, action: l.error ? "error" : l.action })));
     }
     await run("inbound", "Règles entrantes (SDA)", { pending });
-    if (consoleRoles) await run("outbound", "Règles sortantes", { pending });
+    if (consoleRoles && trunks) await run("outbound", "Règles sortantes", { pending });
     await run("contacts", "Annuaire");
     return { version: conv.version, applied: apply, sections, prompts: conv.prompts.map((p) => p.file),
-      notes: [...conv.notes, ...(consoleRoles ? [] : ["Trunks et règles sortantes : réservés à l'installateur, non importés."])] };
+      trunks_available: T.trunks.rows.length,
+      notes: [...conv.notes, ...(!consoleRoles ? ["Trunks et règles sortantes : réservés à l'installateur, non importés."] : !trunks && T.trunks.rows.length ? ["Trunks et règles sortantes non importés (case décochée) : à reprendre le jour de la bascule."] : [])] };
   }
 
   return { items, exportKind, importKind, import3cx };
