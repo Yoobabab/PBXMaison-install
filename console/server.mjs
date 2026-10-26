@@ -100,6 +100,9 @@ export async function buildApp({ db, ami } = {}) {
     if (!row) { reply.clearCookie(COOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce compte n'existe plus." }); }
     req.role = row.role;
     if (!u.mfa) return reply.code(403).send({ error: "Active d'abord la double authentification.", need_totp_setup: true });
+    // Lecture seule : jamais les mots de passe (SIP des postes, fichiers des téléphones et passerelles, sauvegardes complètes)
+    if (row.role === "lecture" && /^\/api\/(extensions\/[^/]+\/(secret|phone\.cfg)|gateways\/[^/]+\/setup|backups\/file)(\/|$|\?)/.test(req.url))
+      return reply.code(403).send({ error: "Compte en lecture seule : les mots de passe ne sont pas visibles." });
     if (row.role === "lecture" && req.method !== "GET" && !/^\/api\/(reauth|logout|totp\/|diag\/(inbound|outbound))/.test(req.url)) return reply.code(403).send({ error: "Compte en lecture seule : modification impossible." });
     const path = req.url.split("?")[0];
     if (row.role === "client" && (CLIENT_DENY.test(path) || (req.method !== "GET" && /^\/api\/trunks(\/|$)/.test(path))))
