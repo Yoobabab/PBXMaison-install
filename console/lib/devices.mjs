@@ -14,9 +14,9 @@ const normalizeMac = (input) => {
 // ------------------------------------------------------------------ Téléphones (liste compatible 3CX)
 const ph = (brand, list, extra = {}) => list.map(([id, label, keys = 0, more = {}]) => ({ id: `${brand.toLowerCase()}-${id}`, brand, label: `${brand} ${label}`, keys, ...extra, ...more }));
 export const OTHER_PHONES = [
-  ...ph("Fanvil", [["x1sg", "X1S / X1SG", 0], ["x3sg", "X3SG / X3U", 2], ["x3u-pro", "X3U Pro", 6], ["x4u", "X4U / X4SG", 12], ["x5u", "X5U", 30],
+  ...ph("Fanvil", [["x1sg", "X1S / X1SG", 0], ["x3sg", "X3SG / X3U", 2], ["x3u-pro", "X3U Pro", 6], ["x4u", "X4U / X4SG / X4U-V2", 12], ["x5u", "X5U / X5U-V2", 30],
     ["x6u", "X6U", 60], ["x7", "X7 / X7C", 40], ["x7a", "X7A", 40], ["x210", "X210 / X210i", 106], ["x301", "X301 / X301G", 2], ["x303", "X303 / X303G", 4],
-    ["v61", "V61 / V61G", 2], ["v62", "V62 / V62 Pro", 6], ["v63", "V63", 6], ["v64", "V64", 12], ["v65", "V65", 30], ["v66", "V66", 24], ["v67", "V67", 30],
+    ["v61", "V61 / V61G / V61W", 4], ["v62", "V62 / V62 Pro / V62W", 5], ["v63", "V63", 6], ["v64", "V64 / V64W", 7], ["v65", "V65 / V65W", 9], ["v66", "V66", 24], ["v67", "V67", 29],
     ["h2u", "H2U / H3W / H5W", 0], ["x2p", "X2P", 0]], { format: "fanvil", status: "beta" }),
   ...ph("Snom", [["d712", "D712", 4], ["d713", "D713", 4], ["d715", "D715", 5], ["d717", "D717", 3], ["d735", "D735", 32], ["d785", "D785", 24],
     ["d812", "D812", 6], ["d815", "D815", 6], ["d862", "D862", 36], ["d865", "D865", 36]], { format: "snom", status: "beta" }),

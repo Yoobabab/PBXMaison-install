@@ -14,6 +14,7 @@ import { runConfigure } from "./admin.mjs";
 import { RING_TYPES, RINGERS, MODELS, LANGUAGES, DATE_FORMATS, TIME_FORMATS, TIMEZONES, BACKLIGHT, SCREENSAVER, TRANSFER, LED, TRANSPORTS, KEY_TYPES, EXPANSIONS,
   phoneFromStored, validatePhone, buildYealinkCfg, randomPassword, identifyDevice, deviceKey, isPublicIp, contactSource, connectionType, modelById, addToggleKey } from "./phones.mjs";
 import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, provRequest, GATEWAY_MODELS } from "./devices.mjs";
+import { buildFanvilXml, buildSnomPhoneXml, buildGrandstreamPhoneXml, grandstreamAlias } from "./phones-other.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
 import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, contactVisibleTo, PHONE_TYPES } from "./contacts.mjs";
@@ -868,13 +869,15 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const acc = [{ index: 1, user: u.id, name: displayName(u), auth_id: secret.auth_id, password: secret.password }];
     const srv = { host: server.host, prov_url, lang: u.phone.settings.language, tz: u.phone.settings.timezone, admin_password: u.phone.admin_password };
     let text;
-    if (model?.format === "fanvil") text = buildFanvilCfg(acc, srv);
-    else if (model?.format === "snom") text = buildSnomXml(acc, srv);
-    else if (model?.format === "grandstream") text = buildGrandstreamXml(u.phone.mac || "", acc, srv);
+    // Codes de statut (Codes raccourcis) : le bouton NPD du téléphone prévient le PBX, le statut se voit partout
+    const codes = { st_available: "*30", st_dnd: "*32", pickup: "**", ...(await db.getSetting("shortcodes", {})) };
+    const other = { host: server.host, prov_url, codes };
+    // Anciens Fanvil (firmware 1.x : X1S, X3SG, X301, X303) : format texte
+    if (model?.format === "fanvil") text = /^fanvil-(x1sg|x3sg|x301|x303)$/.test(model.id) ? buildFanvilCfg(acc, srv) : buildFanvilXml(u, u.phone, secret, other, names);
+    else if (model?.format === "snom") text = buildSnomPhoneXml(u, u.phone, secret, other, names);
+    else if (model?.format === "grandstream") text = grandstreamAlias(model.id) ? buildGrandstreamPhoneXml(u, u.phone, secret, other, names) : buildGrandstreamXml(u.phone.mac || "", acc, srv);
     else {
-      // Codes de statut (Codes raccourcis) : le bouton NPD du téléphone prévient le PBX, le statut se voit partout
       const theme = readTheme();
-      const codes = { st_available: "*30", st_dnd: "*32", pickup: "**", ...(await db.getSetting("shortcodes", {})) };
       text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes,
         wallpaper: (screen) => wallpaperName(screen, theme) }, names);
     }
@@ -942,7 +945,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     checkExtNumber(num);
     const reg = (await registrations()).get(num) || [];
     if (!reg.length) throw new UserError("Le téléphone n'est pas connecté : impossible de lui envoyer l'ordre.");
-    const kind = action === "reboot" ? "pbxm-reboot" : "pbxm-resync";
+    // Grandstream : « resync » relit la configuration sans redémarrer (check-sync le fait redémarrer)
+    const gs = modelById((await getUser(num).catch(() => null))?.phone?.model)?.format === "grandstream";
+    const kind = action === "reboot" ? "pbxm-reboot" : gs ? "pbxm-resync-gs" : "pbxm-resync";
     try { await ami.command(`pjsip send notify ${kind} endpoint ${num}`); }
     catch { throw new UserError("Moteur téléphonique injoignable."); }
     return { ok: true };
@@ -950,10 +955,11 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
 
   async function resyncAll() {
     const reg = await registrations();
+    const gs = new Set((await loadUsers()).filter((u) => modelById(u.phone?.model)?.format === "grandstream").map((u) => u.id));
     let sent = 0;
     for (const [id, contacts] of reg) {
       if (!contacts.length) continue;
-      try { await ami.command(`pjsip send notify pbxm-resync endpoint ${id}`); sent++; } catch { /* suivant */ }
+      try { await ami.command(`pjsip send notify ${gs.has(id) ? "pbxm-resync-gs" : "pbxm-resync"} endpoint ${id}`); sent++; } catch { /* suivant */ }
     }
     return { sent };
   }
