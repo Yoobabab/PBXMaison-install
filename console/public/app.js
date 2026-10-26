@@ -738,28 +738,31 @@ function wireResync(root) {
     const reboot = !!b.dataset.reboot, id = b.dataset.reboot || b.dataset.resync;
     if (reboot && !confirm(`Redémarrer le téléphone du poste ${id} ? Un appel en cours serait coupé.`)) return;
     const t = b.textContent; b.disabled = true;
-    try { await api("POST", `/api/extensions/${id}/phone/notify`, { action: reboot ? "reboot" : "resync" }); b.textContent = "Envoyé ✓"; }
+    try { await api("POST", `/api/extensions/${id}/phone/notify`, { action: reboot ? "reboot" : "resync" }); b.textContent = b.classList.contains("ibtn") ? "✓" : "Envoyé ✓"; }
     catch (err) { b.textContent = "Échec"; b.title = err.message; }
     setTimeout(() => { b.textContent = t; b.disabled = false; }, 2500);
   });
 }
 
 // ---------------------------------------------------------------- Téléphones
+const psel = new Set();   // téléphones cochés (gardés pendant le rafraîchissement)
 async function renderPhones() {
   setNav("phones");
   const d = await api("GET", "/api/phones");
   const filter = sessionStorage.getItem("pbxm_phones_f") || "all";
   const q0 = sessionStorage.getItem("pbxm_phones_q") || "";
   const on = d.phones.filter((p) => p.online).length;
-  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Téléphones</h1><p class="sub" style="margin:0">Tous les appareils des utilisateurs : téléphones de bureau, softphones et applis. Clique sur une ligne pour ouvrir la fiche.</p></div>
-    ${on ? `<button class="btn ghost" id="resyncall" title="Ils rechargent leur configuration sans redémarrer">Reprovisionner les ${on} connectés</button>` : ""}</div>
-    <div class="provbar"><span class="dl">Lien de provisioning</span><span class="mono">${esc(d.provisioning_url)}</span><button class="copy" data-copy="${esc(d.provisioning_url)}">Copier</button>
-      <span class="hint">À mettre dans le téléphone (Auto Provision › Server URL) ou en option DHCP 66.</span></div>
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Téléphones</h1><p class="sub" style="margin:0">Téléphones de bureau, softphones et applis des utilisateurs.</p></div>
+    <button class="btn ghost" data-copy="${esc(d.provisioning_url)}" title="${esc(d.provisioning_url)}\nÀ mettre dans le téléphone (Auto Provision › Server URL) ou en option DHCP 66.">🔗 Copier le lien de provisioning</button>
+    ${on ? `<button class="btn ghost" id="resyncall" title="Ils rechargent leur configuration sans redémarrer">Provisionner les ${on} connectés</button>` : ""}</div>
     <div class="panel"><div class="filters">
       <div class="seg" id="pf">${[["all", "Tous", d.phones.length], ["on", "Connectés", on], ["off", "Déconnectés", d.phones.length - on]].map(([k, l, n]) => `<label class="${filter === k ? "on" : ""}"><input type="radio" name="pf" value="${k}" ${filter === k ? "checked" : ""}>${l} <span class="cnt">${n}</span></label>`).join("")}</div>
       <input type="search" id="pq" class="grow" placeholder="Rechercher : utilisateur, modèle, MAC, adresse IP…" value="${esc(q0)}" style="max-width:360px"></div>
+    <div class="ubulk" id="pbar" hidden><strong id="pcount"></strong>
+      <button type="button" class="btn sm" id="psync">Provisionner</button><button type="button" class="btn ghost sm" id="preboot">Redémarrer</button>
+      <button type="button" class="btn link" id="pnone">Tout décocher</button></div>
     ${d.phones.length ? `<div class="table-wrap"><table class="ptable">
-      <thead><tr><th>Appareil</th><th>Utilisateur</th><th>État</th><th class="hide-sm">Adresse</th><th></th></tr></thead>
+      <thead><tr><th class="ck"><input type="checkbox" id="pall" aria-label="Tout cocher"></th><th>Appareil</th><th>Utilisateur</th><th>État</th><th class="hide-sm">Adresse</th><th></th></tr></thead>
       <tbody id="prows"></tbody></table></div>`
       : `<div class="empty">Aucun appareil pour l'instant. Renseigne le modèle et l'adresse MAC dans la fiche d'un utilisateur (onglet Téléphone IP), ou connecte un softphone.</div>`}</div>`;
   copyButtons();
@@ -781,22 +784,43 @@ async function renderPhones() {
         ? `<span class="mono">${esc(p.source_ip || "—")}</span>${p.local_ip && p.local_ip !== p.source_ip || p.connection ? `<div class="s">${[p.local_ip && p.local_ip !== p.source_ip ? `local ${esc(p.local_ip)}` : "", p.connection ? esc(p.connection.label) : ""].filter(Boolean).join(" · ")}</div>` : ""}${p.public_ip !== p.source_ip ? pub : ""}`
         : p.last_seen ? `${p.public_ip ? `<span class="s">Dernière IP publique</span><div><span class="mono">${esc(p.public_ip)}</span></div>` : `<span class="s">Dernière adresse</span><div><span class="mono">${esc(p.source_ip || "—")}</span></div><div class="s">réseau local, pas d'IP publique connue</div>`}${p.local_ip && p.local_ip !== p.public_ip ? `<div class="s">local ${esc(p.local_ip)}</div>` : ""}`
         : '<span class="s">—</span>';
-      return `<tr class="click ${p.online ? "" : p.last_seen ? "dev-off" : "dev-never"}" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
+      const can = p.online && p.device.kind === "phone" && !p.extra;
+      return `<tr class="click ${p.online ? "" : p.last_seen ? "dev-off" : "dev-never"} ${can && psel.has(p.user.id) ? "sel" : ""}" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
+      <td class="ck">${can ? `<input type="checkbox" data-psel="${esc(p.user.id)}" ${psel.has(p.user.id) ? "checked" : ""} aria-label="Cocher ${esc(p.user.id)}">` : ""}</td>
       <td><span class="devcell">${deviceIcon(p.device.kind)}<span><strong>${esc(p.model || p.device?.label || "Appareil")}</strong>${sub ? `<div class="s mono-s">${esc(sub)}</div>` : ""}</span></span></td>
       <td class="nw"><a href="#/utilisateurs/${esc(p.user.id)}">${esc(p.user.id)} · ${esc(p.user.name)}</a></td>
       <td class="nw">${state}</td>
       <td class="hide-sm">${addr}</td>
       <td class="acts nw">${p.online && p.device.kind === "phone" && !p.extra ? `<button class="ic" data-resync="${esc(p.user.id)}" title="Reprovisionner (sans redémarrer)" aria-label="Reprovisionner">⟳</button><button class="ic" data-reboot="${esc(p.user.id)}" title="Redémarrer" aria-label="Redémarrer">⏻</button>` : ""}
         ${!p.online && p.last_seen && !p.configured ? `<button class="ic" data-forget="${esc(p.user.id)}|${esc(p.key)}" title="Retirer de la liste (il revient s'il se reconnecte)" aria-label="Retirer de la liste">✕</button>` : ""}</td></tr>`;
-    }).join("") || '<tr><td colspan="5" class="empty">Aucun appareil ne correspond.</td></tr>';
+    }).join("") || '<tr><td colspan="6" class="empty">Aucun appareil ne correspond.</td></tr>';
     wireResync(rows);
+    // Cases à cocher : provisionner / redémarrer les téléphones choisis
+    const selectable = list.filter((p) => p.online && p.device.kind === "phone" && !p.extra).map((p) => p.user.id);
+    for (const id of [...psel]) if (!d.phones.some((p) => p.user.id === id && p.online)) psel.delete(id);
+    const pbar = () => { $("#pbar").hidden = !psel.size; $("#pcount").textContent = `${psel.size} téléphone${psel.size > 1 ? "s" : ""} coché${psel.size > 1 ? "s" : ""}`; $("#pall").checked = selectable.length > 0 && selectable.every((id) => psel.has(id)); };
+    rows.querySelectorAll("[data-psel]").forEach((cb) => cb.onchange = () => { cb.checked ? psel.add(cb.dataset.psel) : psel.delete(cb.dataset.psel); cb.closest("tr").classList.toggle("sel", cb.checked); pbar(); });
+    $("#pall").onchange = (e) => { for (const id of selectable) e.target.checked ? psel.add(id) : psel.delete(id); draw(); };
+    pbar();
     rows.querySelectorAll("[data-forget]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation();
       const [ext, ...k] = b.dataset.forget.split("|");
       await api("POST", "/api/phones/forget", { ext, key: k.join("|") }); renderPhones();
     });
-    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a,button")) location.hash = tr.dataset.href; });
+    rows.querySelectorAll("tr.click").forEach((tr) => tr.onclick = (e) => { if (!e.target.closest("a,button,.ck")) location.hash = tr.dataset.href; });
   };
+  const sendSel = async (action, btn) => {
+    const ids = [...psel];
+    if (action === "reboot" && !confirm(`Redémarrer ${ids.length} téléphone(s) ? Un appel en cours serait coupé.`)) return;
+    btn.disabled = true;
+    const r = await Promise.allSettled(ids.map((id) => api("POST", `/api/extensions/${id}/phone/notify`, { action })));
+    const ko = r.filter((x) => x.status === "rejected").length;
+    btn.textContent = ko ? `${ids.length - ko} envoyé(s), ${ko} en échec` : `Envoyé ✓`;
+    setTimeout(() => { btn.disabled = false; btn.textContent = action === "reboot" ? "Redémarrer" : "Provisionner"; }, 2500);
+  };
+  $("#psync")?.addEventListener("click", (e) => sendSel("resync", e.target));
+  $("#preboot")?.addEventListener("click", (e) => sendSel("reboot", e.target));
+  $("#pnone")?.addEventListener("click", () => { psel.clear(); draw(); });
   app.querySelectorAll("#pf input").forEach((i) => i.addEventListener("change", draw));
   $("#pq")?.addEventListener("input", draw);
   $("#resyncall")?.addEventListener("click", async (e) => {
@@ -805,13 +829,21 @@ async function renderPhones() {
   });
   draw();
   clearInterval(timer);
-  timer = setInterval(() => location.hash === "#/telephones" && !document.activeElement?.matches?.("#pq") && renderPhones(), 20000);
+  timer = setInterval(() => location.hash === "#/telephones" && !document.activeElement?.matches?.("#pq") && !$(".ubulk:not([hidden]) button:disabled") && renderPhones(), 20000);
 }
 
 // ---------------------------------------------------------------- Utilisateurs
 const STATUS_LABELS = { available: "Disponible", away: "Absent", dnd: "Ne pas déranger" };
 const STATUS_CLS = { available: "ok", away: "wait", dnd: "bad" };
 const DEST_LABELS = { voicemail: "Messagerie vocale", extension: "Autre utilisateur", external: "Numéro externe", hangup: "Raccrocher" };
+/** Liste des utilisateurs : statut en pastille (le libellé au survol) */
+const statusDot = (u) => { const off = u.disabled || u.options?.disabled; const l = off ? "Désactivé" : STATUS_LABELS[u.status]; return `<span class="sdot ${off ? "off" : STATUS_CLS[u.status]}" title="${esc(l)}" aria-label="${esc(l)}"></span>`; };
+/** Liste des utilisateurs : renvoi en une ligne courte, le détail au survol */
+const fwCell = (fw) => {
+  if (!fw.length) return '<span class="s">—</span>';
+  const main = fw.find((f) => f.level !== "info") || fw[0];
+  return `<span class="fwc ${main.level}" title="${esc(fw.map((f) => f.text).join("\n"))}">${main.level === "bad" ? "⛔" : "↪"} ${esc(main.short || main.text)}${fw.length > 1 ? ` <span class="more">+${fw.length - 1}</span>` : ""}</span>`;
+};
 const statusPill = (u) => u.disabled || u.options?.disabled ? '<span class="pill off">Désactivé</span>'
   : `<span class="pill ${STATUS_CLS[u.status]}">${STATUS_LABELS[u.status]}</span>`;
 
@@ -856,13 +888,13 @@ async function renderUsers() {
         <label class="check"><input type="checkbox" id="ufw" ${onlyFw ? "checked" : ""}> Seulement ceux avec un renvoi actif</label></div>
       <div class="ubulk" id="ubar" hidden><strong id="ucount"></strong>
         <button type="button" class="btn sm" id="bwelcome">Envoyer le mail de bienvenue</button>
-        <button type="button" class="btn ghost sm" id="bqr">Envoyer le QR code de l'appli</button>
+        <button type="button" class="btn ghost sm" id="bqr">QR codes de l'appli</button>
         <button type="button" class="btn ghost sm" id="bexp" title="Fichier CSV (Excel). Autres formats : Administration › Import / export">Exporter</button>
         <button type="button" class="btn danger sm" id="bdel">Supprimer</button>
         <button type="button" class="btn link" id="bnone">Tout désélectionner</button></div>
       <div id="ubres"></div>
       ${d.extensions.length ? `<div class="table-wrap"><table>
-      <thead><tr><th class="ck"><input type="checkbox" id="uall" aria-label="Tout sélectionner"></th><th>Poste</th><th>Nom</th><th>Statut</th><th class="hide-sm">Téléphone</th><th>Renvois</th><th></th></tr></thead>
+      <thead><tr><th class="ck"><input type="checkbox" id="uall" aria-label="Tout sélectionner"></th><th class="dotc" title="Statut"></th><th>Poste</th><th>Nom</th><th class="hide-sm">E-mail</th><th class="hide-sm">SDA</th><th class="hide-sm">Téléphone</th><th>Renvoi</th><th></th></tr></thead>
       <tbody id="urows"></tbody></table></div><div id="unone" class="empty" hidden>Aucun utilisateur ne correspond.</div>`
       : `<div class="empty"><p>Aucun utilisateur pour l'instant.</p><a class="btn" href="#/utilisateurs/nouveau">Créer le premier utilisateur</a></div>`}</div>`;
   const rows = $("#urows");
@@ -880,11 +912,14 @@ async function renderUsers() {
     });
     rows.innerHTML = list.map((x) => `<tr class="click ${usel.has(x.id) ? "sel" : ""}" data-href="#/utilisateurs/${esc(x.id)}">
       <td class="ck"><input type="checkbox" data-sel="${esc(x.id)}" ${usel.has(x.id) ? "checked" : ""} aria-label="Sélectionner ${esc(x.id)}"></td>
+      <td class="dotc">${statusDot(x)}</td>
       <td><strong>${esc(x.id)}</strong></td>
-      <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.hidden ? ' <span class="pill off">Masqué</span>' : ""}${x.email ? `<div class="s">${esc(x.email)}</div>` : ""}${x.dids.length ? `<div class="s">SDA ${x.dids.map(fmtPhone).map(esc).join(", ")}</div>` : ""}</td>
-      <td>${statusPill(x)}</td>
-      <td class="hide-sm">${x.registered ? `<span class="devs">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}<span class="pill ok">Connecté</span></span>` : '<span class="pill off">Non connecté</span>'}</td>
-      <td>${x.forwards.length ? x.forwards.map((f) => `<div class="fw ${f.level}">${esc(f.text)}</div>`).join("") : '<span class="s">—</span>'}</td>
+      <td><a href="#/utilisateurs/${esc(x.id)}">${esc(x.name)}</a>${x.hidden ? ' <span class="pill off">Masqué</span>' : ""}</td>
+      <td class="hide-sm s">${x.email ? esc(x.email) : "—"}</td>
+      <td class="hide-sm nowrap">${x.dids.length ? x.dids.map((n) => `<div>${esc(fmtPhone(n))}</div>`).join("") : '<span class="s">—</span>'}</td>
+      <td class="hide-sm nowrap">${x.registered ? `<span class="devs" title="${esc(x.contacts.map((c) => `${c.device?.label || c.user_agent} · ${c.ip}`).join("\n"))}">${x.contacts.map((c) => deviceIcon(c.device?.kind, `${c.device?.label || c.user_agent} · ${c.ip}`)).join("")}</span>` : '<span class="s">—</span>'}
+        ${x.registered && x.contacts.some((c) => c.device?.kind === "phone") ? `<button type="button" class="ibtn" data-resync="${esc(x.id)}" title="Provisionner le téléphone (il recharge sa configuration)">⟳</button>` : ""}</td>
+      <td class="nowrap">${fwCell(x.forwards)}</td>
       <td class="acts"><details class="rowmenu"><summary class="btn ghost sm" title="Actions">⋯</summary><div class="rm-list">
         <a href="#/utilisateurs/plusieurs?depuis=${esc(x.id)}">Dupliquer…</a>
         <button type="button" data-imp="${esc(x.id)}">Incarner (softphone)</button>
@@ -1188,6 +1223,9 @@ async function renderUser(id, tab = "general") {
   if (userDraft?.id !== id) userDraft = { id, data: {} };
   const [{ user: u, server, key_offer: keyOffer }, list] = await Promise.all([api("GET", `/api/extensions/${id}`), api("GET", "/api/extensions")]);
   if ((tab === "telephone" || tab === "touches") && !phoneOpts) phoneOpts = await api("GET", "/api/phone-options");
+  // Passerelles et bases DECT où ce poste a un port / un combiné
+  const onGw = tab === "telephone" ? ((await api("GET", "/api/gateways").catch(() => null))?.gateways || [])
+    .flatMap((g) => g.ports.filter((p) => p.user === id).map((p) => ({ g, p }))) : [];
   const users = list.extensions;
   const fw = u.forwarding;
   const tabs = `<nav class="tabs">${USER_TABS.map(([k, l]) => `<a href="#/utilisateurs/${esc(u.id)}${k === "general" ? "" : "/" + k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
@@ -1264,6 +1302,10 @@ async function renderUser(id, tab = "general") {
     const localIp = mainC?.local_ip;
     body = `<form method="post" id="uf" novalidate>
       <div class="grid nogap-top"><div class="form-msg full"></div>
+        ${onGw.length ? `<h3 class="full sec">Passerelle / base DECT</h3>
+        <div class="full gwlinks">${onGw.map(({ g, p }) => `<a class="gwlink" href="#/passerelles/${esc(g.id)}/config"><strong>${esc(g.name)}</strong>
+          <span class="s">${esc(g.model_label)} · ${g.type === "dect" ? "combiné" : "port"} ${esc(String(p.port))}</span>${p.online ? '<span class="pill ok">Connecté</span>' : '<span class="pill off">Non connecté</span>'}</a>`).join("")}
+          <p class="hint" style="margin:0">Mêmes identifiants SIP que ce poste (en bas de cette page) : la passerelle les reçoit au provisioning.</p></div>` : ""}
         <h3 class="full sec">Téléphone et provisioning automatique</h3>
         <div class="full phrow"><label>Modèle<select name="phone.model"><option value="">— Saisie manuelle / softphone —</option>${o.models.map((m) => `<option value="${m.id}" ${ph.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
 <label>Adresse MAC<input name="phone.mac" value="${esc(fmtMac(ph.mac))}" placeholder="44:DB:D2:29:FA:7B" autocomplete="off"><span class="hint">Sur l'étiquette sous le téléphone.</span></label>

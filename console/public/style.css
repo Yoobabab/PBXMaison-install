@@ -971,7 +971,7 @@ tr.dim td{opacity:.55}
 #blist td input{width:100%;min-width:110px}
 
 /* Menu d'actions d'une ligne (⋯) */
-.rowmenu{position:relative;display:inline-block}
+.rowmenu{position:relative;display:inline-block;border:0;padding:0;background:none;margin:0}
 .rowmenu>summary{list-style:none;cursor:pointer;min-width:38px;justify-content:center}
 .rowmenu>summary::-webkit-details-marker{display:none}
 .rowmenu .rm-list{position:fixed;z-index:60;min-width:220px;background:var(--panel, #fff);border:1px solid var(--line, #e6e8ee);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:6px;display:flex;flex-direction:column}
@@ -996,3 +996,20 @@ tr.dim td{opacity:.55}
 .vispick{margin-top:10px}
 .vislist{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:6px}
 .vislist.row{flex-direction:row;flex-wrap:wrap;gap:6px 18px;max-height:none}
+/* Liste des utilisateurs : pastille de statut, renvoi court, bouton provisionner */
+th.dotc,td.dotc{width:14px;padding-right:0}
+.sdot{display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--muted);vertical-align:middle;cursor:help}
+.sdot.ok{background:var(--ok)}.sdot.wait{background:var(--warn)}.sdot.bad{background:var(--bad)}.sdot.off{background:transparent;border:2px solid var(--muted)}
+.fwc{font-size:13px;cursor:help}.fwc.warn{color:var(--warn);font-weight:600}.fwc.bad{color:var(--bad);font-weight:600}.fwc.info{color:var(--muted)}
+.fwc .more{font-size:11px;background:var(--bg);color:var(--muted);border-radius:99px;padding:1px 6px;font-weight:600}
+.ibtn{border:1px solid var(--line);background:var(--panel,#fff);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--ink);font-size:15px;line-height:1;vertical-align:middle;margin-left:4px}
+.ibtn:hover{border-color:var(--accent)}
+td.nowrap{white-space:nowrap}
+
+/* Passerelles / DECT : mise en service compacte */
+.cx-setup{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px 24px}
+.cx-setup .dl{display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:6px}
+
+.gwlinks{display:flex;flex-direction:column;gap:8px}
+.gwlink{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:10px 14px;color:inherit;text-decoration:none}
+.gwlink:hover{border-color:var(--accent)}

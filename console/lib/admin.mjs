@@ -700,12 +700,12 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     const g = (await pbx.loadGateways()).find((x) => x.id === id);
     if (!g) throw new UserError("Appareil introuvable.");
     const m = GATEWAY_MODELS.find((x) => x.id === g.model);
-    const { text, accounts } = await pbx.gatewayConfig(g, server);
+    const [{ text, accounts }, reg] = await Promise.all([pbx.gatewayConfig(g, server), pbx.registrations()]);
     return {
       gateway: { id: g.id, name: g.name, model: m?.label, mac: g.mac }, admin_password: g.admin_password,
       provisioning: text ? { url: await pbx.provisioningUrl(server), file: m.prov === "gs-ht" ? `cfg${g.mac || "<mac>"}.xml` : m.prov === "snom-dect" ? `${g.mac || "<mac>"}.xml` : `${g.mac || "<mac>"}.cfg`, beta: m.status === "beta" } : null,
       guide: manualGuide(g, { host: server.host }), server: server.host,
-      accounts: accounts.map((a) => ({ port: a.index, user: a.user, name: a.name, auth_id: a.auth_id, password: a.password })),
+      accounts: accounts.map((a) => ({ port: a.index, user: a.user, name: a.name, auth_id: a.auth_id, password: a.password, online: (reg.get(a.user) || []).length > 0 })),
       text,
     };
   }

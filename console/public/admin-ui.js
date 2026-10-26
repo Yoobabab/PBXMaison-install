@@ -593,18 +593,19 @@ async function pageGateways(sub) {
 async function gatewaySetup(id) {
   const s = await H.api("GET", `/api/gateways/${id}/setup`);
   H.app.innerHTML = head(H.esc(s.gateway.name), `${H.esc(s.gateway.model)} — mise en service`, `<a class="btn ghost" href="#/passerelles/${id}">Modifier</a><a class="btn ghost" href="#/passerelles">Retour</a>`) +
-    `<div class="grid2">${s.provisioning ? `<div class="panel"><div class="ph"><h2>${ic(I.check, 18)} Provisioning automatique</h2>${s.provisioning.beta ? pill("wait", "À valider sur le matériel") : pill("ok", "Pris en charge")}</div><div class="pad stack">
-        <p style="margin:0">Dans l'interface web de l'appareil, renseigne l'adresse de provisioning (ou l'option DHCP 66 du réseau) :</p>
-        <div class="cx-copy"><code>${H.esc(s.provisioning.url)}</code><button class="btn ghost sm" data-copy="${H.esc(s.provisioning.url)}">Copier</button></div>
-        <p class="hint" style="margin:0">L'appareil télécharge <span class="mono">${H.esc(s.provisioning.file)}</span>${s.gateway.mac ? "" : " — renseigne l'adresse MAC pour l'activer"}. Il se configure seul et se resynchronise chaque jour.</p>
-        <p class="hint" style="margin:0">Mot de passe administrateur posé sur l'appareil : <span class="mono">${H.esc(s.admin_password || "—")}</span></p></div></div>` : ""}
-      <div class="panel"><div class="ph"><h2>${s.provisioning ? "Ou configuration manuelle" : "Configuration guidée"}</h2></div><div class="pad"><ol class="cx-guide">${s.guide.map((g) => `<li>${H.esc(g)}</li>`).join("")}</ol></div></div></div>
+    `<div class="panel"><div class="ph"><h2>Mise en service</h2>${s.provisioning ? (s.provisioning.beta ? pill("wait", "Provisioning à valider sur le matériel") : pill("ok", "Provisioning automatique")) : pill("off", "Configuration à la main")}</div>
+      <div class="pad"><div class="cx-setup">
+        ${s.provisioning ? `<div><span class="dl">Lien de provisioning</span><button class="btn ghost sm" data-copy="${H.esc(s.provisioning.url)}" title="${H.esc(s.provisioning.url)}">🔗 Copier le lien</button>
+          <div class="hint" style="margin:6px 0 0">Interface web de l'appareil ou option DHCP 66${s.gateway.mac ? "" : " · <b>adresse MAC à renseigner</b>"}</div></div>` : ""}
+        <div><span class="dl">Mot de passe de l'appareil</span>${s.admin_password ? `<span class="mono cx-secret" data-v="${H.esc(s.admin_password)}">••••••••••</span> <button class="btn link" data-show>Afficher</button> <button class="btn link" data-copy="${H.esc(s.admin_password)}">Copier</button>
+          <div class="hint" style="margin:6px 0 0">${s.provisioning ? "Remplace l'ancien mot de passe dès que l'appareil est provisionné" : "À poser dans l'interface web de l'appareil"}</div>` : '<span class="s">—</span>'}</div>
+        <div><span class="dl">Serveur SIP</span><span class="mono">${H.esc(s.server)}</span> <span class="hint">port 5060 (UDP)</span></div>
+      </div>${s.provisioning ? "" : `<details style="margin-top:14px"><summary>Réglages à faire dans l'appareil</summary><ol class="cx-guide">${s.guide.map((g) => `<li>${H.esc(g)}</li>`).join("")}</ol></details>`}</div></div>
     <div class="panel" style="margin-top:18px"><div class="ph"><h2>Comptes SIP</h2></div>
-      ${s.accounts.length ? `<div class="table-wrap"><table><thead><tr><th>Port / combiné</th><th>Utilisateur</th><th>Identifiant (numéro)</th><th>Identifiant d'authentification</th><th>Mot de passe</th></tr></thead><tbody>
-        ${s.accounts.map((a) => `<tr><td>${a.port}</td><td>${H.esc(a.name)}</td><td class="mono">${H.esc(a.user)}</td><td class="mono">${H.esc(a.auth_id)} <button class="btn link" data-copy="${H.esc(a.auth_id)}">Copier</button></td>
+      ${s.accounts.length ? `<div class="table-wrap"><table><thead><tr><th>Port / combiné</th><th>Utilisateur</th><th>État</th><th>Identifiant (numéro)</th><th>Identifiant d'authentification</th><th>Mot de passe</th></tr></thead><tbody>
+        ${s.accounts.map((a) => `<tr><td>${a.port}</td><td><a href="#/utilisateurs/${H.esc(a.user)}">${H.esc(a.name)}</a></td><td>${a.online ? pill("ok", "Connecté") : pill("off", "Non connecté")}</td><td class="mono">${H.esc(a.user)}</td><td class="mono">${H.esc(a.auth_id)} <button class="btn link" data-copy="${H.esc(a.auth_id)}">Copier</button></td>
           <td class="mono"><span class="cx-secret" data-v="${H.esc(a.password)}">••••••••••</span> <button class="btn link" data-show>Afficher</button> <button class="btn link" data-copy="${H.esc(a.password)}">Copier</button></td></tr>`).join("")}</tbody></table></div>`
-      : `<div class="empty">Aucun port attribué : <a href="#/passerelles/${id}">choisis les utilisateurs</a>.</div>`}
-      <div class="pad hint">Serveur : <span class="mono">${H.esc(s.server)}</span>, port 5060 (UDP). Ces identifiants sont ceux des utilisateurs : ne les communique pas.</div></div>`;
+      : `<div class="empty">Aucun port attribué : <a href="#/passerelles/${id}">choisis les utilisateurs</a>.</div>`}</div>`;
   H.copyButtons(H.app);
   H.app.querySelectorAll("[data-show]").forEach((b) => b.addEventListener("click", () => { const x = b.previousElementSibling; x.textContent = x.textContent.startsWith("•") ? x.dataset.v : "••••••••••"; }));
 }

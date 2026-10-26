@@ -213,16 +213,16 @@ export function describeDest(d, u) {
 export function forwardSummary(u) {
   const out = [];
   if (u.options.disabled) out.push({ level: "bad", text: "Utilisateur désactivé" });
-  if (u.forwarding.always?.type && u.forwarding.always.type !== "none") out.push({ level: "warn", text: `Renvoi immédiat : tout vers ${describeDest(u.forwarding.always, u)}` });
-  if (u.status === "away") out.push({ level: "warn", text: `Absent : tout vers ${describeDest(u.forwarding.away, u)}` });
-  if (u.status === "dnd") out.push({ level: "warn", text: `Ne pas déranger : tout vers ${describeDest(u.forwarding.dnd, u)}` });
+  if (u.forwarding.always?.type && u.forwarding.always.type !== "none") out.push({ level: "warn", text: `Renvoi immédiat : tout vers ${describeDest(u.forwarding.always, u)}`, short: `vers ${describeDest(u.forwarding.always, u)}` });
+  if (u.status === "away") out.push({ level: "warn", text: `Absent : tout vers ${describeDest(u.forwarding.away, u)}`, short: `vers ${describeDest(u.forwarding.away, u)}` });
+  if (u.status === "dnd") out.push({ level: "warn", text: `Ne pas déranger : tout vers ${describeDest(u.forwarding.dnd, u)}`, short: `vers ${describeDest(u.forwarding.dnd, u)}` });
   if (u.status === "available") {
     for (const [rule, label] of [["no_answer", `Sans réponse (${u.forwarding.timeout} s)`], ["busy", "Occupé / non connecté"]]) {
       const d = u.forwarding[rule];
-      if (d.type === "extension" || d.type === "external") out.push({ level: "info", text: `${label} → ${describeDest(d, u)}` });
+      if (d.type === "extension" || d.type === "external") out.push({ level: "info", text: `${label} → ${describeDest(d, u)}`, short: `${rule === "busy" ? "occupé" : "sans réponse"} → ${describeDest(d, u)}` });
     }
   }
-  if (u.options.ring_mobile) out.push({ level: "info", text: `Sonne aussi sur le mobile ${fmt(u.mobile)}` });
+  if (u.options.ring_mobile) out.push({ level: "info", text: `Sonne aussi sur le mobile ${fmt(u.mobile)}`, short: `+ mobile ${fmt(u.mobile)}` });
   return out;
 }
 
