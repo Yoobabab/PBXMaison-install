@@ -985,77 +985,112 @@ async function renderUsers() {
   }, 15000);
 }
 
-/** Plusieurs utilisateurs d'un coup : plage de numéros (ex. 200 à 300), un nom par poste, réglages copiés d'un modèle (facultatif) */
+/** Plusieurs utilisateurs d'un coup : plage de numéros (ex. 200 à 300) ou lignes ajoutées une à une, un nom par poste, réglages copiés d'un modèle (facultatif) */
 async function renderUsersBulkNew(from) {
   setNav("ext");
   clearInterval(timer);
   const d = await api("GET", "/api/extensions");
-  const taken = new Set([...d.extensions.map((x) => x.id), ...(d.taken || [])]);
-  const start = Number(from && d.next ? d.next : d.next || 200);
+  const taken = new Set(d.extensions.map((x) => x.id));
+  const start = Number(d.next || 200);
+  // Lignes à créer : { n: numéro, fn, ln, em, sel: cochée, free: numéro saisi à la main }
+  let rows = [];
   app.innerHTML = `<a class="back" href="#/utilisateurs">← Utilisateurs</a><h1>${from ? "Dupliquer un utilisateur" : "Ajouter plusieurs utilisateurs"}</h1>
-    <p class="sub">Choisis la plage de postes, nomme chaque utilisateur (ou colle une liste de noms), puis crée-les en une fois. Postes laissés sans nom : pas créés.</p>
+    <p class="sub">Prépare une plage de postes et/ou ajoute des lignes une à une (numéro court + nom), retire celles qui ne servent pas, puis crée tout en une fois. Lignes sans nom : pas créées.</p>
     <div class="panel"><div class="pad stack">
       <div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
         <label>Du poste<input id="bfrom" inputmode="numeric" maxlength="3" value="${esc(String(start))}" style="width:110px"></label>
         <label>au poste<input id="bto" inputmode="numeric" maxlength="3" value="${esc(String(Math.min(999, start + (from ? 0 : 9))))}" style="width:110px"></label>
+        <button type="button" class="btn ghost" id="bgo">Ajouter cette plage</button>
         <label style="min-width:260px">Réglages copiés de<select id="bsrc"><option value="">Aucun (réglages par défaut)</option>
-          ${d.extensions.map((x) => `<option value="${esc(x.id)}" ${x.id === from ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label>
-        <button type="button" class="btn ghost" id="bgo">Préparer la liste</button></div>
+          ${d.extensions.map((x) => `<option value="${esc(x.id)}" ${x.id === from ? "selected" : ""}>${esc(x.id)} · ${esc(x.name)}</option>`).join("")}</select></label></div>
       <p class="hint" style="margin:0" id="bsrchint"></p>
       <details><summary>Coller une liste de noms</summary>
         <textarea id="bpaste" rows="5" placeholder="Un utilisateur par ligne, dans l'ordre des postes : Prénom Nom (ou Prénom ; Nom ; e-mail, copié d'Excel)"></textarea>
         <button type="button" class="btn ghost sm" id="bfill" style="margin-top:6px">Remplir la liste</button></details>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <button type="button" class="btn ghost sm" id="badd">＋ Ajouter une ligne</button>
+        <button type="button" class="btn ghost sm" id="bdelsel" hidden>Retirer les lignes cochées</button>
+        <button type="button" class="btn link" id="bclear" hidden>Tout vider</button>
+        <span class="hint" id="bstat"></span></div>
       <div id="blist"></div>
       <div class="form-msg" id="bmsg"></div>
       <div class="actions"><a class="btn ghost" href="#/utilisateurs">Annuler</a><button type="button" class="btn" id="bcreate" disabled>Créer</button></div>
     </div></div>`;
   const srcHint = () => { const v = $("#bsrc").value; $("#bsrchint").textContent = v ? "Copiés : renvois, statut, options, messagerie (nouveau code), numéro présenté, réglages du téléphone et touches. Non copiés : SDA, adresse MAC, accès à la console. Nouveaux identifiants SIP pour chacun." : ""; };
   $("#bsrc").onchange = srcHint; srcHint();
-  let nums = [];
-  const count = () => {
-    const n = $$("#blist [data-fn]").filter((i) => i.value.trim() || $(`[data-ln="${i.dataset.fn}"]`).value.trim()).length;
+  const msg = (t) => { $("#bmsg").innerHTML = t ? `<div class="flash bad">${esc(t)}</div>` : ""; };
+  const problem = (r) => !/^[1-9]\d{2}$/.test(r.n) ? "numéro à 3 chiffres" : taken.has(r.n) ? "déjà pris" : rows.filter((x) => x.n === r.n).length > 1 ? "en double" : "";
+  const named = () => rows.filter((r) => (r.fn.trim() || r.ln.trim()) && !problem(r));
+  const status = () => {
+    const n = named().length, sel = rows.filter((r) => r.sel).length;
     $("#bcreate").disabled = !n; $("#bcreate").textContent = n ? `Créer ${n} utilisateur${n > 1 ? "s" : ""}` : "Créer";
+    $("#bdelsel").hidden = !sel; $("#bdelsel").textContent = `Retirer ${sel > 1 ? `les ${sel} lignes cochées` : "la ligne cochée"}`;
+    $("#bclear").hidden = !rows.length;
+    $("#bstat").textContent = rows.length ? `${rows.length} ligne${rows.length > 1 ? "s" : ""}` : "";
+    const all = $("#ball"); if (all) all.checked = rows.length > 0 && rows.every((r) => r.sel);
+    rows.forEach((r, i) => { const t = $(`[data-pb="${i}"]`); if (t) { const p = problem(r); t.textContent = p; t.closest("tr").classList.toggle("dim", p === "déjà pris"); } });
   };
   const draw = () => {
-    const a = Number($("#bfrom").value), b = Number($("#bto").value);
-    if (!(a >= 100 && a <= 999 && b >= a && b <= 999)) { $("#blist").innerHTML = '<div class="flash bad">Plage invalide : postes à 3 chiffres (100 à 999), « au poste » après « du poste ».</div>'; return; }
-    if (b - a >= 300) { $("#blist").innerHTML = '<div class="flash bad">300 postes au plus à la fois.</div>'; return; }
-    const keep = Object.fromEntries($$("#blist [data-fn]").map((i) => [i.dataset.fn, [i.value, $(`[data-ln="${i.dataset.fn}"]`).value, $(`[data-em="${i.dataset.fn}"]`).value]]));
-    nums = []; for (let n = a; n <= b; n++) nums.push(String(n));
-    $("#blist").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Poste</th><th>Prénom</th><th>Nom</th><th class="hide-sm">E-mail (facultatif)</th></tr></thead><tbody>
-      ${nums.map((n) => taken.has(n) ? `<tr class="dim"><td><strong>${n}</strong></td><td colspan="3"><span class="pill off">Déjà pris</span></td></tr>`
-        : `<tr><td><strong>${n}</strong></td><td><input data-fn="${n}" maxlength="40" value="${esc(keep[n]?.[0] || "")}"></td><td><input data-ln="${n}" maxlength="40" value="${esc(keep[n]?.[1] || "")}"></td>
-          <td class="hide-sm"><input data-em="${n}" type="email" maxlength="120" value="${esc(keep[n]?.[2] || "")}"></td></tr>`).join("")}</tbody></table></div>`;
-    $$("#blist input").forEach((i) => i.oninput = count);
-    count();
+    if (!rows.length) { $("#blist").innerHTML = '<div class="empty">Ajoute une plage de postes ou une ligne.</div>'; status(); return; }
+    $("#blist").innerHTML = `<div class="table-wrap"><table><thead><tr><th class="ck"><input type="checkbox" id="ball" aria-label="Tout cocher"></th><th>Poste</th><th>Prénom</th><th>Nom</th><th class="hide-sm">E-mail (facultatif)</th><th></th></tr></thead><tbody>
+      ${rows.map((r, i) => `<tr><td class="ck"><input type="checkbox" data-ck="${i}" ${r.sel ? "checked" : ""} aria-label="Cocher ${esc(r.n)}"></td>
+        <td>${r.free ? `<input data-n="${i}" value="${esc(r.n)}" inputmode="numeric" maxlength="3" style="width:70px" placeholder="250">` : `<strong>${esc(r.n)}</strong>`}<div class="s red" data-pb="${i}"></div></td>
+        <td><input data-f="fn" data-i="${i}" maxlength="40" value="${esc(r.fn)}"></td><td><input data-f="ln" data-i="${i}" maxlength="40" value="${esc(r.ln)}"></td>
+        <td class="hide-sm"><input data-f="em" data-i="${i}" type="email" maxlength="120" value="${esc(r.em)}"></td>
+        <td><button type="button" class="btn ghost sm" data-rm="${i}" title="Retirer cette ligne">✕</button></td></tr>`).join("")}</tbody></table></div>`;
+    $$("#blist [data-f]").forEach((inp) => inp.oninput = () => { rows[inp.dataset.i][inp.dataset.f] = inp.value; status(); });
+    $$("#blist [data-n]").forEach((inp) => inp.oninput = () => { rows[inp.dataset.n].n = inp.value.replace(/\D/g, "").slice(0, 3); status(); });
+    $$("#blist [data-ck]").forEach((cb) => cb.onchange = () => { rows[cb.dataset.ck].sel = cb.checked; status(); });
+    $$("#blist [data-rm]").forEach((bt) => bt.onclick = () => { rows.splice(Number(bt.dataset.rm), 1); draw(); });
+    $("#ball").onchange = (e) => { rows.forEach((r) => { r.sel = e.target.checked; }); draw(); };
+    status();
   };
-  $("#bgo").onclick = draw;
-  for (const id of ["#bfrom", "#bto"]) $(id).onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); draw(); } };
+  const addRange = () => {
+    const a = Number($("#bfrom").value), b = Number($("#bto").value);
+    if (!(a >= 100 && a <= 999 && b >= a && b <= 999)) return msg("Plage invalide : postes à 3 chiffres (100 à 999), « au poste » après « du poste ».");
+    const add = []; for (let n = a; n <= b; n++) { const k = String(n); if (!taken.has(k) && !rows.some((r) => r.n === k)) add.push({ n: k, fn: "", ln: "", em: "", sel: false }); }
+    if (rows.length + add.length > 300) return msg("300 lignes au plus à la fois.");
+    msg(add.length ? "" : "Tous les postes de cette plage sont déjà pris ou déjà dans la liste.");
+    rows = [...rows, ...add].sort((x, y) => (x.free ? 1 : 0) - (y.free ? 1 : 0) || Number(x.n) - Number(y.n));
+    draw();
+  };
+  $("#bgo").onclick = addRange;
+  for (const id of ["#bfrom", "#bto"]) $(id).onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addRange(); } };
+  // Ligne seule : numéro court + nom tapés à la main (le numéro proposé est le premier libre)
+  $("#badd").onclick = () => {
+    if (rows.length >= 300) return msg("300 lignes au plus à la fois.");
+    let n = start; while (n <= 999 && (taken.has(String(n)) || rows.some((r) => r.n === String(n)))) n++;
+    rows.push({ n: n <= 999 ? String(n) : "", fn: "", ln: "", em: "", sel: false, free: true });
+    draw();
+    const last = $$("#blist [data-f=fn]").at(-1); last?.focus();
+  };
+  $("#bdelsel").onclick = () => { rows = rows.filter((r) => !r.sel); draw(); };
+  $("#bclear").onclick = () => { if (confirm("Vider toute la liste ?")) { rows = []; draw(); } };
   $("#bfill").onclick = () => {
-    if (!$("#blist [data-fn]")) draw();
     const lines = $("#bpaste").value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const free = $$("#blist [data-fn]");
+    const free = rows.filter((r) => !r.fn.trim() && !r.ln.trim() && !problem(r));
     lines.forEach((l, i) => {
-      const inp = free[i]; if (!inp) return;
+      const r = free[i]; if (!r) return;
       const parts = l.includes(";") || l.includes("\t") ? l.split(/[;\t]/).map((x) => x.trim()) : (() => { const w = l.split(/\s+/); return [w[0], w.slice(1).join(" ")]; })();
-      inp.value = parts[0] || ""; $(`[data-ln="${inp.dataset.fn}"]`).value = parts[1] || ""; if (parts[2]) $(`[data-em="${inp.dataset.fn}"]`).value = parts[2];
+      r.fn = parts[0] || ""; r.ln = parts[1] || ""; if (parts[2]) r.em = parts[2];
     });
-    if (lines.length > free.length) $("#bmsg").innerHTML = `<div class="flash bad">${lines.length - free.length} nom(s) en trop : agrandis la plage de postes.</div>`;
-    count();
+    msg(lines.length > free.length ? `${lines.length - free.length} nom(s) en trop : ajoute des postes à la liste.` : "");
+    draw();
   };
   $("#bcreate").onclick = async (e) => {
-    const users = $$("#blist [data-fn]").map((i) => ({ number: i.dataset.fn, first_name: i.value.trim(), last_name: $(`[data-ln="${i.dataset.fn}"]`).value.trim(), email: $(`[data-em="${i.dataset.fn}"]`).value.trim() }))
-      .filter((u) => u.first_name || u.last_name);
+    const users = named().map((r) => ({ number: r.n, first_name: r.fn.trim(), last_name: r.ln.trim(), email: r.em.trim() }));
     if (!users.length) return;
+    const bad = rows.filter((r) => (r.fn.trim() || r.ln.trim()) && problem(r));
+    if (bad.length && !confirm(`${bad.length} ligne(s) ne seront pas créées (${bad.map((r) => `${r.n || "?"} : ${problem(r)}`).join(", ")}). Continuer ?`)) return;
     e.target.disabled = true; e.target.textContent = `Création de ${users.length} utilisateur${users.length > 1 ? "s" : ""}…`;
     try {
       const r = await api("POST", "/api/extensions/bulk/create", { copy_from: $("#bsrc").value, users });
-      const ok = r.results.filter((x) => x.ok), bad = r.results.filter((x) => !x.ok);
-      flash = { cls: bad.length ? "warn" : "", text: `${ok.length} utilisateur${ok.length > 1 ? "s" : ""} créé${ok.length > 1 ? "s" : ""}.${bad.length ? ` Non créés : ${bad.map((x) => `${x.number} (${x.error})`).join(", ")}` : ""}` };
+      const ok = r.results.filter((x) => x.ok), ko = r.results.filter((x) => !x.ok);
+      flash = { cls: ko.length ? "warn" : "", text: `${ok.length} utilisateur${ok.length > 1 ? "s" : ""} créé${ok.length > 1 ? "s" : ""}.${ko.length ? ` Non créés : ${ko.map((x) => `${x.number} (${x.error})`).join(", ")}` : ""}` };
       location.hash = "#/utilisateurs";
-    } catch (err) { $("#bmsg").innerHTML = `<div class="flash bad">${esc(err.message)}</div>`; e.target.disabled = false; count(); }
+    } catch (err) { msg(err.message); e.target.disabled = false; status(); }
   };
-  draw();
+  if (from) addRange(); else draw();
 }
 
 async function renderUserNew(from) {
