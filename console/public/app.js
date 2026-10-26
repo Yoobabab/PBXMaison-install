@@ -1838,8 +1838,17 @@ async function route() {
     app.innerHTML = `<div class="flash bad">${esc(e.message)}</div>`;
   }
 }
-window.addEventListener("hashchange", () => { clearInterval(timer); route(); });
-route();
+// Écran de chargement (logo du partenaire) : au premier affichage, puis seulement si une page met plus de 0,4 s à venir
+const splash = $("#cx-splash");
+let splashT = null;
+const splashOut = () => { clearTimeout(splashT); splash?.classList.add("out"); };
+const routeWithSplash = async () => {
+  clearTimeout(splashT);
+  if (splash?.classList.contains("out")) splashT = setTimeout(() => splash.classList.remove("out"), 400), splash.classList.add("soft");
+  try { await route(); } finally { splashOut(); }
+};
+window.addEventListener("hashchange", () => { clearInterval(timer); routeWithSplash(); });
+routeWithSplash();
 
 // ---------------------------------------------------------------- Œil sur les mots de passe
 const EYE = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>';

@@ -978,3 +978,13 @@ tr.dim td{opacity:.55}
 .rowmenu .rm-list>a,.rowmenu .rm-list>button{all:unset;cursor:pointer;padding:9px 12px;border-radius:8px;font-size:14px;color:inherit;text-align:left}
 .rowmenu .rm-list>a:hover,.rowmenu .rm-list>button:hover{background:var(--bg, #f4f5f8)}
 .rowmenu .rm-list>.danger{color:#d8141c}
+
+/* Écran de chargement : logo du partenaire (ou Callikoe) au centre, disparaît en fondu quand la page est prête */
+.cx-splash{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg, #f4f5f8);transition:opacity .35s ease, visibility .35s}
+.cx-splash.out{opacity:0;visibility:hidden;pointer-events:none}
+.cx-splash.soft{background:rgba(244,245,248,.72);backdrop-filter:blur(2px)}
+.cx-splash .sl{width:96px;height:96px;border-radius:26px;background:var(--grad, linear-gradient(120deg,#f26b4f,#d8141c 50%,#e0006e));position:relative;
+  box-shadow:0 14px 40px rgba(var(--accent-rgb, 216,20,28),.32);animation:cxpulse 1.3s ease-in-out infinite}
+.cx-splash .sl::after{content:"";position:absolute;inset:28px;border-radius:50%;border:7px solid #fff}
+@keyframes cxpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+@media (prefers-reduced-motion:reduce){.cx-splash .sl{animation:none}}

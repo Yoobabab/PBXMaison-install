@@ -172,6 +172,7 @@ export function themeCss(t = readTheme()) {
   if (t.logo) {
     const u = `url("/theme/logo?v=${v}")`;
     css += `.brand .mark,.rail-logo{background:#fff ${u} center/80% no-repeat;box-shadow:0 2px 8px rgba(0,0,0,.18)}.brand .mark::after,.rail-logo i{display:none}\n`;
+    css += `.cx-splash .sl{background:#fff ${u} center/78% no-repeat;box-shadow:0 14px 40px rgba(0,0,0,.18)}.cx-splash .sl::after{display:none}\n`;
     css += `.login::before,.wizard::before{content:"";display:block;height:56px;margin:0 auto 18px;background:${u} center/contain no-repeat}\n`;
     css += `.sp-brand i{width:44px;height:44px;border-radius:10px;background:${u} center/contain no-repeat;box-shadow:none}\n`;
   }
