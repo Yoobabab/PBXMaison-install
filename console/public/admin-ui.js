@@ -766,9 +766,30 @@ async function pageReceptionist(top) {
 /** Activité › Rapports : rapport mensuel envoyé au client */
 async function pageReports() {
   H.setNav("reports");
-  const [d, rep] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report")]);
+  const [d, rep, sc] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report"), H.api("GET", "/api/reports/schedules")]);
   const on = d.settings.enabled;
+  const editing = sessionStorage.getItem("pbxm_rs_edit");
+  const cur = editing === "new" ? { name: "", frequency: "week", hour: 8, recipients: [], sections: Object.fromEntries(Object.keys(sc.sections).map((k) => [k, true])), csv: true, enabled: true }
+    : sc.schedules.find((x) => x.id === editing);
+  const schForm = cur ? `<form id="rsf" class="pad stack" novalidate style="border-top:1px solid var(--line)"><div class="form-msg"></div>
+      <div class="grid2"><label>Nom<input name="name" value="${H.esc(cur.name)}" maxlength="60" placeholder="Rapport de la semaine"></label>
+        <label>Destinataires<input name="recipients" value="${H.esc(cur.recipients.join(", "))}" placeholder="gerant@client.fr, compta@client.fr"></label></div>
+      <div class="grid2"><label>Fréquence<select name="frequency">${Object.entries(sc.frequencies).map(([k, l]) => `<option value="${k}" ${cur.frequency === k ? "selected" : ""}>${H.esc(l)}</option>`).join("")}</select></label>
+        <label>Heure d'envoi<select name="hour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${cur.hour === h ? "selected" : ""}>${h} h</option>`).join("")}</select></label></div>
+      <div><span class="dl">Contenu</span><div class="row" style="flex-wrap:wrap;gap:6px 18px">${Object.entries(sc.sections).map(([k, l]) => `<label class="check"><input type="checkbox" name="sec_${k}" ${cur.sections[k] ? "checked" : ""}> ${H.esc(l)}</label>`).join("")}
+        <label class="check"><input type="checkbox" name="csv" ${cur.csv ? "checked" : ""}> Tous les appels en fichier Excel (CSV)</label></div></div>
+      ${sw("enabled", cur.enabled, "Actif")}
+      <div class="actions">${cur.id ? '<button type="button" class="btn ghost" id="rsdel">Supprimer</button>' : ""}<button type="button" class="btn ghost" id="rscancel">Annuler</button><button class="btn">Enregistrer</button></div></form>` : "";
   H.app.innerHTML = head("Rapports", "Bilans d'appels envoyés par e-mail au client.") + `
+    <div class="panel" style="margin-bottom:16px"><div class="ph"><h2>Rapports détaillés planifiés</h2>${cur ? "" : '<button class="btn sm" id="rsnew">+ Nouveau rapport</button>'}</div>
+      ${sc.smtp ? "" : '<div class="pad"><div class="flash warn" style="margin:0">Le serveur d\'envoi des e-mails n\'est pas réglé : <a href="#/alertes/reglages">Alertes › Réglages</a>.</div></div>'}
+      ${sc.schedules.length ? `<div class="table-wrap"><table><thead><tr><th>Rapport</th><th>Quand</th><th>Destinataires</th><th>Dernier envoi</th><th></th></tr></thead><tbody>
+        ${sc.schedules.map((x) => `<tr><td><b>${H.esc(x.name)}</b>${x.enabled ? "" : ` ${pill("off", "En pause")}`}<div class="s">${Object.entries(sc.sections).filter(([k]) => x.sections[k]).map(([, l]) => H.esc(l)).join(" · ")}${x.csv ? " · fichier Excel" : ""}</div></td>
+          <td>${H.esc(sc.frequencies[x.frequency].split(" (")[0])}<div class="s">à ${x.hour} h</div></td><td class="s">${H.esc(x.recipients.join(", "))}</td>
+          <td class="s">${x.last ? `${H.esc(x.last.label)}<br>${fmtDT(x.last.at)}` : "—"}</td>
+          <td class="acts"><a class="btn ghost sm" href="/api/reports/schedules/${H.esc(x.id)}/preview" target="_blank" rel="noopener">Aperçu</a> <button class="btn ghost sm" data-rstest="${H.esc(x.id)}">Essai</button> <button class="btn ghost sm" data-rsedit="${H.esc(x.id)}">Modifier</button></td></tr>`).join("")}</tbody></table></div>`
+        : cur ? "" : '<div class="empty">Aucun rapport planifié : chaque jour, semaine ou mois, le client reçoit les chiffres détaillés (par utilisateur, par numéro, appels manqués) et tous les appels en fichier Excel.</div>'}
+      ${schForm}</div>
     <div class="panel"><div class="ph"><h2>Rapport mensuel au client</h2></div><form id="rpf" class="pad stack" novalidate><div class="form-msg"></div>
       <p class="hint" style="margin:0">Le 1er de chaque mois, le client reçoit par e-mail le bilan du mois écoulé : appels reçus, pris, manqués, attente, jours et heures chargés, appels par personne${on ? ", avec l'analyse et les conseils de l'IA" : ""}. Aux couleurs et au logo du serveur (option Marque blanche), sinon aux couleurs Callikoe.</p>
       ${sw("enabled", rep.enabled, "Envoyer le rapport chaque mois")}
@@ -778,6 +799,25 @@ async function pageReports() {
       <p class="s" style="margin:0">${rep.last ? `Dernier envoi : ${H.esc(rep.last.label)}, le ${fmtDT(rep.last.at)} à ${H.esc(rep.last.to.join(", "))}.` : "Pas encore envoyé."}</p>
       <div class="actions"><a class="btn ghost" href="/api/ai-settings/report/preview" target="_blank" rel="noopener">Aperçu du mois dernier</a><button type="button" class="btn ghost" id="rptest">M'envoyer un essai</button><button class="btn">Enregistrer</button></div></form></div>`;
   onSubmit(H.$("#rpf"), async (f) => { await H.api("PUT", "/api/ai-settings/report", { enabled: f.enabled, ai: f.ai, recipients: f.recipients, signature: f.signature }); ok("Rapport mensuel enregistré."); pageReports(); });
+  // Rapports planifiés
+  const setEdit = (v) => { try { v ? sessionStorage.setItem("pbxm_rs_edit", v) : sessionStorage.removeItem("pbxm_rs_edit"); } catch { /* */ } pageReports(); };
+  H.$("#rsnew")?.addEventListener("click", () => setEdit("new"));
+  H.$("#rscancel")?.addEventListener("click", () => setEdit(null));
+  H.app.querySelectorAll("[data-rsedit]").forEach((b) => b.onclick = () => setEdit(b.dataset.rsedit));
+  H.$("#rsdel")?.addEventListener("click", async () => { if (!confirm("Supprimer ce rapport planifié ?")) return; await H.api("DELETE", `/api/reports/schedules/${cur.id}`); ok("Rapport supprimé."); setEdit(null); });
+  H.app.querySelectorAll("[data-rstest]").forEach((b) => b.onclick = async () => {
+    const to = prompt("Envoyer un essai de ce rapport (dernière période) à :", H.state?.email || "");
+    if (!to) return;
+    b.disabled = true;
+    try { const x = await H.api("POST", `/api/reports/schedules/${b.dataset.rstest}/test`, { to }); alert(`Rapport (${x.label}) envoyé à ${x.to.join(", ")}.`); } catch (err) { alert(err.message); }
+    b.disabled = false;
+  });
+  if (H.$("#rsf")) onSubmit(H.$("#rsf"), async (f) => {
+    const body = { name: f.name, recipients: f.recipients, frequency: f.frequency, hour: Number(f.hour), csv: f.csv, enabled: f.enabled,
+      sections: Object.fromEntries(Object.keys(sc.sections).map((k) => [k, !!f[`sec_${k}`]])) };
+    await H.api(cur.id ? "PUT" : "POST", `/api/reports/schedules${cur.id ? "/" + cur.id : ""}`, body);
+    ok("Rapport planifié enregistré."); setEdit(null);
+  });
   H.$("#rptest").onclick = async (e) => {
     const to = prompt("Envoyer un essai du rapport (mois dernier) à :", H.state?.email || "");
     if (!to) return;

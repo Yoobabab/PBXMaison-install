@@ -34,3 +34,30 @@ test("rapport mensuel : e-mail aux couleurs du partenaire", async () => {
   assert.match(m.html, /#1d4ed8/); assert.match(m.html, /cid:logo1/); assert.match(m.html, /\+20 %/); assert.match(m.html, /\+3 pts/); assert.match(m.html, /Télécom Ouest/);
   assert.doesNotMatch(m.html, /<b>Sophie|Sophie <b>/); assert.match(m.text, /Notre analyse/);
 });
+
+test("rapports planifiés : période de la veille, échéance, chiffres détaillés, CSV", async () => {
+  const { periodOf, validateSchedule, scheduleDue, detailedStats, callsCsv, detailedReportMail, periodStats } = await import("../lib/report.mjs");
+  const now = Date.parse("2026-10-26T09:30:00Z");   // lundi 26 octobre, 10 h 30 à Paris
+  const d = periodOf("day", now, { previous: true });
+  assert.equal(d.from, "2026-10-24T22:00:00.000Z"); assert.equal(d.to, "2026-10-25T23:00:00.000Z");   // dimanche 25 (passage à l'heure d'hiver)
+  assert.match(d.label, /dimanche 25 octobre 2026/);
+  const sch = validateSchedule({ frequency: "week", hour: 8, recipients: "a@b.fr, A@b.fr", sections: { hours: false } }, "x1");
+  assert.deepEqual(sch.recipients, ["a@b.fr"]); assert.equal(sch.sections.hours, false); assert.equal(sch.sections.users, true);
+  assert.equal(scheduleDue(sch, now), periodOf("week", now, { previous: true }).from);
+  assert.equal(scheduleDue({ ...sch, hour: 11 }, now), null);
+  assert.equal(scheduleDue({ ...sch, frequency: "month" }, now), null);
+  assert.throws(() => validateSchedule({ recipients: "" }), /destinataire/);
+  const c = (start, dir, status, extra = {}) => ({ start, direction: dir, status, from: { number: "0612345678", name: "", ext: dir === "out" ? "201" : "" }, to: { number: "0465001542" }, did: dir === "in" ? "0465001542" : "", answered_by: status === "answered" && dir === "in" ? "202" : "", talk: status === "answered" ? 60 : 0, ...extra });
+  const calls = [c("2026-10-25T08:00:00.000Z", "in", "answered"), c("2026-10-25T09:00:00.000Z", "in", "missed"), c("2026-10-25T10:00:00.000Z", "out", "answered"), c("2026-10-23T10:00:00.000Z", "in", "missed")];
+  const names = new Map([["201", "Sophie"], ["202", "Paul"]]);
+  const det = detailedStats(calls, { from: d.from, to: d.to, names });
+  assert.deepEqual(det.dids, [{ did: "0465001542", calls: 2, answered: 1, missed: 1 }]);
+  assert.equal(det.missed.length, 1);
+  assert.deepEqual(det.users.map((u) => [u.ext, u.name, u.answered, u.outbound]).sort(), [["201", "Sophie", 0, 1], ["202", "Paul", 1, 0]]);
+  const csv = callsCsv(calls, { from: d.from, to: d.to, names });
+  assert.equal(csv.trim().split("\r\n").length, 4);
+  assert.match(csv, /Entrant;06 12 34 56 78;;04 65 00 15 42;Répondu;202 Paul;60/);
+  const mail = detailedReportMail({ name: "Rapport du jour", label: d.label, stats: periodStats(calls, { from: d.from, to: d.to, names }), detail: det, sections: sch.sections, pbxName: "PBX" });
+  assert.match(mail.subject, /^Rapport du jour — dimanche 25 octobre 2026 · PBX$/);
+  assert.match(mail.html, /Par numéro appelé/); assert.doesNotMatch(mail.html, /Appels reçus par heure/);
+});

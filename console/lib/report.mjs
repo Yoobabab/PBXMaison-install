@@ -24,6 +24,12 @@ const localMidnight = (y, m, d, tz) => { const g = Date.UTC(y, m, d); let t = g 
 export function periodOf(kind, now = Date.now(), { previous = false, tz = "Europe/Paris" } = {}) {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(new Date(now)).map((x) => [x.type, x.value]));
   const y = +p.year, mo = +p.month - 1, day = +p.day, wd = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(p.weekday);
+  if (kind === "day") {
+    const d = day - (previous ? 1 : 0);
+    const x = new Date(Date.UTC(y, mo, d));
+    return { from: localMidnight(y, mo, d, tz).toISOString(), to: localMidnight(y, mo, d + 1, tz).toISOString(),
+      label: x.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }) };
+  }
   if (kind === "month") {
     const m = mo - (previous ? 1 : 0);
     return { from: localMidnight(y, m, 1, tz).toISOString(), to: localMidnight(y, m + 1, 1, tz).toISOString(),
@@ -130,4 +136,92 @@ export function monthlyReportMail({ label, stats: s, prev: p0, synthesis = "", p
     `Appels manqués : ${s.missed}${s.voicemail ? ` (dont ${s.voicemail} message${s.voicemail > 1 ? "s" : ""})` : ""}`, `Attente moyenne avant réponse : ${dur(s.avg_wait)}`, "",
     ...s.days.map((d) => `${d.name} : ${d.calls} appel${d.calls > 1 ? "s" : ""}, ${d.missed} manqué${d.missed > 1 ? "s" : ""}`), ...(syn.length ? ["", "Notre analyse :", ...syn] : []), "", `Rapport préparé par ${sign}.`].join("\n");
   return { subject: title + (pbxName ? ` — ${pbxName}` : ""), html, text };
+}
+
+// ------------------------------------------------------------------ Rapports détaillés planifiés (jour, semaine, mois)
+export const REPORT_SECTIONS = { summary: "Chiffres clés", users: "Par utilisateur", dids: "Par numéro appelé (SDA)", missed: "Liste des appels manqués", hours: "Appels par heure" };
+export const REPORT_FREQ = { day: "Chaque jour (la veille)", week: "Chaque semaine (le lundi, semaine écoulée)", month: "Chaque mois (le 1er, mois écoulé)" };
+const fmtNum = (n) => /^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "");
+
+/** Planification validée : { id, name, frequency, hour, recipients[], sections{}, csv } */
+export function validateSchedule(input, id) {
+  const freq = REPORT_FREQ[input?.frequency] ? input.frequency : "week";
+  const hour = Math.min(23, Math.max(0, Math.round(Number(input?.hour ?? 8)) || 0));
+  const recipients = [...new Set((Array.isArray(input?.recipients) ? input.recipients : String(input?.recipients || "").split(/[\s,;]+/)).map((x) => String(x).trim().toLowerCase()).filter(Boolean))].slice(0, 10);
+  for (const r of recipients) if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(r)) throw Object.assign(new Error(`Adresse invalide : ${r}`), { field: "recipients", user: true });
+  if (!recipients.length) throw Object.assign(new Error("Indique au moins un destinataire."), { field: "recipients", user: true });
+  const sections = Object.fromEntries(Object.keys(REPORT_SECTIONS).map((k) => [k, input?.sections?.[k] !== undefined ? !!input.sections[k] : true]));
+  if (!Object.values(sections).some(Boolean) && !input?.csv) throw Object.assign(new Error("Choisis au moins une partie du rapport."), { field: "sections", user: true });
+  return { id, name: String(input?.name || "").replace(/[<>\r\n]/g, " ").trim().slice(0, 60) || `Rapport ${REPORT_FREQ[freq].split(" (")[0].toLowerCase()}`,
+    frequency: freq, hour, recipients, sections, csv: input?.csv !== undefined ? !!input.csv : true, enabled: input?.enabled !== undefined ? !!input.enabled : true };
+}
+/** Le rapport est-il à envoyer maintenant ? (heure locale du PBX) → clé de la période, sinon null */
+export function scheduleDue(sch, now = Date.now(), tz = "Europe/Paris") {
+  if (!sch.enabled) return null;
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: tz, day: "numeric", weekday: "short", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+  if (Number(p.hour) < sch.hour) return null;
+  if (sch.frequency === "week" && p.weekday !== "Mon") return null;
+  if (sch.frequency === "month" && Number(p.day) !== 1) return null;
+  const per = periodOf(sch.frequency, now, { previous: true, tz });
+  return per.from;
+}
+
+/** Chiffres par utilisateur et par SDA, appels manqués d'une période (calls : journal summarize) */
+export function detailedStats(calls, { from, to, names = new Map() }) {
+  const inP = calls.filter((c) => c.start >= from && c.start < to);
+  const users = new Map();
+  const U = (ext) => { if (!users.has(ext)) users.set(ext, { ext, name: names.get(ext) || "", answered: 0, talk: 0, outbound: 0, out_talk: 0, internal: 0 }); return users.get(ext); };
+  const dids = new Map();
+  for (const c of inP) {
+    if (c.direction === "in") {
+      if (c.answered_by) { const u = U(c.answered_by); u.answered++; u.talk += c.talk || 0; }
+      const k = c.did || c.to.number || "?";
+      const d = dids.get(k) || { did: k, calls: 0, answered: 0, missed: 0 };
+      d.calls++; c.status === "answered" ? d.answered++ : d.missed++; dids.set(k, d);
+    } else if (c.direction === "out" && c.from.ext) { const u = U(c.from.ext); u.outbound++; u.out_talk += c.talk || 0; }
+    else if (c.direction === "internal" && c.from.ext) U(c.from.ext).internal++;
+  }
+  const missed = inP.filter((c) => c.direction === "in" && c.status !== "answered").sort((a, b) => a.start.localeCompare(b.start))
+    .map((c) => ({ at: c.start, from: c.from.number, name: c.from.name || "", did: c.did, status: c.status }));
+  return { users: [...users.values()].sort((a, b) => (b.answered + b.outbound) - (a.answered + a.outbound) || a.ext.localeCompare(b.ext)),
+    dids: [...dids.values()].sort((a, b) => b.calls - a.calls), missed };
+}
+const STATUS_FR = { answered: "Répondu", missed: "Manqué", voicemail: "Messagerie", busy: "Occupé", failed: "Sans réponse" };
+const DIR_FR = { in: "Entrant", out: "Sortant", internal: "Interne" };
+/** CSV (Excel, « ; ») de tous les appels de la période */
+export function callsCsv(calls, { from, to, tz = "Europe/Paris", names = new Map() }) {
+  const q = (v) => { const x = String(v ?? ""); return /[";\r\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+  const dt = (iso) => new Date(iso).toLocaleString("fr-FR", { timeZone: tz });
+  const rows = calls.filter((c) => c.start >= from && c.start < to).sort((a, b) => a.start.localeCompare(b.start)).map((c) => [dt(c.start), DIR_FR[c.direction] || c.direction,
+    c.direction === "out" ? `${c.from.ext} ${names.get(c.from.ext) || ""}`.trim() : fmtNum(c.from.number), c.from.name || "", c.direction === "in" ? fmtNum(c.did || c.to.number) : fmtNum(c.to.number),
+    STATUS_FR[c.status] || c.status, c.answered_by ? `${c.answered_by} ${names.get(c.answered_by) || ""}`.trim() : "", c.talk || 0]);
+  return "\uFEFF" + [["Date", "Sens", "De", "Nom de l'appelant", "Vers", "Résultat", "Répondu par", "Durée de conversation (s)"], ...rows].map((r) => r.map(q).join(";")).join("\r\n") + "\r\n";
+}
+/** E-mail du rapport détaillé */
+export function detailedReportMail({ name, label, stats: s, detail: d, sections, pbxName = "", brand = {}, tz = "Europe/Paris" }) {
+  const color = /^#[0-9a-f]{6}$/i.test(brand.color || "") ? brand.color : "#d8141c";
+  const th = (t) => `<th style="text-align:left;padding:6px 8px;font-size:12px;color:#626977;border-bottom:1px solid #e6e8ee">${escH(t)}</th>`;
+  const td = (t, b) => `<td style="padding:6px 8px;font-size:13px;color:#1b1d24;border-bottom:1px solid #f0f1f4${b ? ";font-weight:700" : ""}">${escH(t)}</td>`;
+  const table = (heads, rows) => `<table role="presentation" style="width:100%;border-collapse:collapse"><tr>${heads.map(th).join("")}</tr>${rows.join("")}</table>`;
+  const h3 = (t) => `<h3 style="font-size:15px;margin:22px 0 8px;color:#1b1d24">${escH(t)}</h3>`;
+  const kpi = (v, l) => `<td style="padding:12px 8px;background:#f6f7f9;border-radius:10px;text-align:center;width:25%"><div style="font-size:22px;font-weight:700;color:#1b1d24">${escH(v)}</div><div style="font-size:12px;color:#626977">${escH(l)}</div></td>`;
+  const hm = (iso) => new Date(iso).toLocaleString("fr-FR", { timeZone: tz, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const parts = [];
+  if (sections.summary) parts.push(`<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:6px"><tr>${kpi(s.inbound, "appels reçus")}${kpi(`${s.answer_rate} %`, "appels pris")}${kpi(s.missed, "manqués")}${kpi(s.outbound, "appels passés")}</tr></table>
+    <p style="font-size:13px;color:#626977;margin:6px 0 0">Attente moyenne ${dur(s.avg_wait)} · durée moyenne ${dur(s.avg_talk)} · ${s.callers} appelant${s.callers > 1 ? "s" : ""} différent${s.callers > 1 ? "s" : ""}${s.not_called_back ? ` · <b>${s.not_called_back} pas encore rappelé${s.not_called_back > 1 ? "s" : ""}</b>` : ""}</p>`);
+  if (sections.users && d.users.length) parts.push(h3("Par utilisateur") + table(["Poste", "Appels pris", "Temps au téléphone", "Appels passés"], d.users.map((u) => `<tr>${td(`${u.ext} ${u.name}`.trim(), true)}${td(u.answered)}${td(dur(u.talk + u.out_talk))}${td(u.outbound)}</tr>`)));
+  if (sections.dids && d.dids.length) parts.push(h3("Par numéro appelé") + table(["Numéro", "Appels", "Pris", "Manqués"], d.dids.map((x) => `<tr>${td(fmtNum(x.did), true)}${td(x.calls)}${td(x.answered)}${td(x.missed)}</tr>`)));
+  if (sections.hours && s.inbound) parts.push(h3("Appels reçus par heure") + table(["Heure", "Appels", "Manqués"], s.hours.map((x, i) => [x, i]).filter(([x]) => x.calls).map(([x, i]) => `<tr>${td(`${i} h – ${i + 1} h`)}${td(x.calls)}${td(x.missed)}</tr>`)));
+  if (sections.missed) parts.push(h3(`Appels manqués (${d.missed.length})`) + (d.missed.length ? table(["Quand", "Appelant", "Numéro appelé", ""], d.missed.slice(0, 150).map((m) => `<tr>${td(hm(m.at))}${td(`${fmtNum(m.from) || "Masqué"}${m.name ? ` · ${m.name}` : ""}`)}${td(fmtNum(m.did))}${td(m.status === "voicemail" ? "message laissé" : "")}</tr>`))
+    + (d.missed.length > 150 ? `<p style="font-size:12px;color:#8a90a0">… et ${d.missed.length - 150} autres (voir le fichier joint).</p>` : "") : '<p style="font-size:13px;color:#626977;margin:0">Aucun appel manqué.</p>'));
+  const title = `${name} — ${label}`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;background:#eef0f4;padding:24px 12px"><div style="max-width:680px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden">
+  <div style="background:${color};padding:20px 24px;color:#fff">${brand.logoCid ? `<img src="cid:${brand.logoCid}" alt="" style="height:36px;background:#fff;border-radius:8px;padding:4px;margin-bottom:8px;display:block">` : ""}
+    <div style="font-size:19px;font-weight:700">${escH(name)}</div><div style="font-size:14px;opacity:.9;margin-top:4px">${escH(label)} · ${escH(pbxName)}</div></div>
+  <div style="padding:20px 24px">${parts.join("")}</div>
+  <div style="padding:14px 24px;border-top:1px solid #e6e8ee;font-size:12px;color:#8a90a0">${brand.signature ? `Rapport préparé par ${escH(brand.signature)}` : "Rapport automatique du standard"}${sections.csv ? " · tous les appels dans le fichier joint (Excel)" : ""}.</div></div></div>`;
+  const text = [title, pbxName, "", `Appels reçus : ${s.inbound} · pris : ${s.answer_rate} % · manqués : ${s.missed} · passés : ${s.outbound}`,
+    ...(sections.users ? ["", "Par utilisateur :", ...d.users.map((u) => `${u.ext} ${u.name} : ${u.answered} pris, ${u.outbound} passés`)] : []),
+    ...(sections.missed ? ["", `Appels manqués : ${d.missed.length}`, ...d.missed.slice(0, 150).map((m) => `${hm(m.at)} ${fmtNum(m.from) || "Masqué"} → ${fmtNum(m.did)}`)] : [])].join("\n");
+  return { subject: title + (pbxName ? ` · ${pbxName}` : ""), html, text };
 }

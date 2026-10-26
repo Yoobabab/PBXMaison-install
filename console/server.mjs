@@ -87,7 +87,7 @@ export async function buildApp({ db, ami } = {}) {
   // Console : session valide ET double authentification faite (sinon seule la mise en place de la double authentification est permise)
   const ROLES = { admin: "Accès complet (administrateur)", tech: "Technicien (tout sauf les comptes)", client: "Accès restreint (utilisateurs, téléphones, routage, annuaire)", lecture: "Accès visuel (lecture seule)" };
   // Accès restreint (client) : pas de trunks, règles sortantes, sécurité, codes, sauvegardes, mises à jour, licence, alertes, passerelles, système, comptes
-  const CLIENT_DENY = /^\/api\/(ai-settings|outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
+  const CLIENT_DENY = /^\/api\/(reports|ai-settings|outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
   // Rôles qu'un utilisateur du PBX connecté à la console peut donner
   const PBX_USER_ROLES = ["user", "standard", "manager"];
   const requireUser = async (req, reply) => {
@@ -1214,6 +1214,14 @@ export async function buildApp({ db, ami } = {}) {
     const html = r.attachments.length ? r.mail.html.replace(/cid:logo@callikoe/g, "/theme/logo") : r.mail.html;
     return reply.type("text/html; charset=utf-8").header("cache-control", "no-store").send(`<!doctype html><meta charset="utf-8"><title>${r.mail.subject.replace(/[<>&]/g, "")}</title><body style="margin:0">${html}</body>`);
   });
+  // Rapports détaillés planifiés (Activité › Rapports)
+  app.get("/api/reports/schedules", { preHandler: requireUser }, async () => admin.listSchedules());
+  app.post("/api/reports/schedules", { preHandler: requireUser }, async (req) => admin.saveSchedule(null, req.body || {}));
+  app.put("/api/reports/schedules/:id", { preHandler: requireUser }, async (req) => admin.saveSchedule(req.params.id, req.body || {}));
+  app.delete("/api/reports/schedules/:id", { preHandler: requireUser }, async (req) => admin.deleteSchedule(req.params.id));
+  app.get("/api/reports/schedules/:id/preview", { preHandler: requireUser }, async (req, reply) => reply.type("text/html; charset=utf-8").header("cache-control", "no-store")
+    .send(`<!doctype html><meta charset="utf-8"><title>Aperçu du rapport</title><body style="margin:0">${(await admin.previewSchedule(req.params.id)).replace(/cid:logo@callikoe/g, "/theme/logo")}</body>`));
+  app.post("/api/reports/schedules/:id/test", { preHandler: requireUser }, async (req) => admin.sendSchedule(req.params.id, String(req.body?.to || "").trim().toLowerCase() || null));
   app.post("/api/ai-settings/report/test", { preHandler: requireUser }, async (req) => admin.sendMonthlyReport({ to: String(req.body?.to || "").trim() || null, force: true }));
   app.get("/api/ai", { preHandler: requireUser }, async () => {
     const s = await ai.settings();
