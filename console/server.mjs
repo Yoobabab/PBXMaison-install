@@ -1091,7 +1091,7 @@ export async function buildApp({ db, ami } = {}) {
     return ipOk && k.length === want.length && crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want));
   };
   // ---------------------------------------------------------------- Appli mobile : sonnerie même fermée (notifications)
-  const appPush = createAppPush({ db, relay: (p, body) => ai.relay(p, body), log: app.log, pbxName: () => pbxEnv().PBX_NAME || "" });
+  const appPush = createAppPush({ db, relay: (p, body) => ai.relay(p, body), log: app.log, pbxName: () => pbxEnv().PBX_NAME || "", pbxHost: () => sipServer().host });
   // Postes qui ont un téléphone joignable par notification : notés dans Asterisk (cxapp/<poste>), seuls ceux-là passent par [cx-app]
   const syncAppFlags = async () => {
     try {

@@ -16,18 +16,18 @@ export const RING_WAIT_S = 20;
 const FOREGROUND_MS = 75_000;   // appli « au premier plan » si elle a donné signe de vie depuis moins de 75 s
 
 /** Contenu de la notification d'appel entrant (format attendu par expo-callkit-telecom, iOS et Android) */
-export function incomingCallEvent({ call, num, name, ext, pbx }) {
+export function incomingCallEvent({ call, num, name, ext, pbx, host = "" }) {
   const n = String(num || "").replace(/[^\d+*#]/g, "").slice(0, 32);
   return { eventId: crypto.randomUUID(), serverCallId: String(call), hasVideo: false, startedAt: new Date().toISOString(),
     caller: { id: n || "inconnu", displayName: String(name || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 60) || n || "Appel entrant", ...(n.startsWith("+") ? { phoneNumber: n } : {}) },
-    metadata: { pbx: String(pbx || ""), ext: String(ext) } };
+    metadata: { pbx: String(pbx || ""), ext: String(ext), host: String(host || "") } };   // host + ext : l'appli retrouve le bon compte
 }
 /** Requête FCM v1 (Android) : message de données prioritaire, lu par l'appli même fermée */
 export function fcmMessage(token, event) {
   return { message: { token, android: { priority: "high", ttl: "30s" }, data: { messageType: "incomingCall", incomingCall: JSON.stringify(event) } } };
 }
 
-export function createAppPush({ db, relay, log = console, pbxName = () => "", fetchImpl = globalThis.fetch, connect = http2.connect, now = () => Date.now() }) {
+export function createAppPush({ db, relay, log = console, pbxName = () => "", pbxHost = () => "", fetchImpl = globalThis.fetch, connect = http2.connect, now = () => Date.now() }) {
   const seen = new Map();      // poste → dernier signe de vie de l'appli au premier plan
   const calls = new Map();     // appel → { ext, state, ready, at }
   let auth = null;             // autorisations du portail (APNs, FCM) gardées jusqu'à leur expiration
@@ -109,7 +109,7 @@ export function createAppPush({ db, relay, log = console, pbxName = () => "", fe
     ext = String(ext); call = String(call);
     if (foreground(ext)) { calls.set(call, { ext, state: "ringing", ready: true, at: now() }); return "dial"; }
     calls.set(call, { ext, state: "ringing", ready: false, at: now() });
-    const sent = await notify(ext, incomingCallEvent({ call, num, name, ext, pbx: pbxName() }));
+    const sent = await notify(ext, incomingCallEvent({ call, num, name, ext, pbx: pbxName(), host: pbxHost() }));
     if (!sent) { calls.delete(call); return ""; }
     return "wait";
   }
