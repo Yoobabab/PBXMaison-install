@@ -181,7 +181,12 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
   };
 
   /** Message vocal → transcription + résumé (gardés en base : une seule fois par message) */
-  async function voicemailInsight(box, msgKey, file, meta = {}) {
+  const inFlight = new Map();   // une seule transcription à la fois par message (deux tâches peuvent la demander en même temps)
+  function voicemailInsight(box, msgKey, file, meta = {}) {
+    if (!inFlight.has(msgKey)) inFlight.set(msgKey, insightOnce(box, msgKey, file, meta).finally(() => inFlight.delete(msgKey)));
+    return inFlight.get(msgKey);
+  }
+  async function insightOnce(box, msgKey, file, meta = {}) {
     const old = (await db.query("SELECT text, summary, caller_name, callback, urgent FROM pbxmaison_vm_ai WHERE key = $1", [msgKey])).rows[0];
     if (old) return old;
     const t = await transcribe(file);

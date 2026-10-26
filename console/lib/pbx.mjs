@@ -513,6 +513,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     if (input.phone) {
       const users = await loadUsers();
       const macOwners = new Map(users.flatMap((x) => [x.phone.mac, ...(x.phone.extra || []).map((e) => e.mac)].filter(Boolean).map((m) => [m, x.id])));
+      for (const g of await loadGateways()) if (g.mac) macOwners.set(g.mac, `la passerelle « ${g.name} »`);   // une passerelle a aussi un fichier de configuration à son adresse MAC
       try {
         u.phone = validatePhone(input.phone, current.phone, { selfId: num, macOwners, extensions: new Map(users.map((x) => [x.id, displayName(x)])) });
       } catch (e) { throw new UserError(e.message, e.field); }

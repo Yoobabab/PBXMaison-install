@@ -712,7 +712,8 @@ export async function buildApp({ db, ami } = {}) {
   // Bilan de la semaine / du mois (chiffres + synthèse IA à la demande, gardée pour les périodes terminées)
   async function periodReport(kind, previous) {
     const k = kind === "month" ? "month" : "week";
-    const cur = periodOf(k, Date.now(), { previous }), prev = periodOf(k, Date.parse(cur.from) - 1000);
+    const tzp = pbxEnv().PBX_TIMEZONE || "Europe/Paris";
+    const cur = periodOf(k, Date.now(), { previous, tz: tzp }), prev = periodOf(k, Date.parse(cur.from) - 1000, { tz: tzp });
     const { calls } = await pbx.callLog({ days: k === "month" ? 75 : 22, limit: 5000 });
     const names = new Map((await pbx.listExtensions()).map((u) => [u.id, u.name]));
     const tz = pbxEnv().PBX_TIMEZONE || "Europe/Paris";
@@ -938,7 +939,7 @@ export async function buildApp({ db, ami } = {}) {
     // ?mac= : fichier d'un téléphone supplémentaire du poste
     const mac = String(req.query?.mac || "").toLowerCase().replace(/[^0-9a-f]/g, "") || null;
     const { user, text, format } = await pbx.phoneConfig(req.params.id, sipServer(), mac);
-    const base = (mac && user.phone.mac) || user.phone.mac || "poste-" + user.id;
+    const base = mac || user.phone.mac || "poste-" + user.id;   // téléphone supplémentaire : son propre fichier
     const fname = format === "grandstream" ? `cfg${base}.xml` : format === "snom" ? `${base}.xml` : `${base}.cfg`;
     reply.header("content-disposition", `attachment; filename="${fname}"`);
     return reply.type("text/plain; charset=utf-8").send(text);

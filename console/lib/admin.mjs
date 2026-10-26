@@ -255,7 +255,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
         if (!up.ok) error = `Copie distante impossible : ${up.error}`;
       }
       await db.setSetting("backup_last", { at: new Date().toISOString(), ok: !error, file: done?.message || "", error, trigger });
-      if (error) await logAlert("backup_failed", error);
+      // (alerte « sauvegarde ratée » : levée par la surveillance d'après backup_last, une seule fois)
       job.running = false; job.ok = !error; job.error = error;
     })().catch((e) => { job.running = false; job.ok = false; job.error = e.message; });
     return { running: true };
@@ -488,7 +488,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
   }
   async function buildMonthlyReport({ previous = true } = {}) {
     const st = await reportSettings();
-    const cur = periodOf("month", Date.now(), { previous }), prev = periodOf("month", Date.parse(cur.from) - 1000);
+    const cur = periodOf("month", Date.now(), { previous, tz: tzName() }), prev = periodOf("month", Date.parse(cur.from) - 1000, { tz: tzName() });
     const { calls } = await pbx.callLog({ days: 75, limit: 5000 });
     const names = new Map((await pbx.listExtensions()).map((u) => [u.id, u.name]));
     const stats = periodStats(calls, { from: cur.from, to: cur.to, tz: tzName(), names }), before = periodStats(calls, { from: prev.from, to: prev.to, tz: tzName(), names });
@@ -515,7 +515,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     if (!st.enabled || !st.recipients.length || !smtpReady((await alertSettings()).smtp)) return;
     const now = new Date(), local = new Date(now.toLocaleString("en-US", { timeZone: tzName() }));
     if (local.getDate() !== 1 || local.getHours() < 8) return;   // le 1er du mois, à partir de 8 h
-    const label = periodOf("month", Date.now(), { previous: true }).label;
+    const label = periodOf("month", Date.now(), { previous: true, tz: tzName() }).label;
     if ((await db.getSetting("report_last", null))?.label === label) return;
     await sendMonthlyReport().catch((e) => mailFailed(`Rapport mensuel : ${e.message}`));
   }
@@ -539,24 +539,28 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
       const list = vmbox.listMessages(u.id).map((m) => ({ ...m, key: keyOf(u, m) }));
       if (!list.length) continue;
       const done = new Set((await db.query("SELECT key FROM pbxmaison_vm_mailed WHERE box = $1", [u.id])).rows.map((x) => x.key));
-      const todo = messagesToMail(list, done);
+      const todo = messagesToMail(list, done), mailed = [];
       for (const m of todo) {
         // IA : transcription et résumé dans l'e-mail (si le relais ne répond pas, l'e-mail part quand même, sans)
         let insight = null;
         if (aiOn) { try { insight = await ai.voicemailInsight(u.id, m.key, vmbox.audioPath(u.id, m.id).file, m); } catch { /* sans résumé */ } }
         const mail = voicemailMail({ box: u.id, boxName: displayName(u), caller: m.caller_number, callerName: m.caller_name, at: m.at, duration: m.duration, pbxName: pbxName(), tz: tzName(), attach: u.voicemail.email_attach, insight });
-        let attachments = [];
-        if (u.voicemail.email_attach) {
-          const f = vmbox.audioPath(u.id, m.id);
-          const local = m.at ? new Date(m.at).toLocaleString("sv-SE", { timeZone: tzName() }).slice(0, 16).replace(/[: ]/g, "-") : "message";
-          attachments = [{ filename: `message-${local}${f.type === "audio/wav" ? ".wav" : ".gsm"}`, path: f.file, contentType: f.type }];
-        }
-        try { await sendMail(u.email, mail, attachments); } catch (e) { await mailFailed(`Message vocal de ${u.id} : ${e.message}`); return; }
+        // Un e-mail refusé (adresse fausse, pièce jointe trop grosse) ne bloque plus les messages des autres utilisateurs
+        try {
+          let attachments = [];
+          if (u.voicemail.email_attach) {
+            const f = vmbox.audioPath(u.id, m.id);
+            const local = m.at ? new Date(m.at).toLocaleString("sv-SE", { timeZone: tzName() }).slice(0, 16).replace(/[: ]/g, "-") : "message";
+            attachments = [{ filename: `message-${local}${f.type === "audio/wav" ? ".wav" : ".gsm"}`, path: f.file, contentType: f.type }];
+          }
+          await sendMail(u.email, mail, attachments);
+        } catch (e) { await mailFailed(`Message vocal de ${u.id} : ${e.message}`); break; }
         await db.query("INSERT INTO pbxmaison_vm_mailed (key, box) VALUES ($1, $2) ON CONFLICT DO NOTHING", [m.key, u.id]);
+        mailed.push(m);
       }
       // Effacés du répondeur (après envoi en pièce jointe) : un par un, la liste est renumérotée à chaque suppression
-      if (u.voicemail.email_delete && u.voicemail.email_attach && todo.length) {
-        const sent = new Set(todo.map((m) => m.key));
+      if (u.voicemail.email_delete && u.voicemail.email_attach && mailed.length) {
+        const sent = new Set(mailed.map((m) => m.key));   // seulement ceux vraiment envoyés
         for (let i = 0; i < 50; i++) {
           const m = vmbox.listMessages(u.id).find((x) => sent.has(keyOf(u, x)));
           if (!m) break;
@@ -651,7 +655,8 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
   async function saveGateway(id, input) {
     const gws = await pbx.loadGateways();
     const users = await pbx.loadUsers();
-    const phonesMac = (await db.query("SELECT id, phone->>'mac' AS mac FROM pbxmaison_extensions WHERE coalesce(phone->>'mac', '') <> ''")).rows;
+    // Téléphones principaux ET supplémentaires des postes
+    const phonesMac = users.flatMap((u) => [u.phone?.mac, ...(u.phone?.extra || []).map((e) => e.mac)].filter(Boolean).map((mac) => ({ id: u.id, mac })));
     const macOwners = new Map([...phonesMac.map((r) => [r.mac, `téléphone du poste ${r.id}`]), ...gws.filter((g) => g.mac && g.id !== id).map((g) => [g.mac, `« ${g.name} »`])]);
     const usedPorts = new Map();
     for (const g of gws) if (g.id !== id) for (const p of g.ports) usedPorts.set(p.user, `« ${g.name} »`);
@@ -722,7 +727,11 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
 
   // ---------------------------------------------------------------- Tâches de fond
   function start() {
-    const tick = (fn, ms) => setInterval(() => { if (isConfigured()) fn().catch((e) => console.error(e.message)); }, ms).unref();
+    // Une tâche ne repart pas tant que la précédente n'est pas finie (sinon : e-mails envoyés deux fois, transcriptions payées deux fois)
+    const tick = (fn, ms) => { let busy = false; return setInterval(() => {
+      if (busy || !isConfigured()) return;
+      busy = true; fn().catch((e) => console.error(e.message)).finally(() => { busy = false; });
+    }, ms).unref(); };
     tick(pollStatusCodes, 4000);
     tick(() => pbx.pollForwardCodes(), 4000);
     tick(() => pbx.pollStandard(), 3000);

@@ -167,7 +167,7 @@ export function validatePhone(input, current, ctx) {
     const mac = normalizeMac(input.mac);
     if (mac === null) throw new PhoneError("Adresse MAC invalide (12 caractères hexadécimaux, ex. 44:DB:D2:29:FA:7B).", "phone.mac");
     const owner = mac && ctx.macOwners?.get(mac);
-    if (owner && owner !== ctx.selfId) throw new PhoneError(`Cette adresse MAC est déjà attribuée au poste ${owner}.`, "phone.mac");
+    if (owner && owner !== ctx.selfId) throw new PhoneError(`Cette adresse MAC est déjà attribuée ${/^\d+$/.test(owner) ? `au poste ${owner}` : `à ${owner}`}.`, "phone.mac");
     p.mac = mac;
   }
   if (p.mac && !p.model) throw new PhoneError("Choisis le modèle du téléphone.", "phone.model");
@@ -215,7 +215,7 @@ export function validatePhone(input, current, ctx) {
       if (!mac) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : adresse MAC invalide (12 caractères hexadécimaux).`, `${f}.mac`);
       if (seen.has(mac)) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : cette adresse MAC est déjà utilisée par ce poste.`, `${f}.mac`);
       const owner = ctx.macOwners?.get(mac);
-      if (owner && owner !== ctx.selfId) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : cette adresse MAC est déjà attribuée au poste ${owner}.`, `${f}.mac`);
+      if (owner && owner !== ctx.selfId) throw new PhoneError(`Téléphone supplémentaire ${i + 1} : cette adresse MAC est déjà attribuée ${/^\d+$/.test(owner) ? `au poste ${owner}` : `à ${owner}`}.`, `${f}.mac`);
       seen.add(mac);
       const old = (current.extra || []).find((e) => e.mac === mac);
       return { model: x.model, mac, label: String(x.label || "").trim().slice(0, 40), ...(old?.last_provisioned ? { last_provisioned: old.last_provisioned } : {}) };
