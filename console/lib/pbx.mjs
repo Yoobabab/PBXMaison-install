@@ -413,8 +413,13 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   async function findWebUser(login) {
     const l = String(login || "").trim().toLowerCase();
     if (!l) return null;
-    const r = await db.query("SELECT id, web_password_hash FROM pbxmaison_extensions WHERE id = $1 OR (email <> '' AND lower(email) = $1)", [l]);
+    const r = await db.query("SELECT id, web_password_hash FROM pbxmaison_extensions WHERE (id = $1 OR (email <> '' AND lower(email) = $1)) AND COALESCE((options->>'disabled')::boolean, false) = false", [l]);
     return r.rows.length === 1 ? r.rows[0] : null;
+  }
+  /** Utilisateur encore présent et non désactivé (sessions du softphone et de l'appli) */
+  async function webUserActive(ext) {
+    const r = await db.query("SELECT 1 FROM pbxmaison_extensions WHERE id = $1 AND COALESCE((options->>'disabled')::boolean, false) = false", [String(ext)]);
+    return r.rows.length === 1;
   }
   /** Utilisateur avec le rôle « Accès console » : connexion à la console avec l'e-mail de sa fiche et son mot de passe du softphone. */
   async function findConsoleUser(email) {
@@ -1491,7 +1496,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
-    speechKey, audioSocketPort, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
+    speechKey, audioSocketPort, webUserActive, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }
 

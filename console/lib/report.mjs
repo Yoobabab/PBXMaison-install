@@ -11,18 +11,27 @@ const local = (iso, tz) => {
   return { hour: Number(p.hour), day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(p.weekday) };
 };
 
-/** Bornes d'une période : semaine (lundi → lundi) ou mois civil, la dernière terminée ou en cours */
-export function periodOf(kind, now = Date.now(), { previous = false } = {}) {
-  const d = new Date(now);
+/** Décalage du fuseau (ms) à un instant donné */
+const tzOffset = (ms, tz) => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000;
+};
+/** Minuit (heure locale du PBX) d'un jour donné, en heure UTC ; gère le passage heure d'été / heure d'hiver */
+const localMidnight = (y, m, d, tz) => { const g = Date.UTC(y, m, d); let t = g - tzOffset(g, tz); t = g - tzOffset(t, tz); return new Date(t); };
+
+/** Bornes d'une période : semaine (lundi → lundi) ou mois civil, la dernière terminée ou en cours, en heure locale du PBX */
+export function periodOf(kind, now = Date.now(), { previous = false, tz = "Europe/Paris" } = {}) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+  const y = +p.year, mo = +p.month - 1, day = +p.day, wd = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(p.weekday);
   if (kind === "month") {
-    const y = d.getUTCFullYear(), m = d.getUTCMonth() - (previous ? 1 : 0);
-    return { from: new Date(Date.UTC(y, m, 1)).toISOString(), to: new Date(Date.UTC(y, m + 1, 1)).toISOString(),
+    const m = mo - (previous ? 1 : 0);
+    return { from: localMidnight(y, m, 1, tz).toISOString(), to: localMidnight(y, m + 1, 1, tz).toISOString(),
       label: new Date(Date.UTC(y, m, 1)).toLocaleDateString("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" }) };
   }
-  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7) - (previous ? 7 : 0)));
-  const end = new Date(monday.getTime() + 7 * 86400_000);
-  const f = (x) => x.toLocaleDateString("fr-FR", { day: "numeric", month: "long", timeZone: "UTC" });
-  return { from: monday.toISOString(), to: end.toISOString(), label: `semaine du ${f(monday)} au ${f(new Date(end.getTime() - 86400_000))}` };
+  const d0 = day - wd - (previous ? 7 : 0);
+  const f = (dd) => { const x = new Date(Date.UTC(y, mo, dd)); const n = x.getUTCDate(); return `${n === 1 ? "1er" : n} ${x.toLocaleDateString("fr-FR", { month: "long", timeZone: "UTC" })}`; };
+  return { from: localMidnight(y, mo, d0, tz).toISOString(), to: localMidnight(y, mo, d0 + 7, tz).toISOString(), label: `semaine du ${f(d0)} au ${f(d0 + 6)}` };
 }
 
 /** Chiffres d'une période. calls : journal (summarize) qui couvre au moins la période ; names : poste → nom */
@@ -118,7 +127,7 @@ export function monthlyReportMail({ label, stats: s, prev: p0, synthesis = "", p
   </div>
   <div style="padding:16px 24px;border-top:1px solid #e6e8ee;font-size:12px;color:#8a90a0">Rapport préparé par ${escH(sign)} · chiffres du standard ${escH(pbxName)}, du 1er au dernier jour du mois.</div></div></div>`;
   const text = [title, pbxName, "", `Appels reçus : ${s.inbound}${ev(s.inbound, p?.inbound)}`, `Appels pris : ${s.answer_rate} %${ev(s.answer_rate, p?.answer_rate, { points: true })}`,
-    `Appels manqués : ${s.missed}${s.voicemail ? ` (dont ${s.voicemail} messages)` : ""}`, `Attente moyenne avant réponse : ${dur(s.avg_wait)}`, "",
-    ...s.days.map((d) => `${d.name} : ${d.calls} appels, ${d.missed} manqués`), ...(syn.length ? ["", "Notre analyse :", ...syn] : []), "", `Rapport préparé par ${sign}.`].join("\n");
+    `Appels manqués : ${s.missed}${s.voicemail ? ` (dont ${s.voicemail} message${s.voicemail > 1 ? "s" : ""})` : ""}`, `Attente moyenne avant réponse : ${dur(s.avg_wait)}`, "",
+    ...s.days.map((d) => `${d.name} : ${d.calls} appel${d.calls > 1 ? "s" : ""}, ${d.missed} manqué${d.missed > 1 ? "s" : ""}`), ...(syn.length ? ["", "Notre analyse :", ...syn] : []), "", `Rapport préparé par ${sign}.`].join("\n");
   return { subject: title + (pbxName ? ` — ${pbxName}` : ""), html, text };
 }

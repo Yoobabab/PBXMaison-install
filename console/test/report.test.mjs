@@ -7,8 +7,12 @@ const c = (start, status, extra = {}) => ({ id: start, start, direction: "in", s
 
 test("bilan : période, chiffres, évolution", () => {
   const w = periodOf("week", Date.parse("2026-10-21T10:00:00Z"), { previous: true });
-  assert.equal(w.from, "2026-10-12T00:00:00.000Z"); assert.equal(w.to, "2026-10-19T00:00:00.000Z"); assert.match(w.label, /semaine du 12 octobre au 18 octobre/);
+  assert.equal(w.from, "2026-10-11T22:00:00.000Z"); assert.equal(w.to, "2026-10-18T22:00:00.000Z");   // minuit à Paris assert.match(w.label, /semaine du 12 octobre au 18 octobre/);
   assert.equal(periodOf("month", Date.parse("2026-10-21T10:00:00Z"), { previous: true }).label, "septembre 2026");
+  // passage à l'heure d'hiver (25 oct.) et lundi juste après minuit à Paris
+  const o = periodOf("month", Date.parse("2026-11-05T10:00:00Z"), { previous: true });
+  assert.equal(o.from, "2026-09-30T22:00:00.000Z"); assert.equal(o.to, "2026-10-31T23:00:00.000Z");
+  assert.match(periodOf("week", Date.parse("2026-10-25T23:30:00Z")).label, /semaine du 26 octobre au 1er novembre/);
   const calls = [c("2026-10-13T07:00:00Z", "answered"), c("2026-10-13T07:20:00Z", "missed"), c("2026-10-13T07:40:00Z", "missed"), c("2026-10-14T13:00:00Z", "voicemail", { from: { number: "0478000000" } }),
     c("2026-10-14T14:00:00Z", "answered"), { id: "o", start: "2026-10-14T15:00:00Z", direction: "out", status: "answered", talk: 60, from: { ext: "201" }, to: { number: "0478000000" } }];
   const s = periodStats(calls, { from: w.from, to: w.to, names: new Map([["201", "Sophie"]]) });

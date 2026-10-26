@@ -55,7 +55,7 @@ test("annuaire : Callikoe et 3CX", () => {
   const c = { first_name: "Ana", last_name: "Lopez", company: "Plomberie", email: "a@p.fr", notes: "",
     phones: [{ type: "work", number: "0140000000" }, { type: "mobile", number: "0611111111" }, { type: "mobile", number: "0622222222" }] };
   const t = contactsRows([c], "3cx");
-  assert.deepEqual(t.rows[0].slice(0, 9), ["Ana", "Lopez", "Plomberie", "0611111111", "0622222222", "", "", "0140000000", ""]);
+  assert.deepEqual(t.rows[0].slice(0, 9), ["Ana", "Lopez", "Plomberie", "06 11 11 11 11", "06 22 22 22 22", "", "", "01 40 00 00 00", ""]);
   const [l] = parseContacts(readTable(writeCsv(t.headers, t.rows, "3cx")));
   assert.deepEqual(l.input.phones.map((p) => p.type), ["mobile", "mobile", "work"]);
   const back = parseContacts(readTable(writeCsv(...Object.values(contactsRows([c])))));
@@ -104,4 +104,13 @@ test("règles entrantes : destinations en texte, aller-retour et fichier façon 
   const [x] = parseInbound(readTable("Name,DID,Office Hours,Out of Office Hours\nPrincipal,+33123456789,Queue 700,Voicemail 201"), ctx);
   assert.equal(x.is3cx, true); assert.equal(x.error, "");
   assert.deepEqual(x.input.closed, { type: "user_vm", target: "201" });
+});
+
+test("CSV : guillemet au milieu d'une cellule, 0 enlevé par Excel, formules neutralisées", () => {
+  const t = readTable(Buffer.from('Prénom;Nom;Mobile;Notes\nÉcran;27" bureau;612345678;=1+1\nJulie;Martin;06 11 22 33 44;\n'));
+  assert.equal(t.rows.length, 2);
+  assert.equal(t.rows[0][1], '27" bureau');
+  const [a, b] = parseContacts(t);
+  assert.equal(a.input.phones[0].number, "0612345678"); assert.equal(b.input.phones[0].number, "0611223344");
+  assert.match(writeCsv(["A"], [["=HYPERLINK(1)"], ["+33 6 12 34 56 78"]]).toString(), /'=HYPERLINK\(1\)[\s\S]*\r\n\+33 6 12/);
 });

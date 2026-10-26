@@ -58,6 +58,11 @@ export async function buildApp({ db, ami } = {}) {
   const COOKIE = "pbxm_session";
   const cookieOpts = (req) => ({ path: "/", httpOnly: true, sameSite: "strict", secure: req.protocol === "https", maxAge: 12 * 3600 });
 
+  // Adresses déguisées (/api/securit%79, //api/…) : refusées avant tout, sinon elles passeraient à côté des contrôles d'accès par chemin
+  app.addHook("onRequest", async (req, reply) => {
+    const p = req.url.split("?")[0];
+    if (/\/\/|\/\.\.?(\/|$)/.test(p) || /%(?:2[DEFdef]|3[0-9]|[46][1-9A-Fa-f]|[57][0-9Aa]|5[Ff]|7[Ee])/.test(p)) return reply.code(400).send({ error: "Adresse invalide." });
+  });
   app.addHook("onSend", async (req, reply, payload) => {
     reply.header("x-frame-options", "DENY");
     reply.header("x-content-type-options", "nosniff");
@@ -442,7 +447,17 @@ export async function buildApp({ db, ami } = {}) {
     const user = await pbx.getUser(req.params.id);
     return { user, server: sipServer(), key_offer: { fwd: pbx.phoneKeyInfo(user, "fwd"), standard: pbx.phoneKeyInfo(user, "standard") } };
   });
+  // Accès restreint (Gestionnaire…) : ne touche pas aux utilisateurs qui ont accès à la console (Gestionnaire, Administrateur),
+  // sinon il pourrait changer leur mot de passe ou leur e-mail et se connecter à leur place avec plus de droits
+  const guardTarget = async (req, id) => {
+    if (req.role === "admin" || req.role === "tech") return;
+    if (currentUser(req)?.ext && String(currentUser(req).ext) === String(id)) return;   // sa propre fiche
+    const t = await pbx.getUser(id);
+    if (!PBX_USER_ROLES.includes(t.options?.role || "user"))
+      throw Object.assign(new UserError(`Le poste ${t.id} a accès à la console : seul l'installateur peut modifier ses accès.`), { status: 403 });
+  };
   app.put("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
+    await guardTarget(req, req.params.id);
     // Utilisateur du PBX connecté à la console (Gestionnaire, Administrateur) : donne seulement Utilisateur, Pilote ou Superviseur,
     // et ne touche pas au rôle d'un Gestionnaire ou d'un Administrateur (réservé à l'installateur)
     const role = req.body?.options?.role;
@@ -451,13 +466,14 @@ export async function buildApp({ db, ami } = {}) {
     return pbx.updateUser(req.params.id, req.body || {}, currentUser(req).email);
   });
   app.get("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.extensionSecret(req.params.id));
-  app.post("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => pbx.resetSecret(req.params.id));
+  app.post("/api/extensions/:id/secret", { preHandler: requireUser }, async (req) => { await guardTarget(req, req.params.id); return pbx.resetSecret(req.params.id); });
   const provFails = new Map(); // échecs par IP (provisioning et appli) : 30 / 10 min
   // Application mobile : QR code valable 48 h
   const appUrl = (token) => { const sv = sipServer(); return `${sv.tls ? "https" : "http"}://${sv.host}/app/provision?t=${token}`; };
   const qrSvg = (text) => { const q = qrcode(0, "M"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); };
   app.get("/api/extensions/:id/app-token", { preHandler: requireUser }, async (req) => ({ active: await pbx.appTokenStatus(req.params.id) }));
   app.post("/api/extensions/:id/app-token", { preHandler: requireUser }, async (req) => {
+    await guardTarget(req, req.params.id);
     const t = await pbx.createAppToken(req.params.id, currentUser(req).email);
     const url = appUrl(t.token);
     return { ...t, url, qr_svg: qrSvg(url) };
@@ -508,6 +524,7 @@ export async function buildApp({ db, ami } = {}) {
     const pbxName = pbxEnv().PBX_NAME || "";
     for (const id of bulkIds(req)) {
       try {
+        await guardTarget(req, id);
         const w = await pbx.createWelcome(id, currentUser(req).email);
         const u = w.user, name = u.first_name || u.last_name ? `${u.first_name} ${u.last_name}`.trim() : `Poste ${u.id}`;
         const link = `${baseUrl()}/softphone?bienvenue=${w.token}`;
@@ -526,6 +543,7 @@ export async function buildApp({ db, ami } = {}) {
     const out = [];
     for (const id of bulkIds(req)) {
       try {
+        await guardTarget(req, id);
         const u = await pbx.getUser(id);
         const t = await pbx.createAppToken(id, currentUser(req).email);
         const url = appUrl(t.token), name = u.first_name || u.last_name ? `${u.first_name} ${u.last_name}`.trim() : `Poste ${u.id}`;
@@ -575,12 +593,16 @@ export async function buildApp({ db, ami } = {}) {
   const UCOOKIE = "callikoe_user";
   const webUser = (req) => readToken(req.cookies[UCOOKIE], settings.sessionSecret);
   const requireWebUser = async (req, reply) => {
-    if (!webUser(req)) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
+    const s = webUser(req);
+    if (!s) return reply.code(401).send({ error: "Session expirée : reconnecte-toi." });
+    // Utilisateur supprimé ou désactivé : sa session s'arrête tout de suite (sauf incarnation par l'installateur)
+    if (!s.imp && !(await pbx.webUserActive(s.ext))) { reply.clearCookie(UCOOKIE, { path: "/" }); return reply.code(401).send({ error: "Ce poste est désactivé : connexion impossible." }); }
   };
   const randomWebPassword = () => crypto.randomBytes(9).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 10) + String(crypto.randomInt(10, 99));
   app.get("/softphone", async (req, reply) => reply.sendFile("softphone.html"));
 
   app.post("/api/extensions/:id/web-password", { preHandler: requireUser }, async (req) => {
+    await guardTarget(req, req.params.id);
     const password = randomWebPassword();
     await pbx.setWebPassword(req.params.id, hashPassword(password));
     return { password };
@@ -727,6 +749,9 @@ export async function buildApp({ db, ami } = {}) {
   app.put("/api/u/team/:ext/forward", { preHandler: requireWebUser }, async (req) => {
     const me = await pilotOf(req);
     const ext = String(req.params.ext);
+    // Seulement les collègues que le Pilote voit (pas les postes masqués, d'une autre équipe, ni ceux qui ont accès à la console)
+    if (!(await team(me.id)).some((x) => x.id === ext) || !PBX_USER_ROLES.includes((await pbx.getUser(ext)).options?.role || "user"))
+      throw Object.assign(new UserError("Ce poste ne fait pas partie de ton équipe."), { status: 403 });
     const dest = req.body?.dest;
     const fw = dest ? { always: dest, always_last: dest } : { always: { type: "none", target: "" } };
     const u = await pbx.updateUser(ext, { forwarding: fw }, `Pilote ${me.id} ${me.name}`);
@@ -936,8 +961,10 @@ export async function buildApp({ db, ami } = {}) {
   });
 
   app.get("/api/extensions/:id/impact", { preHandler: requireUser }, async (req) => pbx.deleteImpact(req.params.id));
-  app.delete("/api/extensions/:id", { preHandler: requireUser }, async (req) =>
-    ({ ok: true, impact: await pbx.deleteExtension(req.params.id, req.query?.force === "1", currentUser(req).email) }));
+  app.delete("/api/extensions/:id", { preHandler: requireUser }, async (req) => {
+    await guardTarget(req, req.params.id);
+    return { ok: true, impact: await pbx.deleteExtension(req.params.id, req.query?.force === "1", currentUser(req).email) };
+  });
 
   // ---------------------------------------------------------------- Gestion d'appels
   // Standard : état (ouvert / fermé / renvoyé) et réglages (destination quand fermé, numéros non concernés)

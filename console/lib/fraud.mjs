@@ -89,7 +89,8 @@ export function fraudSignals(calls, { now = Date.now(), cc = "33", tz = "Europe/
   }
 
   // 5. Appel long vers l'étranger ou un numéro surtaxé
-  for (const c of recent) {
+  // (le journal n'a l'appel qu'une fois fini : on regarde les appels terminés dans la dernière heure, même commencés bien avant)
+  for (const c of out.filter((x) => Date.parse(x.start) + (x.duration || x.talk || 0) * 1000 >= recentFrom)) {
     const risk = numberRisk(c.to.number, cc);
     if ((risk === "intl" || risk === "premium") && (c.talk || 0) >= 20 * 60) signals.push({ key: `long:${c.id}`, kind: "long_costly", severity: "warning",
       text: `Appel de ${Math.round(c.talk / 60)} min vers ${risk === "intl" ? countryOf(c.to.number)?.name || "l'étranger" : "un numéro surtaxé"} (${c.to.number}) depuis le poste ${c.from.ext || "?"}.`, extension: c.from.ext || "", detail: { number: c.to.number, talk: c.talk } });

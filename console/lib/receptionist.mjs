@@ -161,7 +161,8 @@ export function createReceptionist({ db, ami, ai, sendMail, tz = () => "Europe/P
     timer = setInterval(() => {   // voix de l'IA vers l'appelant : une trame de 20 ms toutes les 20 ms
       if (out.length >= 320) { const f = out.subarray(0, 320); out = out.subarray(320); try { sock.write(audioFrame(f)); } catch { stop(); } }
     }, 20);
-    sock.on("data", async (chunk) => {
+    sock.on("data", (chunk) => onData(chunk).catch((e) => { log.warn?.({ err: e.message }, "Standardiste IA : erreur audio"); stop(); }));
+    const onData = async (chunk) => {
       buf = Buffer.concat([buf, chunk]);
       const r = readFrames(buf); buf = Buffer.from(r.rest);
       for (const f of r.frames) {
@@ -180,7 +181,8 @@ export function createReceptionist({ db, ami, ai, sendMail, tz = () => "Europe/P
                 output: { format: { type: "audio/pcm", rate: 24000 }, voice: cfg.voice || "marin" } } } });
             send({ type: "response.create" });   // l'IA parle la première (accueil)
           };
-          ws.onmessage = async (ev) => {
+          ws.onmessage = (ev) => handleMessage(ev).catch((e) => log.warn?.({ err: e.message }, "Standardiste IA : erreur pendant l'appel"));   // jamais d'arrêt de la console
+          const handleMessage = async (ev) => {
             let m; try { m = JSON.parse(typeof ev.data === "string" ? ev.data : Buffer.from(ev.data).toString()); } catch { return; }
             if (m.type === "response.output_audio.delta" || m.type === "response.audio.delta") out = Buffer.concat([out, down3(Buffer.from(m.delta || "", "base64"))]);
             else if (m.type === "input_audio_buffer.speech_started") out = Buffer.alloc(0);   // l'appelant coupe la parole : on se tait
@@ -188,7 +190,7 @@ export function createReceptionist({ db, ami, ai, sendMail, tz = () => "Europe/P
               for (const it of m.response?.output || []) {
                 if (it.type !== "function_call") continue;
                 let args = {}; try { args = JSON.parse(it.arguments || "{}"); } catch { /* sans arguments */ }
-                const res = await tool(it.name, args, it.call_id);
+                let res; try { res = await tool(it.name, args, it.call_id); } catch (e) { log.warn?.({ err: e.message }, "Standardiste IA : action impossible"); res = { ok: false, error: "Action impossible pour le moment." }; }
                 if (res) { send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: it.call_id, output: JSON.stringify(res) } }); send({ type: "response.create" }); }
               }
             } else if (m.type === "error") log.warn?.({ err: m.error?.message }, "Standardiste IA : erreur OpenAI");
@@ -200,7 +202,7 @@ export function createReceptionist({ db, ami, ai, sendMail, tz = () => "Europe/P
           if (inBatch.length >= 5) { send({ type: "input_audio_buffer.append", audio: up3(Buffer.concat(inBatch)).toString("base64") }); inBatch = []; }   // 100 ms à la fois
         }
       }
-    });
+    };
     sock.on("close", stop); sock.on("error", stop);
   }
 

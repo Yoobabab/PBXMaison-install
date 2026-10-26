@@ -4,7 +4,7 @@
  * Fonctions pures, testées dans console/test/ivrspeech.test.mjs.
  */
 const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
-const NUMS = { zero: "0", un: "1", une: "1", deux: "2", trois: "3", quatre: "4", cinq: "5", six: "6", sept: "7", huit: "8", neuf: "9", etoile: "*", diese: "#" };
+const NUMS = { zero: "0", un: "1", deux: "2", trois: "3", quatre: "4", cinq: "5", six: "6", sept: "7", huit: "8", neuf: "9", etoile: "*", diese: "#" };   // pas « une » (article)
 
 /** Libellé de chaque touche : destination (nom du groupe, de la personne…) + mots-clés donnés par l'installateur */
 export function ivrOptions(ivr, { objects = [], users = new Map() } = {}) {
@@ -24,8 +24,12 @@ export function localMatch(said, options) {
   if (!t.trim()) return "";
   const words = t.trim().split(" ");
   // Un seul chiffre dit (« le deux », « 2 », « touche 2 ») et c'est une touche du menu
-  const digits = [...new Set(words.map((w) => NUMS[w] || (/^[0-9]$/.test(w) ? w : "")).filter(Boolean))];
-  if (digits.length === 1 && words.length <= 4 && options.some((o) => o.key === digits[0])) return digits[0];
+  // Le nom d'un service ou un mot-clé passe avant les chiffres (« j'ai un problème de panne » → Support, pas la touche 1)
   const hits = options.filter((o) => [o.label, ...o.keywords.split(/[,;/]+/)].map(norm).filter((k) => k.length >= 3).some((k) => t.includes(` ${k} `) || t.includes(` ${k}s `)));
-  return hits.length === 1 ? hits[0].key : "";
+  if (hits.length === 1) return hits[0].key;
+  const digits = [...new Set(words.map((w) => NUMS[w] || (/^[0-9]$/.test(w) ? w : "")).filter(Boolean))];
+  // « un » et « neuf » sont aussi des mots courants : seulement dans une phrase très courte (« le un », « touche neuf »)
+  const short = digits[0] === "1" && words.includes("un") || digits[0] === "9" && words.includes("neuf") ? words.length <= 2 : words.length <= 4;
+  if (!hits.length && digits.length === 1 && short && options.some((o) => o.key === digits[0])) return digits[0];
+  return "";
 }

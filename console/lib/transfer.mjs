@@ -35,13 +35,13 @@ export function readTable(text) {
   for (let i = 0; i < t.length; i++) {
     const ch = t[i];
     if (q) { if (ch === '"' && t[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') q = false; else cell += ch; continue; }
-    if (ch === '"') q = true;
+    if (ch === '"' && cell === "") q = true;   // guillemet au milieu d'une cellule (Écran 27") : gardé tel quel, comme Excel
     else if (ch === sep) { row.push(cell); cell = ""; }
     else if (ch === "\n" || ch === "\r") { if (ch === "\r" && t[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
     else cell += ch;
   }
   if (cell || row.length) { row.push(cell); rows.push(row); }
-  const data = rows.filter((r) => r.some((x) => x.trim()));
+  const data = rows.filter((r) => r.some((x) => x.trim())).map((r) => r.map((x) => x.replace(/^'(?=[=+\-@])/, "")));   // apostrophe anti-formule de l'export
   if (!data.length) throw new UserError("Fichier vide.", "file");
   return { headers: data[0].map((h) => h.trim()), rows: data.slice(1).map((r) => r.map((x) => x.trim())), sep };
 }
@@ -49,7 +49,8 @@ export function readTable(text) {
 /** Écrit un CSV. Callikoe : « ; » + BOM (Excel en français) ; 3CX : « , » sans BOM. */
 export function writeCsv(headers, rows, format = "callikoe") {
   const sep = format === "3cx" ? "," : ";";
-  const q = (v) => { const s = String(v ?? ""); return /[",;\r\n]/.test(s) || s !== s.trim() ? `"${s.replace(/"/g, '""')}"` : s; };
+  // Texte qui commence par = + - @ : apostrophe devant, sinon Excel le prend pour une formule
+  const q = (v) => { let s = String(v ?? ""); if (/^[=+\-@]/.test(s) && !/^\+\d[\d ]*$/.test(s)) s = `'${s}`; return /[",;\r\n]/.test(s) || s !== s.trim() ? `"${s.replace(/"/g, '""')}"` : s; };
   const body = [headers, ...rows].map((r) => r.map(q).join(sep)).join("\r\n") + "\r\n";
   return format === "3cx" ? body : "﻿" + body;
 }
@@ -67,6 +68,8 @@ const cellOf = (row, idx) => (f) => (idx[f] === undefined ? undefined : row[idx[
 const yes = (v) => /^(1|oui|o|yes|y|true|vrai|x|on)$/i.test(String(v).trim());
 const boolOf = (v) => (v === undefined || String(v).trim() === "" ? undefined : yes(v));
 const yn = (b) => (b ? "Oui" : "Non");
+/** Numéro relu d'un fichier : sans espaces ni points ; 9 chiffres = le 0 du début enlevé par Excel, on le remet */
+const frNumber = (n) => { const x = String(n).replace(/[\s.]/g, ""); return /^[1-9]\d{8}$/.test(x) ? `0${x}` : x; };
 const fmtNum = (n) => (/^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : n || "");
 const splitList = (v) => String(v || "").split(/\s*[,;:|\n/]\s*|\s+-\s+|\s{2,}/).map((x) => x.trim()).filter(Boolean);
 
@@ -187,10 +190,10 @@ export function contactsRows(contacts, format = "callikoe") {
   if (format === "3cx") {
     return { headers: CONTACT_3CX, rows: contacts.map((c) => {
       const [m1 = "", m2 = ""] = nums(c, "mobile"), [h1 = "", h2 = ""] = nums(c, "home"), [w1 = "", w2 = ""] = nums(c, "work");
-      return [c.first_name, c.last_name, c.company, m1, m2, h1, h2, w1, w2, c.email, nums(c, "other")[0] || "", "", "", ""];
+      return [c.first_name, c.last_name, c.company, ...[m1, m2, h1, h2, w1, w2].map(fmtNum), c.email, fmtNum(nums(c, "other")[0] || ""), "", "", ""];
     }) };
   }
-  return { headers: CONTACT_COLS, rows: contacts.map((c) => [c.first_name, c.last_name, c.company, ...["work", "mobile", "home", "other"].map((t) => nums(c, t).join(" / ")), c.email, c.notes]) };
+  return { headers: CONTACT_COLS, rows: contacts.map((c) => [c.first_name, c.last_name, c.company, ...["work", "mobile", "home", "other"].map((t) => nums(c, t).map(fmtNum).join(" / ")), c.email, c.notes]) };
 }
 export function parseContacts(table) {
   const head = table.headers.map((h) => CONTACT_FIELDS[norm(h)] || "");
@@ -200,7 +203,7 @@ export function parseContacts(table) {
     head.forEach((k, j) => {
       const v = (r[j] || "").trim();
       if (!k || !v) return;
-      if (["work", "mobile", "home", "other"].includes(k)) for (const n of v.split(/\s*[/|]\s*/).filter(Boolean)) o.phones.push({ type: k, number: n });
+      if (["work", "mobile", "home", "other"].includes(k)) for (const n of v.split(/\s*[/|]\s*/).filter(Boolean)) o.phones.push({ type: k, number: frNumber(n) });
       else o[k] = o[k] ? `${o[k]} ${v}` : v;
     });
     const label = `${o.first_name || ""} ${o.last_name || ""}`.trim() || o.company || `Ligne ${i + 2}`;

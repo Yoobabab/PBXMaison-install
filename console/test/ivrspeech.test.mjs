@@ -14,3 +14,11 @@ test("SVI parlé : libellés des touches et correspondances simples", () => {
   assert.equal(localMatch("le commercial ou la comptabilité", opts), "");  // ambigu : l'IA tranchera
   assert.equal(localMatch("neuf", opts), "");                              // pas une touche du menu
 });
+
+test("SVI parlé : les mots-clés passent avant les chiffres ; « une » n'est pas la touche 1", () => {
+  const opts = [{ key: "1", label: "Commercial", keywords: "" }, { key: "2", label: "Support", keywords: "panne, depannage" }];
+  assert.equal(localMatch("j'ai une panne", opts), "2");
+  assert.equal(localMatch("une question", opts), "");
+  assert.equal(localMatch("le un", opts), "1");
+  assert.equal(localMatch("le deux", opts), "2");
+});
