@@ -15,6 +15,7 @@ import { Ami } from "./lib/ami.mjs";
 import { hashPassword, verifyPassword, passwordProblem, createSession, readSession, createToken, readToken,
   newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
+import { createHistory } from "./lib/history.mjs";
 import { isManager, isStandardist, consoleRoleOf, USER_ROLES } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
@@ -49,6 +50,9 @@ export async function buildApp({ db, ami } = {}) {
   const admin = createAdminService({ db, ami, pbx, ai });
   const transfer = createTransfer({ pbx, admin });
   await admin.migrate();
+  const history = createHistory({ db, pbx });
+  await history.migrate();
+  pbx.setAfterApply(() => history.record());
   pbx.setExtraDialplan(() => admin.dialplanParts());
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 1_048_576 });
@@ -87,7 +91,7 @@ export async function buildApp({ db, ami } = {}) {
   // Console : session valide ET double authentification faite (sinon seule la mise en place de la double authentification est permise)
   const ROLES = { admin: "Accès complet (administrateur)", tech: "Technicien (tout sauf les comptes)", client: "Accès restreint (utilisateurs, téléphones, routage, annuaire)", lecture: "Accès visuel (lecture seule)" };
   // Accès restreint (client) : pas de trunks, règles sortantes, sécurité, codes, sauvegardes, mises à jour, licence, alertes, passerelles, système, comptes
-  const CLIENT_DENY = /^\/api\/(reports|ai-settings|outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
+  const CLIENT_DENY = /^\/api\/(reports|ai-settings|outbound|outbound-order|security|shortcodes|backups|updates|license|alerts|gateways|system|accounts|audit|recording|history|setup|templates|routes|capture|extensions\/[^/]+\/(impersonate|secret|phone\/admin|phone\.cfg))(\/|$)/;
   // Rôles qu'un utilisateur du PBX connecté à la console peut donner
   const PBX_USER_ROLES = ["user", "standard", "manager"];
   const requireUser = async (req, reply) => {
@@ -138,7 +142,7 @@ export async function buildApp({ db, ami } = {}) {
   // Journal d'audit : toute modification faite depuis la console (qui, quand, d'où, quoi)
   const AUDIT_LABEL = [[/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
     [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
-    [/^\/api\/recording/, "Enregistrement"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
+    [/^\/api\/recording/, "Enregistrement"], [/^\/api\/history/, "Historique du standard"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
   app.addHook("onResponse", async (req, reply) => {
     if (req.method === "GET" || !req.url.startsWith("/api/") || reply.statusCode >= 400) return;
     if (/^\/api\/(login|logout|reauth|u\/|invite\/|accounts|diag\/|setup\/(totp|admin)|totp\/(setup|confirm))/.test(req.url)) return;
@@ -1315,6 +1319,8 @@ export async function buildApp({ db, ami } = {}) {
     return reply.type("audio/wav").header("cache-control", "private, no-store").send(fs.createReadStream(f));
   });
   app.delete("/api/recordings/file", { preHandler: requireUser }, async (req) => admin.deleteRecording(req.query?.f));
+  app.get("/api/history", { preHandler: requireUser }, async () => history.list());
+  app.post("/api/history/:id/restore", { preHandler: requireUser }, async (req) => history.restore(req.params.id, currentUser(req).email));
   app.post("/api/recordings/summary", { preHandler: requireUser }, async (req) => admin.summarizeRecording(String(req.body?.f || "")));
 
   // ---------------------------------------------------------------- Capture réseau (pcap)

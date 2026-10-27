@@ -1002,8 +1002,13 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     fs.renameSync(tmp, file);
   }
 
+  let afterApply = null;   // historique du standard : une version gardée après chaque changement
   /** Réécrit les fichiers lus par Asterisk (routes, utilisateurs, messagerie) puis recharge. */
   async function applyDialplan() {
+    await writeDialplan();
+    try { afterApply?.(); } catch { /* l'historique ne bloque jamais la configuration */ }
+  }
+  async function writeDialplan() {
     await ensureWebEndpoints();
     const routes = await getRoutes();
     const users = await loadUsers();
@@ -1543,6 +1548,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
+    setAfterApply: (fn) => { afterApply = fn; },
     speechKey, audioSocketPort, webUserActive, appSipAccount, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }

@@ -5,7 +5,7 @@ import { renderPlanning, planningSummary } from "./planning-ui.js";
 import { resolvePlan, localNow } from "./planning-core.js";
 let h = null;
 const TABS = [["routages", "Routages", "flow"], ["regles", "Règles entrantes", "rule"], ["horaires", "Horaires", "schedule"], ["groupes", "Groupes d'appel", "group"], ["files", "Files d'attente", "queue"],
-  ["svi", "SVI", "ivr"], ["messageries", "Messageries", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["standardiste", "Standardiste IA", ""], ["depannage", "Dépannage", ""], ["traceur", "Traceur", ""], ["renvois", "Renvois actifs", ""], ["planning", "Planning", "planning"]];
+  ["svi", "SVI", "ivr"], ["messageries", "Messageries", "groupvm"], ["reunions", "Réunions", "conf"], ["annonces", "Annonces", "prompt"], ["standardiste", "Standardiste IA", ""], ["depannage", "Dépannage", ""], ["historique", "Historique", ""], ["traceur", "Traceur", ""], ["renvois", "Renvois actifs", ""], ["planning", "Planning", "planning"]];
 const HIDDEN_TABS = ["planning", "traceur", "renvois"]; // planning : ouvert depuis Routages ; traceur et renvois : dans Dépannage
 const DIAG_TABS = [["depannage", "Test d'appel"], ["traceur", "Traceur"], ["renvois", "Renvois actifs"]];
 const KIND_TAB = Object.fromEntries(TABS.filter((t) => t[2]).map(([s, , k]) => [k, s]));
@@ -35,6 +35,7 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
   if (tab === "standardiste") return h.adminPage("standardiste", head);
   if (tab === "traceur") return renderTracer(head, id);
   if (tab === "renvois") return renderForwards(head);
+  if (tab === "historique") return renderHistory(head);
   if (id && kind === "planning") {
     const isNew = id.startsWith("nouveau");
     const plan = isNew ? null : cf.objects.find((o) => o.kind === "planning" && o.id === id);
@@ -839,6 +840,29 @@ function treeNode(n, label, current) {
 
 // ---------------------------------------------------------------- Dépannage : test d'appel sans déranger le client
 const DEV_KIND = { phone: "☎", web: "🖥", mobile: "📱" };
+// ---------------------------------------------------------------- Historique du standard (revenir à une version)
+async function renderHistory(head) {
+  const { versions } = await h.api("GET", "/api/history");
+  const when = (d) => new Date(d).toLocaleString("fr-FR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  h.app.innerHTML = `${h.takeFlash()}${head}<div class="panel"><div class="ph"><h2>Historique du standard</h2></div>
+    <p class="hint pad" style="margin:0;padding-bottom:0">Chaque modification du routage est gardée 6 mois : routages, règles, horaires, groupes, files, SVI, messageries, règles sortantes, standardiste IA et SDA des utilisateurs. Revenir à une version garde d'abord celle du moment : tout se défait. Les renvois et statuts des utilisateurs ne changent pas.</p>
+    ${versions.length ? `<div class="cx-list hist">${versions.map((v) => `<div class="cx-row">
+      <div class="grow"><b>${esc(when(v.at))}</b>${v.current ? ' <span class="pill ok">Version actuelle</span>' : ""} <span class="s">${v.by ? esc(v.by) : "auteur inconnu"}</span>
+        ${v.note ? `<div class="s"><b>${esc(v.note)}</b></div>` : ""}
+        <ul class="hist-ch">${v.changes.slice(0, 6).map((c) => `<li>${esc(c)}</li>`).join("")}${v.changes.length > 6 ? `<li class="s">et ${v.changes.length - 6} autre(s) changement(s)</li>` : ""}</ul></div>
+      ${v.current ? "" : `<button type="button" class="btn ghost sm" data-back="${v.id}" title="Remettre le routage tel qu'il était à ce moment">Revenir à cette version</button>`}
+    </div>`).join("")}</div>` : `<div class="empty">Aucune version gardée pour l'instant : la première le sera à la prochaine modification.</div>`}</div>`;
+  h.app.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", async () => {
+    if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.classList.add("danger"); b.textContent = "Confirmer le retour"; return; }
+    b.disabled = true; b.innerHTML = '<span class="spin"></span> Retour en cours…';
+    try {
+      const r = await h.api("POST", `/api/history/${b.dataset.back}/restore`);
+      h.setFlash({ text: `Routage remis comme avant.${r.notes?.length ? " " + r.notes.join(" ") : ""}`, cls: r.notes?.length ? "warn" : "ok" });
+    } catch (err) { h.setFlash({ cls: "bad", text: err.message }); }
+    renderHistory(head);
+  }));
+}
+
 async function renderDiag(head, arg) {
   if (arg) sessionStorage.setItem("cf_diag_mode", "in");
   const mode = ["out", "ai"].includes(sessionStorage.getItem("cf_diag_mode")) ? sessionStorage.getItem("cf_diag_mode") : "in";

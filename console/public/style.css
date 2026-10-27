@@ -1059,3 +1059,4 @@ td.nowrap{white-space:nowrap}
 .rng.pz .s{font-size:12px;font-weight:600;color:var(--warn)}
 
 .tx-trk{align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--warn);background:var(--warn-soft);border-radius:10px}
+.hist .cx-row{align-items:flex-start}.hist-ch{margin:4px 0 0 18px;padding:0;font-size:13px;color:var(--muted)}
