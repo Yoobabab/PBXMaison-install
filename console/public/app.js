@@ -1727,11 +1727,17 @@ async function renderCdr() {
   clearInterval(timer);
   const f = JSON.parse(sessionStorage.getItem("pbxm_cdr") || '{"days":"7","direction":"","status":"","q":""}');
   const qs = new URLSearchParams(f).toString();
-  const [d, live] = await Promise.all([api("GET", `/api/cdr?${qs}&limit=5000`), api("GET", "/api/calls").catch(() => ({ calls: [] }))]);
+  const [d, live, sh] = await Promise.all([api("GET", `/api/cdr?${qs}&limit=5000`), api("GET", "/api/calls").catch(() => ({ calls: [] })), api("GET", "/api/shield").catch(() => null)]);
   const pg = paginate("cdr", d.calls);
+  const k9 = (n) => String(n || "").replace(/\D/g, "").slice(-9);
+  const reported = new Set((sh?.mine || []).map(k9));
+  const known = new Set(sh?.contacts || []);
+  const scamBtn = (c) => c.direction !== "in" || !sh?.settings?.enabled || k9(c.from.number).length < 9 || known.has(k9(c.from.number)) ? ""
+    : reported.has(k9(c.from.number)) ? `<span class="pill bad" title="Signalé au bouclier anti-arnaque">Arnaque signalée</span>`
+      : `<button type="button" class="btn link scam" data-scam="${esc(c.from.number)}" title="Signaler ce numéro au bouclier anti-arnaque des PBX Callikoe">Arnaque ?</button>`;
   const fmtWhen = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
   const sel = (name, opts) => `<select data-f="${name}">${opts.map(([v, l]) => `<option value="${v}" ${f[name] === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
-  app.innerHTML = `<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX.</p></div>
+  app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX.</p></div>
     <a class="btn ghost" href="/api/cdr.csv?${qs}">Exporter (CSV, Excel)</a></div>
     <div class="kpis">${[["Appels sur la période", d.total, ({ 1: "aujourd'hui et hier", 7: "7 derniers jours", 30: "30 jours", 90: "90 jours", 366: "1 an" })[f.days] || ""],
       ["Répondus", d.calls.filter((c) => c.status === "answered").length, ""], ["Manqués", d.calls.filter((c) => c.status === "missed").length, "à rappeler"],
@@ -1746,12 +1752,19 @@ async function renderCdr() {
       <span class="s">${d.total} appel${d.total > 1 ? "s" : ""}</span></div>
     ${d.calls.length ? `${pg.html}<div class="table-wrap"><table class="cdr"><thead><tr><th>Date</th><th>Sens</th><th>De</th><th>Vers</th><th>Répondu par</th><th>Durée</th><th>Statut</th></tr></thead><tbody>
       ${pg.rows.map((c) => `<tr><td>${esc(fmtWhen(c.start))}</td><td title="${DIR[c.direction]?.[1] || ""}"><span class="dirc ${c.direction}">${DIR[c.direction]?.[0] || ""}</span></td>
-        <td><strong>${esc(fmtPhone(c.from.number))}</strong>${c.from.name ? `<div class="s">${esc(c.from.name)}</div>` : ""}</td>
+        <td><strong>${esc(fmtPhone(c.from.number))}</strong>${c.from.name ? `<div class="s">${esc(c.from.name)}</div>` : ""}${scamBtn(c)}</td>
         <td>${esc(fmtPhone(c.to.number))}${c.rule ? `<div class="s">Règle « ${esc(c.rule)} »</div>` : ""}${c.direction === "in" && c.did ? `<div class="s"><a href="#/gestion/traceur/${esc(c.did)}">Tracer la SDA</a></div>` : ""}</td>
         <td>${c.answered_by ? esc(c.answered_by) : c.voicemail ? `Messagerie ${esc(c.voicemail)}` : "—"}${c.rang.length > (c.answered_by ? 1 : 0) ? `<div class="s">A sonné : ${esc(c.rang.join(", "))}</div>` : ""}</td>
         <td>${c.talk ? fmtDur(c.talk) : "—"}<div class="s">total ${fmtDur(c.duration)}</div></td>
         <td><span class="pill ${CST[c.status]?.[0] || "off"}">${CST[c.status]?.[1] || esc(c.status)}</span></td></tr>`).join("")}</tbody></table></div>${pg.html}` : '<div class="empty">Aucun appel sur cette période.</div>'}</div>`;
   wirePager(app, renderCdr);
+  app.querySelectorAll("[data-scam]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Confirmer : c'est une arnaque"; return; }
+    b.disabled = true;
+    try { const r = await api("POST", "/api/shield/report", { number: b.dataset.scam, reason: "scam" }); flash = { text: r.blocked ? "Numéro filtré chez tous les clients Callikoe." : "Signalé : il sera filtré partout dès qu'un autre PBX le signale aussi." }; }
+    catch (err) { flash = { cls: "bad", text: err.message }; }
+    renderCdr();
+  });
   const save = () => { app.querySelectorAll("[data-f]").forEach((el) => { f[el.dataset.f] = el.value; }); sessionStorage.setItem("pbxm_cdr", JSON.stringify(f)); resetPage("cdr"); renderCdr(); };
   app.querySelectorAll("select[data-f]").forEach((el) => el.onchange = save);
   let t; const h0 = location.hash;   // recherche en attente : abandonnée si on a changé de page entre-temps

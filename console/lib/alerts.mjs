@@ -18,6 +18,7 @@ export const ALERT_EVENTS = {
   gateway_down: ["Passerelle, base DECT ou SBC déconnecté", "warning", "Plus aucun port ou combiné de l'appareil n'est connecté depuis plus de 5 minutes."],
   service_down: ["Service critique arrêté", "critical", "Le moteur téléphonique, la base de données, le serveur web ou la protection anti-intrusion s'est arrêté."],
   license_expiring: ["Licence bientôt expirée", "warning", "La licence expire dans moins de 30 jours."],
+  spoof: ["Numéro peut-être usurpé", "critical", "Beaucoup de numéros inconnus appellent une SDA en peu de temps : des fraudeurs utilisent peut-être ce numéro pour appeler des gens, qui rappellent."],
   backup_failed: ["Sauvegarde en échec", "warning", "La sauvegarde automatique ou l'envoi vers le serveur FTP a échoué."],
 };
 export const SEVERITY = { critical: "Urgent", warning: "À surveiller", info: "Pour info" };   // importance de l'alerte

@@ -15,6 +15,8 @@ import { defaultSecurity, validateSecurity, buildSecurityDialplan, securityGloba
 import { defaultShortcodes, normalizeShortcodes, validateShortcodes, buildShortcodesDialplan, shortcodesList } from "./shortcodes.mjs";
 import { defaultRecording, validateRecording, recordingGlobals, recordingPath, purgeRecordings, recordingUsage, REC_DIR } from "./recording.mjs";
 import { callMatches, CALL_MIN_S } from "./ai.mjs";
+import { DEFAULT_SHIELD, SHIELD_MODES, SHIELD_REASONS, validateShield, shieldGlobals, buildShieldDialplan, spoofSignals } from "./shield.mjs";
+import { sameNumberKey } from "./callback.mjs";
 import { defaultBackup, validateBackup, publicBackup, backupDue, listBackups, backupPath, uploadBackup, BACKUP_DIR, SCHEDULES, PROTOCOLS } from "./backup.mjs";
 import { ALERT_EVENTS, SEVERITY, CRITICAL_SERVICES, defaultAlerts, validateAlerts, publicAlerts, detectAlerts } from "./alerts.mjs";
 import { parseIpList } from "./iplist.mjs";
@@ -272,11 +274,62 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     const prompt = rec.announce && objects.find((o) => o.kind === "prompt" && o.id === rec.announce)?.data?.file;
     const announce = prompt ? path.join(pbx.soundsDir(), prompt).replace(/\.wav$/, "") : "";
     consoleAllow = sec.console_allow || [];
+    const [sh, shList, contactKeys] = await Promise.all([shieldSettings(), db.getSetting("shield_list", null), contactKeySet()]);
     return {
-      globals: [...securityGlobals(sec), ...recordingGlobals(rec, announce)],
-      dialplan: buildOutboundDialplan(valid, trunks) + buildSecurityDialplan(sec) + buildShortcodesDialplan(codes),
+      globals: [...securityGlobals(sec), ...recordingGlobals(rec, announce), ...shieldGlobals(sh)],
+      dialplan: buildOutboundDialplan(valid, trunks) + buildSecurityDialplan(sec) + buildShortcodesDialplan(codes) + buildShieldDialplan(sh.enabled ? shList?.numbers || [] : [], contactKeys),
       sipAcl: sipAcl(sec),
     };
+  }
+
+  // ---------------------------------------------------------------- Bouclier anti-arnaque collectif (liste partagée par le portail)
+  const shieldSettings = async () => validateShield({}, await get("shield", DEFAULT_SHIELD));
+  async function contactKeySet() {
+    const keys = new Set();
+    for (const c of await pbx.listContacts().catch(() => [])) for (const ph of c.phones || []) keys.add(sameNumberKey(ph.number));
+    return keys;
+  }
+  async function getShield() {
+    const [s, l] = await Promise.all([shieldSettings(), db.getSetting("shield_list", null)]);
+    return { settings: s, modes: SHIELD_MODES, reasons: SHIELD_REASONS, count: l?.numbers?.length || 0, mine: l?.mine || [], at: l?.at || null, error: l?.error || "", min: l?.min || 2,
+      contacts: [...await contactKeySet()] };   // numéros de l'annuaire : jamais signalés depuis le journal
+  }
+  async function setShield(input) {
+    await db.setSetting("shield", validateShield(input, await shieldSettings()));
+    await pbx.applyDialplan();
+    return getShield();
+  }
+  /** Liste du portail (chaque heure) : appliquée seulement si elle a changé */
+  async function syncShield() {
+    if (!ai || !(await shieldSettings()).enabled) return;
+    const old = await db.getSetting("shield_list", null);
+    let r;
+    try { r = await ai.relay("/v1/ai/shield/list", undefined); }
+    catch (e) { await db.setSetting("shield_list", { ...(old || { numbers: [], mine: [] }), error: e.message }); return; }
+    const next = { numbers: (r.numbers || []).map(String).slice(0, 50000), mine: (r.mine || []).map(String), min: r.min || 2, at: new Date().toISOString(), error: "" };
+    await db.setSetting("shield_list", next);
+    if (JSON.stringify(old?.numbers || []) !== JSON.stringify(next.numbers)) await pbx.applyDialplan();
+  }
+  /** Signaler (ou retirer) un numéro d'arnaque : envoyé au portail, puis liste relue */
+  async function reportShield(number, reason = "scam", remove = false) {
+    if (!ai) throw new UserError("Bouclier indisponible sur ce serveur.");
+    let r;
+    try { r = await ai.relay("/v1/ai/shield/report", { number, reason, remove }); }
+    catch (e) { throw new UserError(e.message); }
+    await syncShield().catch(() => {});
+    return { ...r, ...(await getShield()) };
+  }
+  /** Numéro usurpé : pic d'appelants inconnus sur une SDA (toutes les 10 minutes) */
+  async function spoofWatch() {
+    if (!(await shieldSettings()).spoof_alert) return;
+    const { calls } = await pbx.callLog({ days: 29, limit: 50000 });
+    const fmt = (n) => (/^0\d{9}$/.test(n) ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : n);
+    for (const sig of spoofSignals(calls, { contacts: await contactKeySet(), tz: tzName() })) {
+      const text = `${sig.callers} numéros inconnus ont appelé le ${fmt(sig.did)} en une heure (d'habitude ${sig.usual} à cette heure-ci). Ce numéro est peut-être utilisé par des fraudeurs : préviens l'opérateur, et mets une annonce d'accueil qui explique que l'entreprise n'a pas appelé.`;
+      const r = await db.query(`INSERT INTO pbxmaison_watch (key, kind, category, extension, text, detail) VALUES ($1, 'anomaly', 'spoof', '', $2, $3) ON CONFLICT (key) DO NOTHING`,
+        [`spoof:${sig.did}:${new Date().toISOString().slice(0, 13)}`, text, sig]);
+      if (r.rowCount) await logAlert("spoof", text);
+    }
   }
 
   // ---------------------------------------------------------------- Sauvegardes
@@ -857,6 +910,9 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     tick(aiCalls, 30_000);
     tick(aiVoicemails, 20_000);
     tick(fraudWatch, 5 * 60_000);
+    tick(spoofWatch, 10 * 60_000);
+    tick(syncShield, 3600_000);
+    setTimeout(() => { if (isConfigured()) syncShield().catch(() => {}); }, 30_000).unref();
     tick(reportTick, 30 * 60_000);
     tick(scheduleTick, 10 * 60_000);
     // Mises à jour (PBX seul) : recherche chaque matin à partir de 6 h ; la console affiche une pastille, rien ne s'installe tout seul
@@ -874,7 +930,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     migrate, start, dialplanParts, testMail, sendMail, vmKey, reportSettings, setReportSettings, buildMonthlyReport, sendMonthlyReport, listSchedules, saveSchedule, deleteSchedule, previewSchedule, sendSchedule, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
     getSecurity, setSecurity, banIp, banList,
-    getRecording, setRecording, listRecordings, recordingFile, deleteRecording, summarizeRecording,
+    getShield, setShield, reportShield, syncShield, getRecording, setRecording, listRecordings, recordingFile, deleteRecording, summarizeRecording,
     getShortcodes, setShortcodes, pollStatusCodes,
     getBackups, setBackups, runBackup, testRemote, restoreBackup, restoreStatus, stageUpload,
     getUpdates, updateAvailable, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, captureCallFile, deleteCapture,

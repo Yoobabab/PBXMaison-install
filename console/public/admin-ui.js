@@ -117,7 +117,7 @@ async function pageSecurity(sub = "apercu") {
   // Serveur multi-tenant : adresses bloquées, protection automatique et liste blanche sont communes à tout le serveur
   const SERVER_MANAGED = `<div class="note">Géré par la console du serveur (Paramètres › Protection anti-intrusion) : les adresses bloquées, la protection automatique et la liste blanche sont communes à tous les PBX du serveur.</div>`;
   if (tenant && sub === "ip") sub = "apercu";
-  const T = [["apercu", "Vue d'ensemble"], ...(tenant ? [] : [["ip", "Adresses IP"]]), ["numeros", "Numéros bloqués"], ["pays", "Appel Pays autorisés"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"], ["journal", "Connexions et journal"]];
+  const T = [["apercu", "Vue d'ensemble"], ...(tenant ? [] : [["ip", "Adresses IP"]]), ["numeros", "Numéros bloqués"], ["bouclier", "Bouclier anti-arnaque"], ["pays", "Appel Pays autorisés"], ["regles", "Anti-fraude"], ["console", "Accès console et postes"], ["journal", "Connexions et journal"]];
   const banned = [...(f2b.manual || []).map((ip) => ({ ip, manual: true })), ...(f2b.auto || []).map((ip) => ({ ip, manual: false }))];
   let body = "";
   if (sub === "apercu") {
@@ -170,6 +170,23 @@ async function pageSecurity(sub = "apercu") {
         <label>Numéros que les postes ne peuvent pas appeler<textarea name="out_block" rows="10" class="mono" placeholder="0899*&#10;3617*">${H.esc(rows(s.out_block))}</textarea></label>
         <span class="hint">S'applique aussi aux renvois vers l'extérieur.</span></div></div>
       </div><div class="actions" style="margin-top:16px"><button class="btn">Enregistrer</button></div></form>`;
+  } else if (sub === "bouclier") {
+    const sh = await H.api("GET", "/api/security/shield");
+    const fmt = (n) => (/^0\d{9}$/.test(n) ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : `+${n}`);
+    body = `<div class="kpis">${kpi("shield", "Liste partagée", sh.settings.enabled ? `${sh.count} numéro${sh.count > 1 ? "s" : ""}` : "Désactivé", sh.at ? `mise à jour ${fmtDT(sh.at)}` : "pas encore reçue", sh.error ? "warn" : sh.settings.enabled ? "good" : "")}
+      ${kpi("phone", "Signalés par ce PBX", String(sh.mine.length), `filtrés partout dès que ${sh.min} PBX les signalent`)}</div>
+    ${sh.error ? `<div class="flash warn">Liste pas mise à jour : ${H.esc(sh.error)}</div>` : ""}
+    <div class="grid2"><form id="shf" class="panel" novalidate><div class="ph"><h2>Réglages</h2></div><div class="pad stack"><div class="form-msg"></div>
+      ${sw("enabled", sh.settings.enabled, "Utiliser la liste anti-arnaque des PBX Callikoe", "Mise à jour chaque heure. Les contacts de l'annuaire ne sont jamais filtrés.")}
+      <label>Quand un numéro de la liste appelle<select name="mode">${Object.entries(sh.modes).map(([k, l]) => `<option value="${k}" ${sh.settings.mode === k ? "selected" : ""}>${H.esc(l)}</option>`).join("")}</select></label>
+      ${sw("spoof_alert", sh.settings.spoof_alert, "Alerte « numéro usurpé »", "Prévient (Alertes) quand beaucoup de numéros inconnus appellent une SDA en une heure : des fraudeurs utilisent peut-être ce numéro.")}
+      <div class="actions"><button class="btn">Enregistrer</button></div></div></form>
+    <div class="panel"><div class="ph"><h2>Signaler un numéro</h2></div><form id="shr" class="pad stack" novalidate><div class="form-msg"></div>
+      <div class="cx-g3" style="grid-template-columns:1fr 1fr auto;align-items:end"><label>Numéro<input name="number" inputmode="tel" placeholder="06 12 34 56 78"></label>
+        <label>Motif<select name="reason">${Object.entries(sh.reasons).map(([k, l]) => `<option value="${k}">${H.esc(l)}</option>`).join("")}</select></label><button class="btn">Signaler</button></div>
+      <span class="hint">Aussi depuis le journal des appels (bouton « Arnaque » sur un appel reçu). Le numéro est filtré chez tous les clients Callikoe quand un autre PBX le signale aussi, ou quand IRT le confirme.</span>
+      ${sh.mine.length ? `<div class="cx-list">${sh.mine.map((n) => `<div class="cx-row"><span class="mono grow">${H.esc(fmt(n))}</span><button type="button" class="btn ghost sm" data-unrep="${H.esc(n)}">Retirer mon signalement</button></div>`).join("")}</div>` : ""}
+      </form></div></div>`;
   } else if (sub === "pays") {
     const sel = new Set(s.intl);
     body = `<form id="intf" novalidate><div class="panel"><div class="ph"><h2>Appel Pays autorisés</h2><span class="s"><span id="ncount">${sel.size}</span> sélectionné(s)</span></div>
@@ -235,6 +252,9 @@ async function pageSecurity(sub = "apercu") {
     } catch (err) { H.setFlash({ cls: "bad", text: err.message }); }
     pageSecurity(sub);
   });
+  H.$("#shf") && onSubmit(H.$("#shf"), async (v) => { await H.api("PUT", "/api/security/shield", { enabled: v.enabled, mode: v.mode, spoof_alert: v.spoof_alert }); ok("Bouclier enregistré."); pageSecurity(sub); });
+  H.$("#shr") && onSubmit(H.$("#shr"), async (v) => { const r = await H.api("POST", "/api/shield/report", { number: v.number, reason: v.reason }); ok(r.blocked ? "Signalé : ce numéro est maintenant filtré chez tous les clients Callikoe." : "Signalé. Il sera filtré partout dès qu'un autre PBX le signale aussi."); pageSecurity(sub); });
+  H.app.querySelectorAll("[data-unrep]").forEach((b) => b.onclick = async () => { try { await H.api("POST", "/api/shield/report", { number: b.dataset.unrep, remove: true }); ok("Signalement retiré."); } catch (err) { H.setFlash({ cls: "bad", text: err.message }); } pageSecurity(sub); });
   H.$("#f2bf") && onSubmit(H.$("#f2bf"), (v) => save({ f2b: v.f2b, whitelist: lines(v.whitelist) }));
   H.$("#numf") && onSubmit(H.$("#numf"), (v) => save({ in_block: parseNums(v.in_block), out_block: parseNums(v.out_block), block_anonymous: v.block_anonymous }));
   H.$("#rgf") && onSubmit(H.$("#rgf"), (v) => save({ ...v, max_per_hour: Number(v.max_per_hour), max_intl_day: Number(v.max_intl_day), max_user_calls: Number(v.max_user_calls), max_duration: Number(v.max_duration) }));

@@ -144,7 +144,7 @@ export async function buildApp({ db, ami } = {}) {
     if (!admin.consoleAllowed(ip)) return reply.code(403).send({ error: `Accès à la console refusé depuis ${ip} (Sécurité › Accès à la console).` });
   });
   // Journal d'audit : toute modification faite depuis la console (qui, quand, d'où, quoi)
-  const AUDIT_LABEL = [[/^\/api\/(absences|extensions\/[^/]+\/absences)/, "Absences programmées"], [/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
+  const AUDIT_LABEL = [[/^\/api\/(shield|security\/shield)/, "Bouclier anti-arnaque"], [/^\/api\/(absences|extensions\/[^/]+\/absences)/, "Absences programmées"], [/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
     [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
     [/^\/api\/recording/, "Enregistrement"], [/^\/api\/history/, "Historique du standard"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
   app.addHook("onResponse", async (req, reply) => {
@@ -1328,6 +1328,11 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.list(String(req.params.id)));
   app.post("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.create(String(req.params.id), req.body || {}, currentUser(req).email));
   app.delete("/api/absences/:id", { preHandler: requireUser }, async (req) => absences.remove(req.params.id, currentUser(req).email));
+  // Bouclier anti-arnaque collectif : réglages (Sécurité) et signalements (journal des appels)
+  app.get("/api/security/shield", { preHandler: requireUser }, async () => admin.getShield());
+  app.put("/api/security/shield", { preHandler: requireUser }, async (req) => admin.setShield(req.body || {}));
+  app.get("/api/shield", { preHandler: requireUser }, async () => admin.getShield());
+  app.post("/api/shield/report", { preHandler: requireUser }, async (req) => admin.reportShield(String(req.body?.number || ""), String(req.body?.reason || "scam"), !!req.body?.remove));
   // Affichage des appels entrants (nom du contact et/ou numéro)
   app.get("/api/cid-display", { preHandler: requireUser }, async () => pbx.getCidDisplay());
   app.put("/api/cid-display", { preHandler: requireUser }, async (req) => pbx.setCidDisplay(String(req.body?.value || "")));
