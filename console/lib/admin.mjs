@@ -282,7 +282,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     };
   }
 
-  // ---------------------------------------------------------------- Bouclier anti-arnaque collectif (liste partagée par le portail)
+  // ---------------------------------------------------------------- Protection anti-fraude collective (liste partagée par le portail)
   const shieldSettings = async () => validateShield({}, await get("shield", DEFAULT_SHIELD));
   async function contactKeySet() {
     const keys = new Set();
@@ -312,7 +312,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
   }
   /** Signaler (ou retirer) un numéro d'arnaque : envoyé au portail, puis liste relue */
   async function reportShield(number, reason = "scam", remove = false) {
-    if (!ai) throw new UserError("Bouclier indisponible sur ce serveur.");
+    if (!ai) throw new UserError("Protection anti-fraude collective indisponible sur ce serveur.");
     let r;
     try { r = await ai.relay("/v1/ai/shield/report", { number, reason, remove }); }
     catch (e) { throw new UserError(e.message); }

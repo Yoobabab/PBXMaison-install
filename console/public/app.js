@@ -1733,8 +1733,8 @@ async function renderCdr() {
   const reported = new Set((sh?.mine || []).map(k9));
   const known = new Set(sh?.contacts || []);
   const scamBtn = (c) => c.direction !== "in" || !sh?.settings?.enabled || k9(c.from.number).length < 9 || known.has(k9(c.from.number)) ? ""
-    : reported.has(k9(c.from.number)) ? `<span class="pill bad" title="Signalé au bouclier anti-arnaque">Arnaque signalée</span>`
-      : `<button type="button" class="btn link scam" data-scam="${esc(c.from.number)}" title="Signaler ce numéro au bouclier anti-arnaque des PBX Callikoe">Arnaque ?</button>`;
+    : reported.has(k9(c.from.number)) ? `<span class="pill bad" title="Signalé à la protection anti-fraude collective">Arnaque signalée</span>`
+      : `<button type="button" class="btn link scam" data-scam="${esc(c.from.number)}" title="Signaler ce numéro à la protection anti-fraude collective des PBX Callikoe">Arnaque ?</button>`;
   const fmtWhen = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
   const sel = (name, opts) => `<select data-f="${name}">${opts.map(([v, l]) => `<option value="${v}" ${f[name] === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Journal des appels</h1><p class="sub" style="margin:0">Tous les appels du PBX.</p></div>

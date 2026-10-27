@@ -1,5 +1,5 @@
 /**
- * Bouclier anti-arnaque collectif, côté PBX :
+ * Protection anti-fraude collective, côté PBX :
  *   - liste des numéros d'arnaque partagée par le portail (signalée par au moins 2 PBX Callikoe, ou bloquée par IRT),
  *     récupérée chaque heure ; les contacts de l'annuaire ne sont jamais filtrés ;
  *   - sur un appel entrant d'un de ces numéros : nom affiché « ARNAQUE? … » (par défaut) ou appel refusé ;
@@ -31,7 +31,7 @@ export const shieldGlobals = (s) => [`SHIELD_MODE = ${s.enabled ? s.mode : "off"
  * numbers : liste du portail ; contacts : clés (9 derniers chiffres) des numéros de l'annuaire, jamais filtrés.
  */
 export function buildShieldDialplan(numbers = [], contacts = new Set()) {
-  const L = ["", "; Bouclier anti-arnaque collectif (liste du portail Callikoe) — écrit par la console", "[shield]"];
+  const L = ["", "; Protection anti-fraude collective (liste du portail Callikoe) — écrit par la console", "[shield]"];
   const seen = new Set();
   for (const n of numbers) {
     if (!/^\d{8,15}$/.test(n) || contacts.has(sameNumberKey(n))) continue;
