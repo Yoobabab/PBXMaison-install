@@ -1328,6 +1328,8 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.list(String(req.params.id)));
   app.post("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.create(String(req.params.id), req.body || {}, currentUser(req).email));
   app.delete("/api/absences/:id", { preHandler: requireUser }, async (req) => absences.remove(req.params.id, currentUser(req).email));
+  app.get("/api/reports/lost", { preHandler: requireUser }, async () => admin.getLost());
+  app.put("/api/reports/lost", { preHandler: requireUser }, async (req) => admin.setLost(req.body || {}));
   app.get("/api/history", { preHandler: requireUser }, async () => history.list());
   // Simulateur : un objet pas encore enregistré, ou une version de l'historique, rejoué sur les appels des 4 dernières semaines
   app.post("/api/simulate", { preHandler: requireUser }, async (req) => {
