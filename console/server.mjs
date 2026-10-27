@@ -1329,6 +1329,12 @@ export async function buildApp({ db, ami } = {}) {
   app.post("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.create(String(req.params.id), req.body || {}, currentUser(req).email));
   app.delete("/api/absences/:id", { preHandler: requireUser }, async (req) => absences.remove(req.params.id, currentUser(req).email));
   app.get("/api/history", { preHandler: requireUser }, async () => history.list());
+  // Simulateur : un objet pas encore enregistré, ou une version de l'historique, rejoué sur les appels des 4 dernières semaines
+  app.post("/api/simulate", { preHandler: requireUser }, async (req) => {
+    const b = req.body || {};
+    if (b.version) return pbx.simulate({ snapshot: await history.snapshotOf(b.version) });
+    return pbx.simulate({ kind: String(b.kind || ""), id: b.id ? String(b.id) : null, input: b.input || {} });
+  });
   app.post("/api/history/:id/restore", { preHandler: requireUser }, async (req) => history.restore(req.params.id, currentUser(req).email));
   app.post("/api/recordings/summary", { preHandler: requireUser }, async (req) => admin.summarizeRecording(String(req.body?.f || "")));
 

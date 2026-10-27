@@ -143,5 +143,10 @@ export function createHistory({ db, pbx }) {
     await recordNow(by, `Retour à la version du ${at}`);
     return { ok: true, notes };
   }
-  return { migrate, record, list, restore, current };
+  async function snapshotOf(id) {
+    const r = (await db.query("SELECT snap FROM pbxmaison_history WHERE id = $1", [Number(id)])).rows[0];
+    if (!r) throw Object.assign(new Error("Version introuvable (trop ancienne ?)."), { status: 404 });
+    return r.snap;
+  }
+  return { migrate, record, list, restore, current, snapshotOf };
 }

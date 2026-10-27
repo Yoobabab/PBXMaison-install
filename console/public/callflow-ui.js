@@ -48,7 +48,7 @@ export async function renderCallflow(helpers, sub = "routages", id = null) {
       done: (text) => { h.setFlash({ text }); location.hash = "#/gestion/routages"; },
     });
   }
-  if (id && kind === "flow") return renderFlowEditor(h, cf, head, id, { promptField, wirePromptFields, destPicker, wireDests, scheduleFields, wireSchedule, collect, defaults, IVR_KEYS });
+  if (id && kind === "flow") return renderFlowEditor(h, cf, head, id, { promptField, wirePromptFields, destPicker, wireDests, scheduleFields, wireSchedule, collect, defaults, IVR_KEYS, simButton, wireSim });
   if (id) return kind === "prompt" ? renderPromptForm(head, id) : renderForm(head, kind, id === "nouveau" ? null : id);
   if (kind === "schedule") return renderSchedules(head);
   return renderList(head, kind);
@@ -505,7 +505,8 @@ function renderForm(head, kind, id) {
         ${numbered ? `<label>Numéro interne<input name="number" inputmode="numeric" maxlength="3" value="${esc(o?.number || nextNumber(kind))}"><span class="hint">Composable depuis un poste.</span></label>` : ""}</div>
       ${body}
       <div class="form-msg"></div>
-      <div class="actions">${o ? `<button type="button" class="btn ghost" id="cfdel">Supprimer</button>` : ""}${o?.number ? `<a class="btn ghost" href="#/gestion/traceur/${esc(o.number)}">Tracer</a>` : ""}<button class="btn" type="submit">${o ? "Enregistrer" : "Créer"}</button></div>
+      <div class="actions">${o ? `<button type="button" class="btn ghost" id="cfdel">Supprimer</button>` : ""}${o?.number ? `<a class="btn ghost" href="#/gestion/traceur/${esc(o.number)}">Tracer</a>` : ""}${SIM_KINDS.includes(kind) ? simButton() : ""}<button class="btn" type="submit">${o ? "Enregistrer" : "Créer"}</button></div>
+      <div id="cfsim"></div>
       <div id="cfimpact"></div>
     </form></div>`;
   const form = h.$("#cff");
@@ -516,6 +517,7 @@ function renderForm(head, kind, id) {
   if (kind === "queue") wirePeriodic(form);
   if (kind === "schedule") wireSchedule(form, d);
   if (kind === "rule") wireRule(form);
+  wireSim(form, h.$("#cfsim"), () => ({ kind, id: o?.id || null, input: collect(form, kind) }));
   form.onsubmit = async (e) => {
     e.preventDefault();
     const data = collect(form, kind);
@@ -840,6 +842,28 @@ function treeNode(n, label, current) {
 
 // ---------------------------------------------------------------- Dépannage : test d'appel sans déranger le client
 const DEV_KIND = { phone: "☎", web: "🖥", mobile: "📱" };
+// ---------------------------------------------------------------- Simulateur : rejouer les appels des 4 dernières semaines
+const SIM_KINDS = ["rule", "schedule", "group", "queue", "ivr", "flow"];
+const simButton = (label = "Simuler sur 4 semaines") => `<button type="button" class="btn ghost" data-sim title="Rejoue les appels entrants des 4 dernières semaines avec ce réglage, sans rien changer">${label}</button>`;
+/** Branche le bouton « Simuler » : body() → { kind, id, input } ou { version } ; résultat affiché dans out */
+function wireSim(root, out, body) {
+  root.querySelectorAll("[data-sim]").forEach((b) => b.onclick = async () => {
+    b.disabled = true; out.innerHTML = '<div class="note"><span class="spin"></span> Je rejoue les appels des 4 dernières semaines…</div>';
+    try { out.innerHTML = simResult(await h.api("POST", "/api/simulate", body())); }
+    catch (err) { out.innerHTML = `<div class="flash bad">${esc(err.message)}</div>`; }
+    b.disabled = false;
+  });
+}
+function simResult(r) {
+  const when = (d) => new Date(d).toLocaleString("fr-FR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  if (!r.total) return `<div class="note sim">Aucun appel entrant sur les ${r.days} derniers jours : rien à rejouer.</div>`;
+  if (!r.changed) return `<div class="note sim ok">Sur les <b>${r.total}</b> appels entrants des ${r.days} derniers jours, <b>aucun</b> n'aurait pris un autre chemin.</div>`;
+  return `<div class="note sim"><p style="margin:0 0 6px">Sur les <b>${r.total}</b> appels entrants des ${r.days} derniers jours, <b>${r.changed}</b> auraient pris un autre chemin :</p>
+    ${r.groups.map((g) => `<div class="sim-g"><b>${g.count} appel${g.count > 1 ? "s" : ""}</b> : ${esc(g.to)}<div class="s">au lieu de : ${esc(g.from)}</div>
+      <div class="s">Ex. ${g.examples.map((x) => `${esc(when(x.start))}${x.from ? ` (${esc(x.from)})` : ""}`).join(", ")}</div></div>`).join("")}
+    <p class="hint" style="margin:6px 0 0">Avec les statuts et renvois des utilisateurs d'aujourd'hui. Rien n'est appliqué tant que tu n'enregistres pas.</p></div>`;
+}
+
 // ---------------------------------------------------------------- Historique du standard (revenir à une version)
 async function renderHistory(head) {
   const { versions } = await h.api("GET", "/api/history");
@@ -850,8 +874,10 @@ async function renderHistory(head) {
       <div class="grow"><b>${esc(when(v.at))}</b>${v.current ? ' <span class="pill ok">Version actuelle</span>' : ""} <span class="s">${v.by ? esc(v.by) : "auteur inconnu"}</span>
         ${v.note ? `<div class="s"><b>${esc(v.note)}</b></div>` : ""}
         <ul class="hist-ch">${v.changes.slice(0, 6).map((c) => `<li>${esc(c)}</li>`).join("")}${v.changes.length > 6 ? `<li class="s">et ${v.changes.length - 6} autre(s) changement(s)</li>` : ""}</ul></div>
-      ${v.current ? "" : `<button type="button" class="btn ghost sm" data-back="${v.id}" title="Remettre le routage tel qu'il était à ce moment">Revenir à cette version</button>`}
-    </div>`).join("")}</div>` : `<div class="empty">Aucune version gardée pour l'instant : la première le sera à la prochaine modification.</div>`}</div>`;
+      ${v.current ? "" : `<div class="hist-act"><button type="button" class="btn ghost sm" data-simv="${v.id}" title="Rejoue les appels des 4 dernières semaines sur cette version">Simuler</button>
+        <button type="button" class="btn ghost sm" data-back="${v.id}" title="Remettre le routage tel qu'il était à ce moment">Revenir à cette version</button></div>`}
+    </div><div class="hist-sim" id="hsim${v.id}"></div>`).join("")}</div>` : `<div class="empty">Aucune version gardée pour l'instant : la première le sera à la prochaine modification.</div>`}</div>`;
+  h.app.querySelectorAll("[data-simv]").forEach((b) => { b.dataset.sim = ""; wireSim(b.parentElement, h.$(`#hsim${b.dataset.simv}`), () => ({ version: b.dataset.simv })); });
   h.app.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", async () => {
     if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.classList.add("danger"); b.textContent = "Confirmer le retour"; return; }
     b.disabled = true; b.innerHTML = '<span class="spin"></span> Retour en cours…';

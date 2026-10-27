@@ -1063,3 +1063,5 @@ td.nowrap{white-space:nowrap}
 .absbox{border-top:1px solid var(--line)}.absbox .cx-list{margin-bottom:12px}
 .absform{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 14px;align-items:end}
 .absform .dest{grid-column:span 2}.absform .form-msg{grid-column:1/-1}
+.sim{margin-top:10px}.sim.ok{background:var(--ok-soft)}.sim-g{padding:6px 0;border-top:1px solid var(--line)}.sim-g:first-of-type{border-top:0}
+.hist-act{display:flex;gap:6px;flex-wrap:wrap}.hist-sim:empty{display:none}.hist-sim{padding:0 16px 10px}

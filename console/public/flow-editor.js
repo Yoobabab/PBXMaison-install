@@ -59,7 +59,7 @@ export function renderFlowEditor(helpers, cfData, head, id, shared) {
     <div class="fx-top">
       <a href="#/gestion/routages" class="fx-back">← Routages</a>
       <input id="fname" class="fx-name" maxlength="50" value="${esc(flow.name)}" placeholder="Nom du routage (ex. Standard principal)" aria-label="Nom du routage">
-      <div class="fx-actions">${cur ? '<button type="button" class="btn ghost" id="fdel">Supprimer</button>' : ""}${cur?.data.dids[0] ? `<a class="btn ghost" href="#/gestion/traceur/${esc(cur.data.dids[0])}">Tracer</a>` : ""}<button type="button" class="btn" id="fsave">Valider et appliquer</button></div>
+      <div class="fx-actions">${cur ? '<button type="button" class="btn ghost" id="fdel">Supprimer</button>' : ""}${cur?.data.dids[0] ? `<a class="btn ghost" href="#/gestion/traceur/${esc(cur.data.dids[0])}">Tracer</a>` : ""}${kit.simButton("Simuler")}<button type="button" class="btn" id="fsave">Valider et appliquer</button></div>
     </div>
     <details class="fx-nl" ${cur ? "" : "open"}><summary>${icon("spark", 18)} Décrire le routage en une phrase</summary>
       <div class="fx-nlb"><textarea id="nlt" rows="2" placeholder="Ex. : Quand on appelle le 04 65 00 15 40 : Paul sonne 30 s puis groupe Accueil puis messagerie de Julie. En dehors des horaires Bureau : annonce Fermé puis raccrocher."></textarea>
@@ -75,12 +75,14 @@ export function renderFlowEditor(helpers, cfData, head, id, shared) {
     <nav class="fx-tabs" id="tabs"></nav>
     <div class="fx-stage"><div class="fx-chain" id="chain"></div></div>
     <div class="fx-pickhost" id="pickhost"></div>
-    <div class="fx-msg" id="fmsg"></div>
+    <div class="fx-msg" id="fmsg"></div><div class="fx-msg" id="fsim"></div>
   </div>
   <div class="fx-drawer" id="fxpop" aria-hidden="true"></div><div class="fx-scrim" id="scrim"></div>`;
   h.$("#fname").oninput = (e) => { flow.name = e.target.value; };
   h.$("#fdef").onchange = (e) => { flow.is_default = e.target.checked; drawDids(); };
   h.$("#fsave").onclick = save;
+  kit.wireSim(h.app.querySelector(".fx-actions"), h.$("#fsim"), () => ({ kind: "flow", id: cur?.id || null,
+    input: { name: h.$("#fname").value.trim() || flow.name || "Routage", dids: flow.dids, is_default: flow.is_default, schedule: flow.schedule, branches: flow.branches } }));
   h.$("#fdel")?.addEventListener("click", del);
   h.$("#nlgo").onclick = propose;
   h.$("#fsched").onchange = (e) => {

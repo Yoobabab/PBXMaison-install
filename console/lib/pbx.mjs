@@ -20,6 +20,7 @@ import { summarize, forUser } from "./cdr.mjs";
 import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, contactVisibleTo, PHONE_TYPES } from "./contacts.mjs";
 import { pathNow, ringTargets, parseContacts, deviceStates, inboundVerdict, simulateOutbound } from "./diagnose.mjs";
 import { defaultSecurity } from "./security.mjs";
+import { simulateCalls } from "./simulate.mjs";
 import { KINDS, validateObject, buildCallflowDialplan, buildQueues, buildMoh, mohClasses, buildGroupVoicemail, mailboxesByUser, referencesTo, traceNumber, listForwards } from "./callflow.mjs";
 import { sees, nationalNumber, UserError, STATUSES, buildUsersDialplan, buildVoicemail, defaultUser, displayName, forwardSummary, fromRow, ringsForGroups, userOpts, validateUser } from "./users.mjs";
 import { readTheme, wallpaperName } from "./theme.mjs";
@@ -1293,6 +1294,29 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     });
   }
   async function trace(number) { return traceNumber(number, await traceModel()); }
+  /**
+   * Simulateur : rejoue les appels entrants des `days` derniers jours sur le routage actuel et sur un routage modifié.
+   * change = { kind, id, input } (objet de Gestion d'appels pas encore enregistré, contrôlé comme à l'enregistrement)
+   *       ou { snapshot } (version de l'historique : objets et SDA des utilisateurs)
+   */
+  async function simulate(change, { days = 28 } = {}) {
+    const before = await traceModel();
+    let objects = before.objects, users = before.users;
+    if (change.snapshot) {
+      const prompts = before.objects.filter((o) => o.kind === "prompt");
+      objects = [...prompts, ...change.snapshot.objects.filter((o) => o.kind !== "prompt")];
+      users = new Map([...before.users].map(([k, u]) => [k, change.snapshot.users?.[k] ? { ...u, dids: change.snapshot.users[k].dids } : u]));
+    } else {
+      checkKind(change.kind);
+      const current = change.id ? await getObject(change.kind, change.id) : null;
+      const v = validateObject(change.kind, change.input || {}, current?.data, await cfContext(change.id || null));
+      const id = change.id || "simulation";
+      objects = [...before.objects.filter((o) => !(o.kind === change.kind && o.id === id)), { kind: change.kind, id, number: v.number, name: v.name, data: v.data }];
+    }
+    const { calls } = await callLog({ days, direction: "in", limit: 5000 });
+    const r = simulateCalls(calls.map((c) => ({ start: c.start, did: c.did, from: c.from?.name || c.from?.number || "" })), before, { ...before, objects, users }, traceNumber);
+    return { ...r, days };
+  }
 
   // ------------------------------------------------------------------ Dépannage : tests d'appel
   /** Interroge les appareils des postes (SIP OPTIONS) puis lit leur état. */
@@ -1548,7 +1572,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
-    setAfterApply: (fn) => { afterApply = fn; }, tz,
+    setAfterApply: (fn) => { afterApply = fn; }, tz, simulate,
     speechKey, audioSocketPort, webUserActive, appSipAccount, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }
