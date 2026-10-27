@@ -782,11 +782,10 @@ async function pageReceptionist(top) {
 /** Activité › Rapports : rapport mensuel envoyé au client */
 async function pageReports() {
   H.setNav("reports");
-  const [d, rep, sc, lo] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report"), H.api("GET", "/api/reports/schedules"), H.api("GET", "/api/reports/lost").catch(() => null)]);
+  const [d, rep, sc] = await Promise.all([H.api("GET", "/api/ai-settings"), H.api("GET", "/api/ai-settings/report"), H.api("GET", "/api/reports/schedules")]);
   const on = d.settings.enabled;
   const editing = sessionStorage.getItem("pbxm_rs_edit");
-  const cur = editing === "brief" ? { name: "Brief du lundi", frequency: "week", hour: 8, recipients: [], sections: Object.fromEntries(Object.keys(sc.sections).map((k) => [k, k === "summary" || k === "lost"])), csv: false, enabled: true }
-    : editing === "new" ? { name: "", frequency: "week", hour: 8, recipients: [], sections: Object.fromEntries(Object.keys(sc.sections).map((k) => [k, true])), csv: true, enabled: true }
+  const cur = editing === "new" ? { name: "", frequency: "week", hour: 8, recipients: [], sections: Object.fromEntries(Object.keys(sc.sections).map((k) => [k, true])), csv: true, enabled: true }
     : sc.schedules.find((x) => x.id === editing);
   const schForm = cur ? `<form id="rsf" class="pad stack" novalidate style="border-top:1px solid var(--line)"><div class="form-msg"></div>
       <div class="grid2"><label>Nom<input name="name" value="${H.esc(cur.name)}" maxlength="60" placeholder="Rapport de la semaine"></label>
@@ -797,21 +796,7 @@ async function pageReports() {
         <label class="check"><input type="checkbox" name="csv" ${cur.csv ? "checked" : ""}> Tous les appels en fichier Excel (CSV)</label></div></div>
       ${sw("enabled", cur.enabled, "Actif")}
       <div class="actions">${cur.id ? '<button type="button" class="btn ghost" id="rsdel">Supprimer</button>' : ""}<button type="button" class="btn ghost" id="rscancel">Annuler</button><button class="btn">Enregistrer</button></div></form>` : "";
-  const m = lo?.lost, euro = (n) => `${Number(n).toLocaleString("fr-FR")} €`;
-  const lostPanel = lo ? `<div class="panel" style="margin-bottom:16px"><div class="ph"><h2>Appels perdus · ${H.esc(lo.label)}</h2>
-      ${sc.schedules.some((x) => x.sections.lost) || cur ? "" : '<button class="btn sm" id="rsbrief">Recevoir le brief chaque lundi</button>'}</div>
-    <div class="cards" style="padding:16px 16px 0">${kpi("clock", "Appelants perdus", String(m.lost), `${m.prospects} nouveaux · ${m.clients} clients`, m.lost ? "warn" : "good")}
-      ${kpi("check", "Affaires possibles perdues", m.euros === null ? "—" : `≈ ${euro(m.euros)}`, m.euros === null ? "Indique la valeur d'une affaire ci-dessous" : `${m.prospects} × ${euro(m.value)} × ${m.rate} %`)}
-      ${kpi("mail", "Appels reçus", String(m.inbound), `${m.missed_calls} non décrochés`)}</div>
-    <div class="pad stack"><ul class="lost-s">${lo.sentences.map((t) => `<li>${H.esc(t)}</li>`).join("")}</ul>
-      ${m.callers.length ? `<details><summary>Qui rappeler (${m.callers.length})</summary><div class="cx-list">${m.callers.map((x) => `<div class="cx-row"><div class="grow"><b>${H.esc(H.fmtPhone(x.number))}</b>${x.name ? ` · ${H.esc(x.name)}` : ""}
-        <div class="s">${x.attempts} essai${x.attempts > 1 ? "s" : ""}${x.message ? " · message laissé" : ""}</div></div>${pill(x.known ? "off" : "warn", x.known ? "Client" : "Nouveau")}</div>`).join("")}</div></details>` : ""}
-      <form id="lof" class="row" novalidate style="flex-wrap:wrap;align-items:end;gap:10px 14px">
-        <label>Valeur moyenne d'une affaire (€ HT)<input name="value" type="number" min="0" step="10" value="${m.value}" style="width:140px"></label>
-        <label>Nouveaux appelants qui deviennent clients (%)<input name="rate" type="number" min="1" max="100" value="${m.rate}" style="width:100px"></label>
-        <button class="btn ghost sm">Recalculer</button><div class="form-msg" style="flex-basis:100%"></div></form>
-      <p class="hint" style="margin:0">Un appelant est perdu s'il n'a pas été pris et que personne ne l'a eu au téléphone depuis. Nouveau = inconnu de l'annuaire et jamais eu avant. Les euros ne comptent que les nouveaux.</p></div></div>` : "";
-  H.app.innerHTML = head("Rapports", "Bilans d'appels envoyés par e-mail au client.") + lostPanel + `
+  H.app.innerHTML = head("Rapports", "Bilans d'appels envoyés par e-mail au client.") + `
     <div class="panel" style="margin-bottom:16px"><div class="ph"><h2>Rapports détaillés planifiés</h2>${cur ? "" : '<button class="btn sm" id="rsnew">+ Nouveau rapport</button>'}</div>
       ${sc.smtp ? "" : '<div class="pad"><div class="flash warn" style="margin:0">Le serveur d\'envoi des e-mails n\'est pas réglé : <a href="#/alertes/reglages">Alertes › Réglages</a>.</div></div>'}
       ${sc.schedules.length ? `<div class="table-wrap"><table><thead><tr><th>Rapport</th><th>Quand</th><th>Destinataires</th><th>Dernier envoi</th><th></th></tr></thead><tbody>
@@ -833,8 +818,6 @@ async function pageReports() {
   // Rapports planifiés
   const setEdit = (v) => { try { v ? sessionStorage.setItem("pbxm_rs_edit", v) : sessionStorage.removeItem("pbxm_rs_edit"); } catch { /* */ } pageReports(); };
   H.$("#rsnew")?.addEventListener("click", () => setEdit("new"));
-  H.$("#rsbrief")?.addEventListener("click", () => setEdit("brief"));
-  if (H.$("#lof")) onSubmit(H.$("#lof"), async (f) => { await H.api("PUT", "/api/reports/lost", { value: Number(f.value), rate: Number(f.rate) }); ok("Réglages enregistrés."); pageReports(); });
   H.$("#rscancel")?.addEventListener("click", () => setEdit(null));
   H.app.querySelectorAll("[data-rsedit]").forEach((b) => b.onclick = () => setEdit(b.dataset.rsedit));
   H.$("#rsdel")?.addEventListener("click", async () => { if (!confirm("Supprimer ce rapport planifié ?")) return; await H.api("DELETE", `/api/reports/schedules/${cur.id}`); ok("Rapport supprimé."); setEdit(null); });

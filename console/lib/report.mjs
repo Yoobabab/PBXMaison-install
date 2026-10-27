@@ -2,7 +2,7 @@
  * Chiffres d'une période (bilan de la semaine du Superviseur, rapport mensuel au client) à partir du journal des appels.
  * Fonctions pures, testées dans console/test/report.test.mjs ; la synthèse en français est demandée à l'IA à part.
  */
-import { missedCallers, sameNumberKey } from "./callback.mjs";
+import { missedCallers } from "./callback.mjs";
 
 const DAYS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -138,67 +138,8 @@ export function monthlyReportMail({ label, stats: s, prev: p0, synthesis = "", p
   return { subject: title + (pbxName ? ` — ${pbxName}` : ""), html, text };
 }
 
-// ------------------------------------------------------------------ Compteur d'argent perdu (brief du lundi)
-/** Réglages : valeur moyenne d'une affaire (€ HT, 0 = pas d'euros) et part des nouveaux appelants qui deviennent clients (%) */
-export const LOST_DEFAULT = { value: 0, rate: 20 };
-export function validateLost(input, cur = LOST_DEFAULT) {
-  const value = Math.round(Number(input?.value ?? cur.value)), rate = Math.round(Number(input?.rate ?? cur.rate));
-  if (!Number.isFinite(value) || value < 0 || value > 1_000_000) throw Object.assign(new Error("Valeur d'une affaire : entre 0 et 1 000 000 €."), { field: "value", user: true });
-  if (!Number.isFinite(rate) || rate < 1 || rate > 100) throw Object.assign(new Error("Part des appelants qui deviennent clients : entre 1 et 100 %."), { field: "rate", user: true });
-  return { value, rate };
-}
-/**
- * Appels perdus d'une période, en appelants et en euros : un appelant est « perdu » s'il n'a pas été pris et que personne
- * ne l'a eu au téléphone depuis (ni rappel abouti, ni nouvel appel décroché). Nouveau = inconnu de l'annuaire et jamais
- * eu au téléphone avant ; client = connu. Les euros ne comptent que les nouveaux : nouveaux perdus × valeur × taux.
- * calls : journal (summarize) jusqu'à maintenant, pour voir les rappels faits après la période.
- */
-export function lostMoney(calls, { from, to, contacts = new Map(), value = 0, rate = 20, tz = "Europe/Paris" } = {}) {
-  const keyOf = (c) => sameNumberKey(c.direction === "in" ? c.from.number : c.direction === "out" ? c.to.number : "");
-  const inP = calls.filter((c) => c.direction === "in" && c.start >= from && c.start < to);
-  const byKey = new Map();
-  for (const c of calls) { const k = keyOf(c); if (k.length < 9) continue; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(c); }
-  const lost = [];
-  const seen = new Set();
-  for (const c of inP.filter((x) => x.status !== "answered").sort((a, b) => a.start.localeCompare(b.start))) {
-    const k = keyOf(c);
-    if (k.length < 9 || seen.has(k)) continue;
-    seen.add(k);
-    const list = byKey.get(k) || [];
-    if (list.some((x) => x.status === "answered" && x.start > c.start)) continue;   // rappelé ou repris depuis
-    const known = contacts.has(k) || list.some((x) => x.status === "answered" && x.start < c.start);
-    const tries = list.filter((x) => x.direction === "in" && x.status !== "answered" && x.start >= from && x.start < to);
-    lost.push({ number: c.from.number, name: c.from.name || contacts.get(k) || "", known, attempts: tries.length, message: tries.some((x) => x.status === "voicemail"), first_at: c.start });
-  }
-  const prospects = lost.filter((x) => !x.known).length;
-  // Créneau qui perd le plus : jour et heure (au moins 3 appels, au moins 30 % non décrochés)
-  const slots = new Map();
-  for (const c of inP) { const l = local(c.start, tz), k = `${l.day}-${l.hour}`; const s = slots.get(k) || { day: l.day, hour: l.hour, calls: 0, missed: 0 }; s.calls++; if (c.status !== "answered") s.missed++; slots.set(k, s); }
-  const worst = [...slots.values()].filter((s) => s.calls >= 3 && s.missed / s.calls >= 0.3).sort((a, b) => b.missed - a.missed || b.missed / b.calls - a.missed / a.calls)[0] || null;
-  return {
-    inbound: inP.length, missed_calls: inP.filter((c) => c.status !== "answered").length,
-    lost: lost.length, prospects, clients: lost.length - prospects, messages: lost.filter((x) => x.message).length,
-    euros: value > 0 ? Math.round(prospects * value * rate / 100) : null, value, rate,
-    worst: worst && { ...worst, day_label: DAYS[worst.day], rate: pct(worst.missed, worst.calls) },
-    callers: lost.sort((a, b) => Number(a.known) - Number(b.known) || b.attempts - a.attempts).slice(0, 15),
-  };
-}
-const euro = (n) => `${Number(n).toLocaleString("fr-FR")} €`;
-/** Phrases du brief (e-mail, console) */
-export function lostSentences(m) {
-  if (!m.inbound) return ["Aucun appel reçu sur la période."];
-  const out = [];
-  if (!m.lost) out.push(`Tous les appelants ont été pris ou rappelés (${m.inbound} appels reçus).`);
-  else {
-    out.push(`${m.lost} appelant${m.lost > 1 ? "s" : ""} jamais eu${m.lost > 1 ? "s" : ""} au téléphone : ${m.prospects} nouveau${m.prospects > 1 ? "x" : ""} et ${m.clients} client${m.clients > 1 ? "s" : ""} connu${m.clients > 1 ? "s" : ""}${m.messages ? ` (${m.messages} ${m.messages > 1 ? "ont" : "a"} laissé un message)` : ""}.`);
-    if (m.euros !== null && m.prospects) out.push(`Environ ${euro(m.euros)} d'affaires possibles perdues (${m.prospects} × ${euro(m.value)} × ${m.rate} %).`);
-  }
-  if (m.worst) out.push(`Le ${m.worst.day_label.toLowerCase()} entre ${m.worst.hour} h et ${m.worst.hour + 1} h, ${m.worst.missed} appel${m.worst.missed > 1 ? "s" : ""} sur ${m.worst.calls} n'ont pas été décrochés : ajoutez quelqu'un dans le groupe sur ce créneau, ou un débordement (messagerie de groupe, standardiste IA).`);
-  return out;
-}
-
 // ------------------------------------------------------------------ Rapports détaillés planifiés (jour, semaine, mois)
-export const REPORT_SECTIONS = { summary: "Chiffres clés", lost: "Argent perdu et conseil", users: "Par utilisateur", dids: "Par numéro appelé (SDA)", missed: "Liste des appels manqués", hours: "Appels par heure" };
+export const REPORT_SECTIONS = { summary: "Chiffres clés", users: "Par utilisateur", dids: "Par numéro appelé (SDA)", missed: "Liste des appels manqués", hours: "Appels par heure" };
 export const REPORT_FREQ = { day: "Chaque jour (la veille)", week: "Chaque semaine (le lundi, semaine écoulée)", month: "Chaque mois (le 1er, mois écoulé)" };
 const fmtNum = (n) => /^0\d{9}$/.test(n || "") ? n.replace(/(\d{2})(?=\d)/g, "$1 ") : (n || "");
 
@@ -268,12 +209,6 @@ export function detailedReportMail({ name, label, stats: s, detail: d, sections,
   const parts = [];
   if (sections.summary) parts.push(`<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:6px"><tr>${kpi(s.inbound, "appels reçus")}${kpi(`${s.answer_rate} %`, "appels pris")}${kpi(s.missed, "manqués")}${kpi(s.outbound, "appels passés")}</tr></table>
     <p style="font-size:13px;color:#626977;margin:6px 0 0">Attente moyenne ${dur(s.avg_wait)} · durée moyenne ${dur(s.avg_talk)} · ${s.callers} appelant${s.callers > 1 ? "s" : ""} différent${s.callers > 1 ? "s" : ""}${s.not_called_back ? ` · <b>${s.not_called_back} pas encore rappelé${s.not_called_back > 1 ? "s" : ""}</b>` : ""}</p>`);
-  if (sections.lost && d.lost) {
-    const m = d.lost;
-    parts.push(h3("Argent perdu") + (m.euros !== null && m.prospects ? `<div style="font-size:26px;font-weight:700;color:${color};margin:0 0 6px">≈ ${escH(euro(m.euros))}</div>` : "")
-      + lostSentences(m).map((t) => `<p style="font-size:14px;color:#1b1d24;margin:0 0 6px">${escH(t)}</p>`).join("")
-      + (m.callers.length ? table(["À rappeler", "Essais", ""], m.callers.map((x) => `<tr>${td(`${fmtNum(x.number)}${x.name ? ` · ${x.name}` : ""}`, !x.known)}${td(x.attempts)}${td(x.known ? "client" : "nouveau")}</tr>`)) : ""));
-  }
   if (sections.users && d.users.length) parts.push(h3("Par utilisateur") + table(["Poste", "Appels pris", "Temps au téléphone", "Appels passés"], d.users.map((u) => `<tr>${td(`${u.ext} ${u.name}`.trim(), true)}${td(u.answered)}${td(dur(u.talk + u.out_talk))}${td(u.outbound)}</tr>`)));
   if (sections.dids && d.dids.length) parts.push(h3("Par numéro appelé") + table(["Numéro", "Appels", "Pris", "Manqués"], d.dids.map((x) => `<tr>${td(fmtNum(x.did), true)}${td(x.calls)}${td(x.answered)}${td(x.missed)}</tr>`)));
   if (sections.hours && s.inbound) parts.push(h3("Appels reçus par heure") + table(["Heure", "Appels", "Manqués"], s.hours.map((x, i) => [x, i]).filter(([x]) => x.calls).map(([x, i]) => `<tr>${td(`${i} h – ${i + 1} h`)}${td(x.calls)}${td(x.missed)}</tr>`)));
@@ -286,7 +221,6 @@ export function detailedReportMail({ name, label, stats: s, detail: d, sections,
   <div style="padding:20px 24px">${parts.join("")}</div>
   <div style="padding:14px 24px;border-top:1px solid #e6e8ee;font-size:12px;color:#8a90a0">${brand.signature ? `Rapport préparé par ${escH(brand.signature)}` : "Rapport automatique du standard"}${sections.csv ? " · tous les appels dans le fichier joint (Excel)" : ""}.</div></div></div>`;
   const text = [title, pbxName, "", `Appels reçus : ${s.inbound} · pris : ${s.answer_rate} % · manqués : ${s.missed} · passés : ${s.outbound}`,
-    ...(sections.lost && d.lost ? ["", ...lostSentences(d.lost)] : []),
     ...(sections.users ? ["", "Par utilisateur :", ...d.users.map((u) => `${u.ext} ${u.name} : ${u.answered} pris, ${u.outbound} passés`)] : []),
     ...(sections.missed ? ["", `Appels manqués : ${d.missed.length}`, ...d.missed.slice(0, 150).map((m) => `${hm(m.at)} ${fmtNum(m.from) || "Masqué"} → ${fmtNum(m.did)}`)] : [])].join("\n");
   return { subject: title + (pbxName ? ` · ${pbxName}` : ""), html, text };

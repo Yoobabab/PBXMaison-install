@@ -23,8 +23,7 @@ import { EMERGENCY } from "./pbx.mjs";
 import { smtpReady, transportOf, smtpError, voicemailMail, alertMail, messagesToMail } from "./mail.mjs";
 import * as vmbox from "./voicemail.mjs";
 import { fraudSignals } from "./fraud.mjs";
-import { periodOf, periodStats, reportInput, monthlyReportMail, validateSchedule, scheduleDue, detailedStats, detailedReportMail, callsCsv, REPORT_SECTIONS, REPORT_FREQ, lostMoney, lostSentences, validateLost, LOST_DEFAULT } from "./report.mjs";
-import { sameNumberKey } from "./callback.mjs";
+import { periodOf, periodStats, reportInput, monthlyReportMail, validateSchedule, scheduleDue, detailedStats, detailedReportMail, callsCsv, REPORT_SECTIONS, REPORT_FREQ } from "./report.mjs";
 import { readTheme, assetFile, THEME_DIR } from "./theme.mjs";
 
 /** Lance pbx-configure et renvoie { code, out, lines (JSON par ligne) }. */
@@ -601,7 +600,6 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     const { calls } = await pbx.callLog({ days: sch.frequency === "month" ? 40 : sch.frequency === "week" ? 10 : 3, limit: 20000 });
     const names = new Map((await pbx.listExtensions()).map((u) => [u.id, u.name]));
     const stats = periodStats(calls, { from: per.from, to: per.to, tz, names }), detail = detailedStats(calls, { from: per.from, to: per.to, names });
-    if (sch.sections.lost) detail.lost = lostMoney(calls, { from: per.from, to: per.to, tz, contacts: await contactNames(), ...(await lostSettings()) });
     const theme = (() => { try { return readTheme(THEME_DIR); } catch { return { color: "#d8141c" }; } })();
     const logo = (() => { try { const f = theme.logo ? assetFile("logo", THEME_DIR) : null; return f?.type && f.type !== "image/svg+xml" ? f : null; } catch { return null; } })();
     const sign = (await reportSettings()).signature;
@@ -609,25 +607,6 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     const attachments = logo ? [{ filename: `logo.${logo.type.split("/")[1]}`, content: logo.buf, contentType: logo.type, cid: "logo@callikoe" }] : [];
     if (sch.csv) attachments.push({ filename: `appels-${per.from.slice(0, 10)}.csv`, content: callsCsv(calls, { from: per.from, to: per.to, tz, names }), contentType: "text/csv; charset=utf-8" });
     return { mail, attachments, label: per.label, key: per.from };
-  }
-  // Compteur d'argent perdu : réglages et chiffres de la semaine dernière (page Rapports)
-  const lostSettings = async () => validateLost(await get("lost_money", LOST_DEFAULT));
-  async function contactNames() {
-    const names = new Map();
-    for (const c of await pbx.listContacts().catch(() => [])) for (const ph of c.phones || []) names.set(sameNumberKey(ph.number), c.name);
-    return names;
-  }
-  async function getLost() {
-    const tz = tzName(), st = await lostSettings();
-    const per = periodOf("week", Date.now(), { previous: true, tz });
-    const { calls } = await pbx.callLog({ days: 10, limit: 20000 });
-    const m = lostMoney(calls, { from: per.from, to: per.to, tz, contacts: await contactNames(), ...st });
-    return { settings: st, label: per.label, lost: m, sentences: lostSentences(m) };
-  }
-  async function setLost(input) {
-    let v; try { v = validateLost(input, await lostSettings()); } catch (e) { throw new UserError(e.message, e.field); }
-    await db.setSetting("lost_money", v);
-    return getLost();
   }
   async function previewSchedule(id) { const sch = (await schedules()).find((x) => x.id === id); if (!sch) throw Object.assign(new UserError("Rapport introuvable."), { status: 404 }); return (await buildScheduled(sch)).mail.html; }
   async function sendSchedule(id, to = null) {
@@ -895,7 +874,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     migrate, start, dialplanParts, testMail, sendMail, vmKey, reportSettings, setReportSettings, buildMonthlyReport, sendMonthlyReport, listSchedules, saveSchedule, deleteSchedule, previewSchedule, sendSchedule, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
     getSecurity, setSecurity, banIp, banList,
-    getLost, setLost, getRecording, setRecording, listRecordings, recordingFile, deleteRecording, summarizeRecording,
+    getRecording, setRecording, listRecordings, recordingFile, deleteRecording, summarizeRecording,
     getShortcodes, setShortcodes, pollStatusCodes,
     getBackups, setBackups, runBackup, testRemote, restoreBackup, restoreStatus, stageUpload,
     getUpdates, updateAvailable, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, captureCallFile, deleteCapture,

@@ -61,31 +61,3 @@ test("rapports planifiés : période de la veille, échéance, chiffres détaill
   assert.match(mail.subject, /^Rapport du jour — dimanche 25 octobre 2026 · PBX$/);
   assert.match(mail.html, /Par numéro appelé/); assert.doesNotMatch(mail.html, /Appels reçus par heure/);
 });
-
-test("compteur d'argent perdu : appelants perdus, euros, créneau", async () => {
-  const { lostMoney, lostSentences, validateLost } = await import("../lib/report.mjs");
-  const C = (start, dir, num, status, name = "") => ({ start, direction: dir, status, from: { number: dir === "in" ? num : "", name, ext: dir === "out" ? "201" : "" }, to: { number: dir === "out" ? num : "201" }, did: "0412345678" });
-  const calls = [
-    C("2026-10-14T09:00:00Z", "in", "0611111111", "answered"),            // client déjà eu avant la semaine
-    C("2026-10-20T10:05:00Z", "in", "0611111111", "missed"),              // client perdu
-    C("2026-10-20T10:10:00Z", "in", "0622222222", "missed"),              // nouveau perdu (2 essais)
-    C("2026-10-20T10:20:00Z", "in", "0622222222", "voicemail"),
-    C("2026-10-20T10:30:00Z", "in", "0633333333", "missed"),              // rappelé ensuite : pas perdu
-    C("2026-10-21T08:00:00Z", "out", "0633333333", "answered"),
-    C("2026-10-22T14:00:00Z", "in", "0644444444", "answered"),
-    C("2026-10-23T10:15:00Z", "in", "0655555555", "missed", "Dupont"),    // connu de l'annuaire
-    C("2026-10-20T10:40:00Z", "in", "", "missed"),                       // masqué : ignoré
-  ];
-  const contacts = new Map([["655555555", "Dupont SARL"]]);
-  const m = lostMoney(calls, { from: "2026-10-19T22:00:00Z", to: "2026-10-26T23:00:00Z", contacts, value: 1000, rate: 25, tz: "Europe/Paris" });
-  assert.equal(m.inbound, 7); assert.equal(m.lost, 3); assert.equal(m.prospects, 1); assert.equal(m.clients, 2); assert.equal(m.messages, 1);
-  assert.equal(m.euros, 250);
-  assert.equal(m.callers[0].number, "0622222222"); assert.equal(m.callers[0].attempts, 2);
-  assert.deepEqual([m.worst.day_label, m.worst.hour, m.worst.calls, m.worst.missed], ["Mardi", 12, 5, 5]);
-  const t = lostSentences(m);
-  assert.match(t[0], /3 appelants jamais eus au téléphone : 1 nouveau et 2 clients connus \(1 a laissé un message\)/);
-  assert.match(t[1], /Environ 250 € d'affaires/); assert.match(t[2], /mardi entre 12 h et 13 h, 5 appels sur 5/);
-  assert.equal(lostMoney(calls, { from: "2026-10-19T22:00:00Z", to: "2026-10-26T23:00:00Z" }).euros, null);
-  assert.throws(() => validateLost({ value: 100, rate: 0 }), /entre 1 et 100/);
-  assert.deepEqual(lostSentences({ inbound: 0 }), ["Aucun appel reçu sur la période."]);
-});
