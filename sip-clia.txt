@@ -1,0 +1,400 @@
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029670, ts 021280, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051187, ts 021280, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029671, ts 021440, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051188, ts 021440, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029672, ts 021600, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051189, ts 021600, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029673, ts 021760, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051190, ts 021760, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029674, ts 021920, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051191, ts 021920, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029675, ts 022080, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051192, ts 022080, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029676, ts 022240, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051193, ts 022240, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029677, ts 022400, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051194, ts 022400, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029678, ts 022560, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051195, ts 022560, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029679, ts 022720, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051196, ts 022720, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029680, ts 022880, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051197, ts 022880, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029681, ts 023040, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051198, ts 023040, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029682, ts 023200, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051199, ts 023200, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029683, ts 023360, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051200, ts 023360, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029684, ts 023520, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051201, ts 023520, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029685, ts 023680, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051202, ts 023680, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029686, ts 023840, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051203, ts 023840, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029687, ts 024000, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051204, ts 024000, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029688, ts 024160, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051205, ts 024160, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029689, ts 024320, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051206, ts 024320, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029690, ts 024480, len 000160)
+[2026-10-27 16:23:42] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051207, ts 024480, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029691, ts 024640, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051208, ts 024640, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029692, ts 024800, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051209, ts 024800, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029693, ts 024960, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051210, ts 024960, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029694, ts 025120, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051211, ts 025120, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029695, ts 025280, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051212, ts 025280, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029696, ts 025440, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051213, ts 025440, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029697, ts 025600, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051214, ts 025600, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029698, ts 025760, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051215, ts 025760, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029699, ts 025920, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051216, ts 025920, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029700, ts 026080, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051217, ts 026080, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029701, ts 026240, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051218, ts 026240, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029702, ts 026400, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051219, ts 026400, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029703, ts 026560, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051220, ts 026560, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029704, ts 026720, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051221, ts 026720, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029705, ts 026880, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051222, ts 026880, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029706, ts 027040, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051223, ts 027040, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029707, ts 027200, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051224, ts 027200, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029708, ts 027360, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051225, ts 027360, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029709, ts 027520, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051226, ts 027520, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029710, ts 027680, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051227, ts 027680, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029711, ts 027840, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051228, ts 027840, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029712, ts 028000, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051229, ts 028000, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029713, ts 028160, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051230, ts 028160, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029714, ts 028320, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051231, ts 028320, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029715, ts 028480, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051232, ts 028480, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029716, ts 028640, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051233, ts 028640, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029717, ts 028800, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051234, ts 028800, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029718, ts 028960, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051235, ts 028960, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029719, ts 029120, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051236, ts 029120, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029720, ts 029280, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051237, ts 029280, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029721, ts 029440, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051238, ts 029440, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029722, ts 029600, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051239, ts 029600, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029723, ts 029760, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051240, ts 029760, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029724, ts 029920, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051241, ts 029920, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029725, ts 030080, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051242, ts 030080, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029726, ts 030240, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051243, ts 030240, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029727, ts 030400, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051244, ts 030400, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029728, ts 030560, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051245, ts 030560, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029729, ts 030720, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051246, ts 030720, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029730, ts 030880, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051247, ts 030880, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029731, ts 031040, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051248, ts 031040, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029732, ts 031200, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051249, ts 031200, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029733, ts 031360, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051250, ts 031360, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029734, ts 031520, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051251, ts 031520, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029735, ts 031680, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051252, ts 031680, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029736, ts 031840, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051253, ts 031840, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029737, ts 032000, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051254, ts 032000, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029738, ts 032160, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051255, ts 032160, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029739, ts 032320, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051256, ts 032320, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029740, ts 032480, len 000160)
+[2026-10-27 16:23:43] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051257, ts 032480, len 000160)
+[2026-10-27 16:23:44] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029741, ts 032640, len 000160)
+[2026-10-27 16:23:44] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051258, ts 032640, len 000160)
+[2026-10-27 16:23:44] VERBOSE[16492][C-00000001] res_rtp_asterisk.c: Got  RTP packet from    127.0.0.50:30090 (type 00, seq 029742, ts 032800, len 000160)
+[2026-10-27 16:23:44] VERBOSE[16497][C-00000001] res_rtp_asterisk.c: Sent RTP packet to      127.0.0.11:31034 (type 08, seq 051259, ts 032800, len 000160)
+[2026-10-27 16:23:44] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (556 bytes) from UDP:127.0.0.2:5060 --->
+BYE sip:asterisk@127.0.0.1:6001 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.2;branch=z9hG4bK5bc3.121318138d0b2bdee734867f16390fa5.0
+Via: SIP/2.0/UDP 127.0.0.11:5080;received=127.0.0.11;rport=5080;branch=z9hG4bKPj00748d09-d780-431c-b61e-77d9c61970b3
+From: <sip:201@127.0.0.11>;tag=f8f19c94-3fb7-4dde-adcd-ebee1abe4603
+To: "Anonymous" <sip:anonymous@127.0.0.1>;tag=6ca878d3-03ab-4099-b5be-ec77362a563c
+Call-ID: 5b488678-fb36-453a-a47d-e1532a02eb0e
+CSeq: 27706 BYE
+Reason: Q.850;cause=16
+Max-Forwards: 69
+User-Agent: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-27 16:23:44] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP response (504 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.2;rport=5060;received=127.0.0.2;branch=z9hG4bK5bc3.121318138d0b2bdee734867f16390fa5.0
+Via: SIP/2.0/UDP 127.0.0.11:5080;rport=5080;received=127.0.0.11;branch=z9hG4bKPj00748d09-d780-431c-b61e-77d9c61970b3
+Call-ID: 5b488678-fb36-453a-a47d-e1532a02eb0e
+From: <sip:201@127.0.0.11>;tag=f8f19c94-3fb7-4dde-adcd-ebee1abe4603
+To: "Anonymous" <sip:anonymous@127.0.0.1>;tag=6ca878d3-03ab-4099-b5be-ec77362a563c
+CSeq: 27706 BYE
+Server: PBXMaison
+Content-Length:  0
+
+
+[2026-10-27 16:23:44] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP request (631 bytes) to UDP:127.0.0.2:5060 --->
+BYE sip:asterisk@127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.1.219:5060;rport;branch=z9hG4bKPj38358c8e-3139-44ae-8845-058e46245997
+From: <sip:cx2bde85a8b94f5746@10.1.1.219;line=dzztabm>;tag=589b9736-d611-4431-ad93-a39c39c1e397
+To: "Anonymous" <sip:anonymous@anonymous.invalid>;tag=f81db3a6-2320-4cff-b786-ddddb8ce82bc
+Call-ID: 8c2afee1-0c82-48c7-9093-3155dc0d878d
+CSeq: 18271 BYE
+Route: <sip:127.0.0.2:5060;lr;r2=on;ftag=f81db3a6-2320-4cff-b786-ddddb8ce82bc>
+Route: <sip:10.1.1.219;lr;r2=on;ftag=f81db3a6-2320-4cff-b786-ddddb8ce82bc>
+Reason: Q.850;cause=16
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-27 16:23:44] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP response (438 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 10.1.1.219:5060;rport=6001;received=127.0.0.1;branch=z9hG4bKPj38358c8e-3139-44ae-8845-058e46245997
+Call-ID: 8c2afee1-0c82-48c7-9093-3155dc0d878d
+From: <sip:cx2bde85a8b94f5746@10.1.1.219;line=dzztabm>;tag=589b9736-d611-4431-ad93-a39c39c1e397
+To: "Anonymous" <sip:anonymous@anonymous.invalid>;tag=f81db3a6-2320-4cff-b786-ddddb8ce82bc
+CSeq: 18271 BYE
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-27 16:23:44] ERROR[13658] cdr_csv.c: Unable to open file /var/log/callikoe/clia//cdr-csv//Master.csv : No such file or directory
+[2026-10-27 16:23:44] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:23:44] ERROR[13658] cdr_csv.c: Unable to open file /var/log/callikoe/clia//cdr-csv//Master.csv : No such file or directory
+[2026-10-27 16:23:44] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (1212 bytes) from UDP:127.0.0.2:5060 --->
+INVITE sip:0412345678@a.e2e.invalid SIP/2.0
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Record-Route: <sip:10.1.1.219;r2=on;lr=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Via: SIP/2.0/UDP 127.0.0.2;branch=z9hG4bK84ef.7c12570209e27df633eb132066fff36e.0
+Via: SIP/2.0/UDP 127.0.0.11:5080;received=127.0.0.11;rport=5080;branch=z9hG4bKPjbbeea320-2942-4ff5-a824-c00773c8357f
+From: "Anonymous" <sip:201@a.e2e.invalid>;tag=930fe078-9bc9-4e3b-a303-ed8732c604bf
+To: <sip:0412345678@a.e2e.invalid>
+Contact: <sip:201@127.0.0.11:5080>
+Call-ID: 22c824fd-bc81-465a-bb7f-d3dfd7486f3b
+CSeq: 19348 INVITE
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Supported: 100rel, timer, replaces, norefersub, histinfo
+Session-Expires: 1800
+Min-SE: 90
+Max-Forwards: 69
+User-Agent: Asterisk PBX 22.11.0
+Content-Type: application/sdp
+Content-Length:   255
+
+v=0
+o=- 271342888 271342888 IN IP4 127.0.0.11
+s=Asterisk
+c=IN IP4 127.0.0.11
+t=0 0
+m=audio 31010 RTP/AVP 0 8 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+[2026-10-27 16:24:13] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP response (846 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 127.0.0.2;rport=5060;received=127.0.0.2;branch=z9hG4bK84ef.7c12570209e27df633eb132066fff36e.0
+Via: SIP/2.0/UDP 127.0.0.11:5080;rport=5080;received=127.0.0.11;branch=z9hG4bKPjbbeea320-2942-4ff5-a824-c00773c8357f
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Record-Route: <sip:10.1.1.219;lr;r2=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Call-ID: 22c824fd-bc81-465a-bb7f-d3dfd7486f3b
+From: "Anonymous" <sip:201@a.e2e.invalid>;tag=930fe078-9bc9-4e3b-a303-ed8732c604bf
+To: <sip:0412345678@a.e2e.invalid>;tag=z9hG4bK84ef.7c12570209e27df633eb132066fff36e.0
+CSeq: 19348 INVITE
+WWW-Authenticate: Digest realm="asterisk",nonce="1793118253/ec01f5a9c98ad9924763ef655a2fb425",opaque="5234a38a3db9e2a2",algorithm=MD5,qop="auth"
+Server: PBXMaison
+Content-Length:  0
+
+
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (398 bytes) from UDP:127.0.0.2:5060 --->
+ACK sip:0412345678@a.e2e.invalid SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.2;branch=z9hG4bK84ef.7c12570209e27df633eb132066fff36e.0
+From: "Anonymous" <sip:201@a.e2e.invalid>;tag=930fe078-9bc9-4e3b-a303-ed8732c604bf
+To: <sip:0412345678@a.e2e.invalid>;tag=z9hG4bK84ef.7c12570209e27df633eb132066fff36e.0
+Call-ID: 22c824fd-bc81-465a-bb7f-d3dfd7486f3b
+CSeq: 19348 ACK
+Max-Forwards: 69
+Content-Length: 0
+
+
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (1517 bytes) from UDP:127.0.0.2:5060 --->
+INVITE sip:0412345678@a.e2e.invalid SIP/2.0
+Record-Route: <sip:127.0.0.2;r2=on;lr=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Record-Route: <sip:10.1.1.219;r2=on;lr=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Via: SIP/2.0/UDP 127.0.0.2;branch=z9hG4bK74ef.5e88268a84bed8fd8ad6a2a0ebc1abfa.0
+Via: SIP/2.0/UDP 127.0.0.11:5080;received=127.0.0.11;rport=5080;branch=z9hG4bKPj92e619df-724c-4ad6-bc9c-00293ed36518
+From: "Anonymous" <sip:201@a.e2e.invalid>;tag=930fe078-9bc9-4e3b-a303-ed8732c604bf
+To: <sip:0412345678@a.e2e.invalid>
+Contact: <sip:201@127.0.0.11:5080>
+Call-ID: 22c824fd-bc81-465a-bb7f-d3dfd7486f3b
+CSeq: 19349 INVITE
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, INFO, MESSAGE, REFER
+Supported: 100rel, timer, replaces, norefersub, histinfo
+Session-Expires: 1800
+Min-SE: 90
+Max-Forwards: 69
+User-Agent: Asterisk PBX 22.11.0
+Authorization: Digest username="WksWJcVOZa", realm="asterisk", nonce="1793118253/ec01f5a9c98ad9924763ef655a2fb425", uri="sip:0412345678@a.e2e.invalid", response="d7b36e08bdcea0231aab18a099ab94aa", algorithm=MD5, cnonce="3164da7b823f4ff8af416e9a3397187f", opaque="5234a38a3db9e2a2", qop=auth, nc=00000001
+Content-Type: application/sdp
+Content-Length:   255
+
+v=0
+o=- 271342888 271342888 IN IP4 127.0.0.11
+s=Asterisk
+c=IN IP4 127.0.0.11
+t=0 0
+m=audio 31010 RTP/AVP 0 8 101
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-16
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+[2026-10-27 16:24:13] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP response (643 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.2;rport=5060;received=127.0.0.2;branch=z9hG4bK74ef.5e88268a84bed8fd8ad6a2a0ebc1abfa.0
+Via: SIP/2.0/UDP 127.0.0.11:5080;rport=5080;received=127.0.0.11;branch=z9hG4bKPj92e619df-724c-4ad6-bc9c-00293ed36518
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Record-Route: <sip:10.1.1.219;lr;r2=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Call-ID: 22c824fd-bc81-465a-bb7f-d3dfd7486f3b
+From: "Anonymous" <sip:201@a.e2e.invalid>;tag=930fe078-9bc9-4e3b-a303-ed8732c604bf
+To: <sip:0412345678@a.e2e.invalid>
+CSeq: 19349 INVITE
+Server: PBXMaison
+Content-Length:  0
+
+
+[2026-10-27 16:24:13] ERROR[13665] res_pjsip.c: Endpoint 'op': Could not create dialog to invalid URI 'op'.  Is endpoint registered and reachable?
+[2026-10-27 16:24:13] ERROR[13665] chan_pjsip.c: Failed to create outgoing session to endpoint 'op'
+[2026-10-27 16:24:13] NOTICE[16721][C-00000002] app_dial.c: Unable to create channel of type 'PJSIP' (cause 3 - No route to destination)
+[2026-10-27 16:24:13] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP response (710 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 404 Not Found
+Via: SIP/2.0/UDP 127.0.0.2;rport=5060;received=127.0.0.2;branch=z9hG4bK74ef.5e88268a84bed8fd8ad6a2a0ebc1abfa.0
+Via: SIP/2.0/UDP 127.0.0.11:5080;rport=5080;received=127.0.0.11;branch=z9hG4bKPj92e619df-724c-4ad6-bc9c-00293ed36518
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Record-Route: <sip:10.1.1.219;lr;r2=on;ftag=930fe078-9bc9-4e3b-a303-ed8732c604bf>
+Call-ID: 22c824fd-bc81-465a-bb7f-d3dfd7486f3b
+From: "Anonymous" <sip:201@a.e2e.invalid>;tag=930fe078-9bc9-4e3b-a303-ed8732c604bf
+To: <sip:0412345678@a.e2e.invalid>;tag=0b7a8693-642d-467c-abc2-3ae1fa793b33
+CSeq: 19349 INVITE
+Server: PBXMaison
+Reason: Q.850;cause=3
+Content-Length:  0
+
+
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (388 bytes) from UDP:127.0.0.2:5060 --->
+ACK sip:0412345678@a.e2e.invalid SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.2;branch=z9hG4bK74ef.5e88268a84bed8fd8ad6a2a0ebc1abfa.0
+From: "Anonymous" <sip:201@a.e2e.invalid>;tag=930fe078-9bc9-4e3b-a303-ed8732c604bf
+To: <sip:0412345678@a.e2e.invalid>;tag=0b7a8693-642d-467c-abc2-3ae1fa793b33
+Call-ID: 22c824fd-bc81-465a-bb7f-d3dfd7486f3b
+CSeq: 19349 ACK
+Max-Forwards: 69
+Content-Length: 0
+
+
+[2026-10-27 16:24:13] ERROR[13658] cdr_csv.c: Unable to open file /var/log/callikoe/clia//cdr-csv//Master.csv : No such file or directory
+[2026-10-27 16:24:13] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:24:14] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP request (418 bytes) to UDP:127.0.0.2:5060 --->
+OPTIONS sip:127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.1.219:5060;rport;branch=z9hG4bKPj40694c6b-35b4-4283-b566-e399ccbf19ff
+From: <sip:op@127.0.0.50>;tag=ceea988f-4f4a-4486-b710-280d29c92b8a
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+Call-ID: 5995fe83-8f64-4c92-a6e0-4bf4dfc05a1d
+CSeq: 51694 OPTIONS
+Route: <sip:127.0.0.2:5060;lr>
+Max-Forwards: 70
+User-Agent: PBXMaison
+Content-Length:  0
+
+
+[2026-10-27 16:24:14] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP response (715 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.1.219:5060;rport=6001;received=127.0.0.1;branch=z9hG4bKPj40694c6b-35b4-4283-b566-e399ccbf19ff
+Record-Route: <sip:10.1.1.219;lr;r2=on;ftag=ceea988f-4f4a-4486-b710-280d29c92b8a>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=ceea988f-4f4a-4486-b710-280d29c92b8a>
+Call-ID: 5995fe83-8f64-4c92-a6e0-4bf4dfc05a1d
+From: <sip:op@127.0.0.50>;tag=ceea988f-4f4a-4486-b710-280d29c92b8a
+To: <sip:127.0.0.50>;tag=z9hG4bKf5b8.96aad965bd5be3d100293ef3d554f28e.0
+CSeq: 51694 OPTIONS
+WWW-Authenticate: Digest realm="asterisk",nonce="1793118254/cd902239147e5900b0f2e4a826cd7579",opaque="5d53aca02ea0d3c6",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-27 16:24:14] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP request (709 bytes) to UDP:127.0.0.2:5060 --->
+OPTIONS sip:127.0.0.50:5070 SIP/2.0
+Via: SIP/2.0/UDP 10.1.1.219:5060;rport;branch=z9hG4bKPj9e354ef9-a934-4f94-ab7a-ad7a9fea89a1
+From: <sip:op@127.0.0.50>;tag=ceea988f-4f4a-4486-b710-280d29c92b8a
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+Call-ID: 5995fe83-8f64-4c92-a6e0-4bf4dfc05a1d
+CSeq: 51695 OPTIONS
+Route: <sip:127.0.0.2:5060;lr>
+Max-Forwards: 70
+User-Agent: PBXMaison
+Authorization: Digest username="accta", realm="asterisk", nonce="1793118254/cd902239147e5900b0f2e4a826cd7579", uri="sip:127.0.0.50:5070", response="b8a4c583f9d95bd5e37624c22feea167", algorithm=MD5, cnonce="3701b24e13f744f49c68f17af65cafb4", opaque="5d53aca02ea0d3c6", qop=auth, nc=00000001
+Content-Length:  0
+
+
+[2026-10-27 16:24:14] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP response (715 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 10.1.1.219:5060;rport=6001;received=127.0.0.1;branch=z9hG4bKPj9e354ef9-a934-4f94-ab7a-ad7a9fea89a1
+Record-Route: <sip:10.1.1.219;lr;r2=on;ftag=ceea988f-4f4a-4486-b710-280d29c92b8a>
+Record-Route: <sip:127.0.0.2;lr;r2=on;ftag=ceea988f-4f4a-4486-b710-280d29c92b8a>
+Call-ID: 5995fe83-8f64-4c92-a6e0-4bf4dfc05a1d
+From: <sip:op@127.0.0.50>;tag=ceea988f-4f4a-4486-b710-280d29c92b8a
+To: <sip:127.0.0.50>;tag=z9hG4bK06b8.b532b6ef67ddec54c1258999845fe675.0
+CSeq: 51695 OPTIONS
+WWW-Authenticate: Digest realm="asterisk",nonce="1793118254/cd902239147e5900b0f2e4a826cd7579",opaque="40358c6075b90a0d",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 22.11.0
+Content-Length:  0
+
+
+[2026-10-27 16:24:14] WARNING[13665] res_pjsip_outbound_authenticator_digest.c: noendpoint:127.0.0.2: Authentication credentials not accepted by server. Credential failed to authenticate (PJSIP_EFAILEDCREDENTIAL)

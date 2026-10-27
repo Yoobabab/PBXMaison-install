@@ -1,0 +1,102 @@
+Callikoe — installation du serveur multi-tenant (2026-10-27 16:16:31)
+
+[1/9] Vérification de la machine
+  ✔ Ubuntu 24.04.5 LTS · 15989 Mo de RAM · 85 Go libres
+
+[2/9] Paquets système
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+ systemctl restart packagekit.service php8.3-fpm.service
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+  ✔ Node.js v22.23.4, PostgreSQL, Nginx, Certbot, fail2ban
+
+[3/9] Téléchargement de Callikoe
+  ✔ Code installé dans /opt/pbxmaison (c8862302fad26fbdf92d2cb80ad8c5b3aab6cedd · c886230 · version 1.5.0)
+
+[4/9] Moteur téléphonique (Asterisk précompilé)
+
+Running kernel seems to be up-to-date.
+
+Restarting services...
+ /etc/needrestart/restart.d/systemd-manager
+ systemctl restart fail2ban.service multipathd.service nginx.service packagekit.service php8.3-fpm.service polkit.service rsyslog.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-udevd.service udisks2.service
+
+Service restarts being deferred:
+ systemctl restart ModemManager.service
+ /etc/needrestart/restart.d/dbus.service
+ systemctl restart docker.service
+ systemctl restart networkd-dispatcher.service
+ systemctl restart systemd-logind.service
+ systemctl restart walinuxagent.service
+
+No containers need to be restarted.
+
+User sessions running outdated binaries:
+ runner @ user manager service: systemd[1173]
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+  ✔ Asterisk 22.11.0 installé (sons en français inclus)
+
+[5/9] Base de données
+  ✔ PostgreSQL prêt (une base par PBX client)
+
+[6/9] Console web
+  … installation des modules de la console (1 à 2 minutes)
+  ✔ Code installé ; une console par PBX client (callikoe-host)
+
+[7/9] Réseau et accès web
+  ✔ Configuration du serveur vérifiée (hub.e2e.invalid)
+  ✔ Aiguilleur SIP actif (5060, IP 10.1.1.219)
+  ✔ Serveur web prêt
+  ✔ Protection anti-intrusion sur l'aiguilleur SIP
+  ✔ Téléphonie acceptée seulement depuis les pays autorisés (FR)
+  ⚠ hub.e2e.invalid ne pointe pas encore vers 10.1.1.219 : console du serveur en HTTP en attendant ; relance l'installeur une fois le DNS en place pour le certificat.
+curl: (7) Failed to connect to 127.0.0.1 port 8800 after 0 ms: Couldn't connect to server
+  ✔ Console du serveur : http://hub.e2e.invalid
+  ✔ IP publique 10.1.1.219
+
+[8/9] Sécurité : pare-feu et fail2ban
+  ⚠ Pare-feu non configuré (PBXM_NO_FIREWALL=1)
+  ✔ fail2ban actif (réglages : console › Sécurité)
+
+[9/9] Assistant de configuration
+curl: (7) Failed to connect to 127.0.0.1 port 8800 after 0 ms: Couldn't connect to server
+
+✔ Serveur multi-tenant prêt en 5 min 13 s
+
+  ⚠ Pare-feu non configuré (PBXM_NO_FIREWALL=1)
+
+  PBX clients : 0
+
+  Console du serveur : http://hub.e2e.invalid
+  Première connexion (compte super administrateur) : http://hub.e2e.invalid/?jeton=c1958310dda02b0d22ee40bada538b3b
+
+  Ensuite : connecte-toi à la console du serveur et crée les PBX clients (bouton « Nouveau PBX »).
+

@@ -1,0 +1,86 @@
+Config de test : a.e2e.invalid · PBXM-95MM-6RUX-PVSB-V9XD
+Config de test : b.e2e.invalid · PBXM-54DY-D94A-4T62-5Q28
+Config de test : hub.e2e.invalid · PBXM-7BVA-EEK4-XEXZ-RULT
+✔ Installation refusée sans la configuration du serveur (commande incomplète)
+✔ install.sh --multi-tenant --serveur terminé en 313 s
+✔ Lien de première connexion à la console du serveur affiché
+✔ Aiguilleur SIP (Kamailio) actif sur 10.1.1.219:5060
+✔ Anti-intrusion SIP actif (bannit seulement le SIP : SSH et web restent joignables)
+✔ Pays autorisés : téléphonie acceptée seulement depuis la France (par défaut), opérateurs et réseau local toujours acceptés
+✔ Console du serveur active
+✔ Pas d'Asterisk global : un moteur par client
+✔ Web : hub.e2e.invalid → console du serveur
+✔ Console du serveur : mauvais lien de première connexion refusé
+✔ Console du serveur : super administrateur créé (double authentification, codes de secours)
+✔ Console du serveur : rien sans connexion
+✔ Connexion à la console du serveur (mot de passe + code)
+✔ Pays autorisés : France + Belgique et une adresse toujours acceptée, réglés depuis la console du serveur
+✔ Création bloquée tant que la clé de signature n'est pas installée
+✔ Clé de signature : code de double authentification exigé
+✔ Clé de signature étrangère refusée (pas celle d'IRT)
+✔ Clé de signature des licences installée sur la console du serveur
+✔ Clé de signature lisible par la console du serveur seulement
+✔ PBX clia créé depuis la console du serveur (formulaire, licence signée sur place)
+✔ PBX clib créé depuis la console du serveur (formulaire, licence signée sur place)
+✔ Adresse déjà utilisée par un autre PBX refusée
+✔ Fichier de configuration signé de cli a téléchargeable (réinstallation)
+✔ Console du serveur : 2 PBX listés
+✔ Tableau de bord : 2 PBX en ligne, 16 appels simultanés autorisés au total
+     PBX clients : 2
+     1   clia                     a.e2e.invalid                          moteur active   console active
+     2   clib                     b.e2e.invalid                          moteur active   console active
+✔ clia : moteur et console actifs
+✔ clib : moteur et console actifs
+✔ Isolation : le compte de cli a ne lit pas les secrets de cli b
+✔ Isolation : un PBX ne lit pas la clé de la console du serveur
+✔ Isolation : la base de cli b refuse le compte de cli a
+✔ Isolation : la base de la console du serveur refuse les PBX
+✔ cli a ouvre sa propre base
+✔ Isolation : la console de cli a ne peut pas configurer cli b (sudo)
+✔ Web : a.e2e.invalid → console de cli a
+✔ Web : adresse inconnue → 404
+✔ PBX client : assistant de configuration fermé (configuré par la console du serveur)
+✔ clia ouvert depuis la console du serveur (sans se reconnecter)
+✔ Lien d'ouverture de clia utilisable une seule fois
+✔ Lien d'ouverture de cli a refusé par cli b
+✔ clia : compte IRT administrateur, liste des PBX pour passer de l'un à l'autre
+✔ clia : poste 201 créé
+✔ clia : trunk « op » créé (même nom que chez l'autre client)
+✔ clib ouvert depuis la console du serveur (sans se reconnecter)
+✔ Lien d'ouverture de clib utilisable une seule fois
+✔ clib : compte IRT administrateur, liste des PBX pour passer de l'un à l'autre
+✔ clib : poste 201 créé
+✔ clib : trunk « op » créé (même nom que chez l'autre client)
+✔ cli a : invitation d'un compte client (accès restreint) depuis la console du PBX
+   tru key_name(str) key_type(int) value_type(int) key_value(str) expires(int)
+   tru +33465001540:0:0:sip\:127.0.0.1\:6001:0
+   tru +33465001550:0:0:sip\:127.0.0.1\:6002:0
+   tru 0465001540:0:0:sip\:127.0.0.1\:6001:0
+   tru 0465001550:0:0:sip\:127.0.0.1\:6002:0
+   tru 33465001540:0:0:sip\:127.0.0.1\:6001:0
+   tru 33465001550:0:0:sip\:127.0.0.1\:6002:0
+   tru cx2bde85a8b94f5746:0:0:sip\:127.0.0.1\:6001:0
+   tru cx9ee9a44e4aacc6d1:0:0:sip\:127.0.0.1\:6002:0
+✔ Aiguilleur : compte de trunk et SDA de chaque client publiés
+✔ Poste 201 de cli a enregistré (via l'aiguilleur, domaine a.e2e.invalid)
+✔ Poste 201 de cli b enregistré (même numéro, autre PBX)
+✔ Chaque poste est connu de son seul PBX
+✔ Console de cli a : adresse réelle du poste 201 (notée par l'aiguilleur)
+✔ Poste de cli a refusé par cli b (identifiants d'un autre PBX)
+✔ Échec noté avec l'adresse réelle du poste pirate (fail2ban)
+✔ Réseaux autorisés de cli b : poste hors réseau refusé par l'aiguilleur
+✔ Réseaux autorisés retirés : poste de cli b de nouveau enregistré
+✔ Protection anti-intrusion réglée depuis la console du serveur (6 échecs, 45 min, liste blanche)
+✔ Console d'un PBX : blocage d'adresse refusé (géré par la console du serveur)
+✔ Console du serveur › Téléphonie : mot de passe refusé affiché (poste 201, adresse réelle)
+✔ Surveillance : appel vers l'étranger de cli a affiché dans la console du serveur et marqué vérifié
+✔ Téléphonie : bloquer puis débloquer une adresse depuis la console du serveur
+✔ Trunks des deux clients enregistrés chez l'opérateur (via l'aiguilleur)
+✔ Contact du trunk = jeton propre au client
+✔ Entrant sur le trunk de cli a → poste 201 de cli a uniquement
+✔ Son de l'opérateur reçu par le poste de cli a (205 paquets RTP, directs, sans passer par l'aiguilleur)
+✔ Entrant sur le trunk de cli b → poste 201 de cli b uniquement
+✔ Entrant vers la SDA de cli b depuis l'adresse de l'opérateur → poste 201 de cli b
+✔ Appel vers la SDA de cli a sans le jeton de son trunk : refusé
+LASTOUT=none
+✖ sortant A

@@ -1,0 +1,167 @@
+== Pendant l'appel entrant A (PBX cli a)
+PJSIP/201-00000001!from-internal!!1!Up!AppDial!(Outgoing Line)!201!!!3!3!0f0ed982-abef-42ae-9b9d-3d1cc30e66c5!1793118219.1
+PJSIP/op-00000000!inbound!s!26!Up!Dial!PJSIP/201&PJSIP/201-web&Local/201@cx-app/n,45,tb(pickup-mark^s^1)!anonymous!!!3!3!0f0ed982-abef-42ae-9b9d-3d1cc30e66c5!1793118219.0
+Bridge-ID                            Name                                 Chans Type            Technology      Duration
+0f0ed982-abef-42ae-9b9d-3d1cc30e66c5 <unknown>                                2 basic           simple_bridge   00:00:04
+
+                                             ...........Receive......... .........Transmit..........
+ BridgeId ChannelId ........ UpTime.. Codec.   Count    Lost Pct  Jitter   Count    Lost Pct  Jitter RTT....
+ ===========================================================================================================
+
+ 0f0ed982 201-00000001       00:00:04 alaw        0       0    0   0.000    199       0    0   0.000   0.000
+ 0f0ed982 op-00000000        00:00:04 alaw      199       0    0   0.000      0       0    0   0.000   0.000
+
+Objects found: 2
+
+          State: Up (6)
+  NativeFormats: (alaw)
+    WriteFormat: ulaw
+     ReadFormat: alaw
+ WriteTranscode: Yes (ulaw@8000)->(alaw@8000)
+  ReadTranscode: No 
+      Bridge ID: 0f0ed982-abef-42ae-9b9d-3d1cc30e66c5
+    Application: AppDial
+           Data: (Outgoing Line)
+BRIDGEPVTCALLID=8c2afee1-0c82-48c7-9093-3155dc0d878d
+BRIDGEPEER=PJSIP/op-00000000
+level 1: lastdata=(Outgoing Line)
+    State: sendrecv
+    Metadata:
+          State: Up (6)
+  NativeFormats: (ulaw)
+    WriteFormat: alaw
+     ReadFormat: ulaw
+ WriteTranscode: Yes (alaw@8000)->(ulaw@8000)
+  ReadTranscode: Yes (alaw@8000)->(ulaw@8000)
+      Bridge ID: 0f0ed982-abef-42ae-9b9d-3d1cc30e66c5
+    Application: Dial
+           Data: PJSIP/201&PJSIP/201-web&Local/201@cx-app/n,45,tb(pickup-mark^s^1)
+BRIDGEPVTCALLID=5b488678-fb36-453a-a47d-e1532a02eb0e
+BRIDGEPEER=PJSIP/201-00000001
+level 1: lastdata=PJSIP/201&PJSIP/201-web&Local/201@cx-app/n,45,tb(pickup-mark^s^1)
+level 2: lastdata=PJSIP/201&PJSIP/201-web&Local/201@cx-app/n,45,tb(pickup-mark^s^1)
+    State: sendrecv
+    Metadata:
+== Poste pa
+PJSIP/pbx-00000000!answer!201!3!Up!Wait!4!anonymous!!!3!4!!1793118219.0
+== RTP pendant l'appel entrant A (flux : nombre de paquets)
+    205 127.0.0.50.30090 > 10.1.1.219.10082:
+    205 127.0.0.1.10118 > 127.0.0.11.31034:
+      2 10.1.1.219.10118 > 74.125.250.129.19302:
+      2 10.1.1.219.10082 > 74.125.250.129.19302:
+      1 74.125.250.129.19302 > 10.1.1.219.10118:
+      1 74.125.250.129.19302 > 10.1.1.219.10082:
+      1   
+== tables de l'aiguilleur
+			name: 33465001540
+			name: 33465001550
+			name: cx2bde85a8b94f5746
+			name: 0465001540
+			name: cx9ee9a44e4aacc6d1
+			name: 0465001550
+			name: +33465001540
+			name: +33465001550
+Oct 27 16:23:16 runnervmtai0g callikoe-aiguilleur[15440]: rechargement incomplet : redémarrage de l'aiguilleur
+Oct 27 16:23:16 runnervmtai0g callikoe-aiguilleur[15517]: tables rechargées
+Oct 27 16:23:16 runnervmtai0g callikoe-aiguilleur[15575]: tables rechargées
+Oct 27 16:23:32 runnervmtai0g callikoe-aiguilleur[15982]: tables rechargées
+Oct 27 16:23:32 runnervmtai0g callikoe-aiguilleur[16037]: tables rechargées
+Oct 27 16:23:32 runnervmtai0g callikoe-aiguilleur[16122]: table acl : Ok. Htable reloaded. (chargé 1 / attendu 0)
+Oct 27 16:23:32 runnervmtai0g callikoe-aiguilleur[16123]: rechargement incomplet : redémarrage de l'aiguilleur
+Oct 27 16:23:32 runnervmtai0g callikoe-aiguilleur[16200]: tables rechargées
+total 4
+drwxrwx---  2 kamailio kamailio   80 Oct 27 16:23 .
+drwxr-xr-x 38 root     root     1160 Oct 27 16:23 ..
+-rw-r--r--  1 kamailio kamailio    6 Oct 27 16:23 kamailio.pid
+srw-------  1 kamailio kamailio    0 Oct 27 16:23 kamailio_ctl
+User=kamailio
+Environment='CFGFILE=/etc/kamailio/kamailio.cfg'
+Environment='SHM_MEMORY=64'
+Environment='PKG_MEMORY=8'
+EnvironmentFile=-/etc/default/kamailio
+EnvironmentFile=-/etc/default/kamailio.d/*
+ExecStart=/usr/sbin/kamailio -P /run/kamailio/kamailio.pid -f $CFGFILE -m $SHM_MEMORY -M $PKG_MEMORY
+Oct 27 16:23:24 runnervmtai0g /usr/sbin/kamailio[15449]: WARNING: {2 45975 REGISTER 2923fa93-2c88-4afb-8169-42bac0acead0} <script>: CALLIKOE-AUTHFAIL 127.0.0.13 REGISTER sip:201@b.e2e.invalid
+Oct 27 16:23:32 runnervmtai0g /usr/sbin/kamailio[15447]: NOTICE: {1 11166 REGISTER caff663b-106e-4eca-8daa-43dc7197d5b1} <script>: CALLIKOE-ACL 127.0.0.12 REGISTER b.e2e.invalid
+Oct 27 16:24:07 runnervmtai0g /usr/sbin/kamailio[16132]: WARNING: {2 13982 INVITE b4393239-b601-466d-a40a-e590b151b1e6} <script>: CALLIKOE-AUTHFAIL 127.0.0.13 INVITE sip:201@b.e2e.invalid
+== SIP vu par clia
+[2026-10-27 16:23:44] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP response (438 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 200 OK
+To: "Anonymous" <sip:anonymous@anonymous.invalid>;tag=f81db3a6-2320-4cff-b786-ddddb8ce82bc
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (1212 bytes) from UDP:127.0.0.2:5060 --->
+INVITE sip:0412345678@a.e2e.invalid SIP/2.0
+To: <sip:0412345678@a.e2e.invalid>
+Contact: <sip:201@127.0.0.11:5080>
+Supported: 100rel, timer, replaces, norefersub, histinfo
+[2026-10-27 16:24:13] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP response (846 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:0412345678@a.e2e.invalid>;tag=z9hG4bK84ef.7c12570209e27df633eb132066fff36e.0
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (398 bytes) from UDP:127.0.0.2:5060 --->
+To: <sip:0412345678@a.e2e.invalid>;tag=z9hG4bK84ef.7c12570209e27df633eb132066fff36e.0
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (1517 bytes) from UDP:127.0.0.2:5060 --->
+INVITE sip:0412345678@a.e2e.invalid SIP/2.0
+To: <sip:0412345678@a.e2e.invalid>
+Contact: <sip:201@127.0.0.11:5080>
+Supported: 100rel, timer, replaces, norefersub, histinfo
+[2026-10-27 16:24:13] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP response (643 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 100 Trying
+To: <sip:0412345678@a.e2e.invalid>
+[2026-10-27 16:24:13] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP response (710 bytes) to UDP:127.0.0.2:5060 --->
+SIP/2.0 404 Not Found
+To: <sip:0412345678@a.e2e.invalid>;tag=0b7a8693-642d-467c-abc2-3ae1fa793b33
+[2026-10-27 16:24:13] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP request (388 bytes) from UDP:127.0.0.2:5060 --->
+To: <sip:0412345678@a.e2e.invalid>;tag=0b7a8693-642d-467c-abc2-3ae1fa793b33
+[2026-10-27 16:24:14] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP request (418 bytes) to UDP:127.0.0.2:5060 --->
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+Route: <sip:127.0.0.2:5060;lr>
+[2026-10-27 16:24:14] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP response (715 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:127.0.0.50>;tag=z9hG4bKf5b8.96aad965bd5be3d100293ef3d554f28e.0
+[2026-10-27 16:24:14] VERBOSE[13665] res_pjsip_logger.c: <--- Transmitting SIP request (709 bytes) to UDP:127.0.0.2:5060 --->
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+Route: <sip:127.0.0.2:5060;lr>
+[2026-10-27 16:24:14] VERBOSE[13670] res_pjsip_logger.c: <--- Received SIP response (715 bytes) from UDP:127.0.0.2:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:127.0.0.50>;tag=z9hG4bK06b8.b532b6ef67ddec54c1258999845fe675.0
+[2026-10-27 16:23:39] NOTICE[16492][C-00000001] app_dial.c: Unable to create channel of type 'PJSIP' (cause 3 - No route to destination)
+[2026-10-27 16:23:44] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:23:44] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:24:13] NOTICE[16721][C-00000002] app_dial.c: Unable to create channel of type 'PJSIP' (cause 3 - No route to destination)
+[2026-10-27 16:24:13] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:24:14] WARNING[13665] res_pjsip_outbound_authenticator_digest.c: noendpoint:127.0.0.2: Authentication credentials not accepted by server. Credential failed to authenticate (PJSIP_EFAILE
+[2026-10-27 16:23:44] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:23:44] ERROR[13658] cdr_csv.c: Unable to open file /var/log/callikoe/clia//cdr-csv//Master.csv : No such file or directory
+[2026-10-27 16:23:44] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:24:13] ERROR[13665] res_pjsip.c: Endpoint 'op': Could not create dialog to invalid URI 'op'.  Is endpoint registered and reachable?
+[2026-10-27 16:24:13] ERROR[13665] chan_pjsip.c: Failed to create outgoing session to endpoint 'op'
+[2026-10-27 16:24:13] ERROR[13658] cdr_csv.c: Unable to open file /var/log/callikoe/clia//cdr-csv//Master.csv : No such file or directory
+[2026-10-27 16:24:13] WARNING[13658] cdr_csv.c: Unable to write CSV record to master '/var/log/callikoe/clia//cdr-csv//Master.csv' : No such file or directory
+[2026-10-27 16:24:14] WARNING[13665] res_pjsip_outbound_authenticator_digest.c: noendpoint:127.0.0.2: Authentication credentials not accepted by server. Credential failed to authenticate (PJSIP_EFAILE
+== opérateur simulé
+To: "Anonymous" <sip:anonymous@anonymous.invalid>;tag=c015a5fa-d2ac-4ba1-b18e-25d066532b9c
+[Oct 27 16:24:14] VERBOSE[15636] res_pjsip_logger.c: <--- Received SIP request (664 bytes) from UDP:10.1.1.219:5060 --->
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+[Oct 27 16:24:14] VERBOSE[15631] res_pjsip_logger.c: <--- Transmitting SIP response (829 bytes) to UDP:10.1.1.219:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:127.0.0.50>;tag=z9hG4bKf5b8.96aad965bd5be3d100293ef3d554f28e.0
+[Oct 27 16:24:14] VERBOSE[15636] res_pjsip_logger.c: <--- Received SIP request (955 bytes) from UDP:10.1.1.219:5060 --->
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+[Oct 27 16:24:14] VERBOSE[15631] res_pjsip_logger.c: <--- Transmitting SIP response (829 bytes) to UDP:10.1.1.219:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:127.0.0.50>;tag=z9hG4bK06b8.b532b6ef67ddec54c1258999845fe675.0
+[Oct 27 16:24:17] VERBOSE[15636] res_pjsip_logger.c: <--- Received SIP request (664 bytes) from UDP:10.1.1.219:5060 --->
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+[Oct 27 16:24:17] VERBOSE[15631] res_pjsip_logger.c: <--- Transmitting SIP response (829 bytes) to UDP:10.1.1.219:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:127.0.0.50>;tag=z9hG4bKd521.ed690f8aa82537ea1e2cffdc814f44ab.0
+[Oct 27 16:24:17] VERBOSE[15636] res_pjsip_logger.c: <--- Received SIP request (955 bytes) from UDP:10.1.1.219:5060 --->
+To: <sip:127.0.0.50>
+Contact: <sip:op@10.1.1.219:5060>
+[Oct 27 16:24:17] VERBOSE[15631] res_pjsip_logger.c: <--- Transmitting SIP response (829 bytes) to UDP:10.1.1.219:5060 --->
+SIP/2.0 401 Unauthorized
+To: <sip:127.0.0.50>;tag=z9hG4bKe521.8c1db4d7e94979f07506391a735ddce1.0

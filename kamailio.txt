@@ -1,0 +1,149 @@
+Oct 27 16:19:47 runnervmtai0g systemd[1]: Starting kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]: INFO: <core> [core/tcp_main.c:5205]: init_tcp(): using epoll_lt as the io watch method (auto detected)
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]: Listening on
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              udp: 127.0.0.1:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              udp: 10.1.1.219:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              udp: 172.17.0.1:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              tcp: 127.0.0.1:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              tcp: 10.1.1.219:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              tcp: 172.17.0.1:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]: Aliases:
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              tcp: runnervmtai0g:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              tcp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              tcp: localhost:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              udp: runnervmtai0g:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              udp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:19:47 runnervmtai0g kamailio[9643]:              udp: localhost:5060
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: rr [../outbound/api.h:53]: ob_load_api(): unable to import bind_ob - maybe module is not loaded
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: rr [rr_mod.c:185]: mod_init(): outbound module not available
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [main.c:3189]: main(): processes (at least): 41 - shm size: 67108864 - pkg size: 8388608
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [core/udp_server.c:163]: probe_max_receive_buffer(): SO_RCVBUF is initially 1048576 for fd 10
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [core/udp_server.c:233]: probe_max_receive_buffer(): SO_RCVBUF is finally 1048576 on fd 10
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [core/udp_server.c:163]: probe_max_receive_buffer(): SO_RCVBUF is initially 1048576 for fd 11
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [core/udp_server.c:233]: probe_max_receive_buffer(): SO_RCVBUF is finally 1048576 on fd 11
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [core/udp_server.c:163]: probe_max_receive_buffer(): SO_RCVBUF is initially 1048576 for fd 12
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [core/udp_server.c:233]: probe_max_receive_buffer(): SO_RCVBUF is finally 1048576 on fd 12
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9674]: INFO: jsonrpcs [jsonrpcs_sock.c:471]: jsonrpc_dgram_process(): a new child 0/9674
+Oct 27 16:19:47 runnervmtai0g /usr/sbin/kamailio[9676]: INFO: ctl [io_listener.c:215]: io_listen_loop(): io_listen_loop:  using epoll_lt io watch method (config)
+Oct 27 16:19:47 runnervmtai0g systemd[1]: Started kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9645]: NOTICE: <core> [main.c:750]: handle_sigs(): Thank you for flying kamailio!!!
+Oct 27 16:21:28 runnervmtai0g systemd[1]: Stopping kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9646]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9684]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9685]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9682]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9680]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9676]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9678]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9675]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9647]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9651]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9668]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9652]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9662]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9681]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9653]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9658]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9667]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9666]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9654]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9659]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9655]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9661]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9665]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9674]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9664]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9656]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9663]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9673]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9672]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9671]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9670]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9669]: INFO: <core> [main.c:874]: sig_usr(): signal 15 received
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[9645]: INFO: <core> [core/sctp_core.c:53]: sctp_core_destroy(): SCTP API not initialized
+Oct 27 16:21:28 runnervmtai0g systemd[1]: kamailio.service: Deactivated successfully.
+Oct 27 16:21:28 runnervmtai0g systemd[1]: Stopped kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:21:28 runnervmtai0g systemd[1]: Starting kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]: Listening on
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              udp: 10.1.1.219:5060
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              udp: 127.0.0.2:5060
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              tcp: 10.1.1.219:5060
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              tcp: 127.0.0.2:5060
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]: Aliases:
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              tcp: runnervmtai0g:5060
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              tcp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              udp: runnervmtai0g:5060
+Oct 27 16:21:28 runnervmtai0g kamailio[10964]:              udp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:21:28 runnervmtai0g /usr/sbin/kamailio[10966]: WARNING: tm [tm.c:823]: mod_init(): reparse_on_dns_failover is enabled on a multihomed host -- check the readme of tm module!
+Oct 27 16:21:28 runnervmtai0g systemd[1]: Started kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:21:38 runnervmtai0g /usr/sbin/kamailio[10966]: NOTICE: <core> [main.c:750]: handle_sigs(): Thank you for flying kamailio!!!
+Oct 27 16:21:38 runnervmtai0g systemd[1]: Stopping kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:21:38 runnervmtai0g systemd[1]: kamailio.service: Deactivated successfully.
+Oct 27 16:21:38 runnervmtai0g systemd[1]: Stopped kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:21:38 runnervmtai0g systemd[1]: Starting kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]: Listening on
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              udp: 10.1.1.219:5060
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              udp: 127.0.0.2:5060
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              tcp: 10.1.1.219:5060
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              tcp: 127.0.0.2:5060
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]: Aliases:
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              tcp: runnervmtai0g:5060
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              tcp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              udp: runnervmtai0g:5060
+Oct 27 16:21:38 runnervmtai0g kamailio[12052]:              udp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:21:38 runnervmtai0g /usr/sbin/kamailio[12054]: WARNING: tm [tm.c:823]: mod_init(): reparse_on_dns_failover is enabled on a multihomed host -- check the readme of tm module!
+Oct 27 16:21:38 runnervmtai0g systemd[1]: Started kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:23:15 runnervmtai0g /usr/sbin/kamailio[12054]: NOTICE: <core> [main.c:750]: handle_sigs(): Thank you for flying kamailio!!!
+Oct 27 16:23:15 runnervmtai0g systemd[1]: Stopping kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:23:15 runnervmtai0g systemd[1]: kamailio.service: Deactivated successfully.
+Oct 27 16:23:15 runnervmtai0g systemd[1]: Stopped kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:23:15 runnervmtai0g systemd[1]: Starting kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]: Listening on
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              udp: 10.1.1.219:5060
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              udp: 127.0.0.2:5060
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              tcp: 10.1.1.219:5060
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              tcp: 127.0.0.2:5060
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]: Aliases:
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              tcp: runnervmtai0g:5060
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              tcp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              udp: runnervmtai0g:5060
+Oct 27 16:23:15 runnervmtai0g kamailio[15128]:              udp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:23:15 runnervmtai0g /usr/sbin/kamailio[15130]: WARNING: tm [tm.c:823]: mod_init(): reparse_on_dns_failover is enabled on a multihomed host -- check the readme of tm module!
+Oct 27 16:23:15 runnervmtai0g systemd[1]: Started kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:23:16 runnervmtai0g /usr/sbin/kamailio[15130]: NOTICE: <core> [main.c:750]: handle_sigs(): Thank you for flying kamailio!!!
+Oct 27 16:23:16 runnervmtai0g systemd[1]: Stopping kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:23:16 runnervmtai0g systemd[1]: kamailio.service: Deactivated successfully.
+Oct 27 16:23:16 runnervmtai0g systemd[1]: Stopped kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:23:16 runnervmtai0g systemd[1]: Starting kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]: Listening on
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              udp: 10.1.1.219:5060
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              udp: 127.0.0.2:5060
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              tcp: 10.1.1.219:5060
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              tcp: 127.0.0.2:5060
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]: Aliases:
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              tcp: runnervmtai0g:5060
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              tcp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              udp: runnervmtai0g:5060
+Oct 27 16:23:16 runnervmtai0g kamailio[15442]:              udp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:23:16 runnervmtai0g /usr/sbin/kamailio[15444]: WARNING: tm [tm.c:823]: mod_init(): reparse_on_dns_failover is enabled on a multihomed host -- check the readme of tm module!
+Oct 27 16:23:16 runnervmtai0g systemd[1]: Started kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:23:24 runnervmtai0g /usr/sbin/kamailio[15449]: WARNING: {2 45975 REGISTER 2923fa93-2c88-4afb-8169-42bac0acead0} <script>: CALLIKOE-AUTHFAIL 127.0.0.13 REGISTER sip:201@b.e2e.invalid
+Oct 27 16:23:32 runnervmtai0g /usr/sbin/kamailio[15447]: NOTICE: {1 11166 REGISTER caff663b-106e-4eca-8daa-43dc7197d5b1} <script>: CALLIKOE-ACL 127.0.0.12 REGISTER b.e2e.invalid
+Oct 27 16:23:32 runnervmtai0g /usr/sbin/kamailio[15444]: NOTICE: <core> [main.c:750]: handle_sigs(): Thank you for flying kamailio!!!
+Oct 27 16:23:32 runnervmtai0g systemd[1]: Stopping kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:23:32 runnervmtai0g systemd[1]: kamailio.service: Deactivated successfully.
+Oct 27 16:23:32 runnervmtai0g systemd[1]: Stopped kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:23:32 runnervmtai0g systemd[1]: Starting kamailio.service - Kamailio - the Open Source SIP Server...
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]: Listening on
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              udp: 10.1.1.219:5060
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              udp: 127.0.0.2:5060
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              tcp: 10.1.1.219:5060
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              tcp: 127.0.0.2:5060
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]: Aliases:
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              tcp: runnervmtai0g:5060
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              tcp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              udp: runnervmtai0g:5060
+Oct 27 16:23:32 runnervmtai0g kamailio[16125]:              udp: runnervmtai0g.kxd4yhz2yyuujhsnhtmly0q5oc.dx.internal.cloudapp.net:5060
+Oct 27 16:23:32 runnervmtai0g /usr/sbin/kamailio[16127]: WARNING: tm [tm.c:823]: mod_init(): reparse_on_dns_failover is enabled on a multihomed host -- check the readme of tm module!
+Oct 27 16:23:32 runnervmtai0g systemd[1]: Started kamailio.service - Kamailio - the Open Source SIP Server.
+Oct 27 16:24:07 runnervmtai0g /usr/sbin/kamailio[16132]: WARNING: {2 13982 INVITE b4393239-b601-466d-a40a-e590b151b1e6} <script>: CALLIKOE-AUTHFAIL 127.0.0.13 INVITE sip:201@b.e2e.invalid
