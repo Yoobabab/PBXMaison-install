@@ -1798,11 +1798,15 @@ async function renderContacts(editId) {
   const exts = editing ? (await api("GET", "/api/extensions")).extensions : [];
   const vis = structuredClone(c.visibility || { scope: "all" });
   const visLabel = (v) => !v || v.scope === "all" ? "" : v.scope === "users" ? `Privé : ${v.users.join(", ")}` : `Rôles : ${v.roles.map((r) => ROLES.find((x) => x.id === r)?.name || r).join(", ")}`;
+  const cid = await api("GET", "/api/cid-display").catch(() => null);
   app.innerHTML = `${takeFlash()}<div class="bar"><div class="grow"><h1>Annuaire</h1><p class="sub" style="margin:0">Contacts de l'entreprise.</p></div>
     <a class="btn ghost" href="/api/contacts.csv">Exporter</a><button class="btn ghost" id="imp">Importer un CSV</button><a class="btn" href="#/annuaire/nouveau">+ Ajouter un contact</a></div>
     <input type="file" id="impf" accept=".csv,text/csv" hidden>
     <div class="kpis">${[["Contacts", all.length, "dans l'annuaire"], ["Sociétés", new Set(all.map((x) => x.company).filter(Boolean)).size, ""], ["Numéros", all.reduce((n, x) => n + x.phones.length, 0, ), "nom affiché quand ils appellent"]]
       .map(([k, v, s2]) => `<div class="kpi"><div><div class="k">${k}</div><div class="v">${v}</div>${s2 ? `<div class="s">${s2}</div>` : ""}</div></div>`).join("")}</div>
+    ${cid ? `<div class="panel cidbox"><label>Sur un appel entrant, les téléphones affichent
+      <select id="ciddisp">${Object.entries(cid.choices).map(([k, l]) => `<option value="${k}" ${cid.value === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+      <span class="hint">Pour tous les postes, softphones et l'appli. Un numéro inconnu de l'annuaire s'affiche comme l'envoie l'opérateur.</span><span id="cidok" class="s"></span></div>` : ""}
     <div id="impbox"></div>
     ${editing ? `<div class="panel" style="margin-bottom:18px"><div class="ph"><h2>${cur ? "Modifier le contact" : "Nouveau contact"}</h2></div>
       <form id="cf" class="grid" novalidate>
@@ -1826,6 +1830,10 @@ async function renderContacts(editId) {
   let t; const h0 = location.hash;
   $("#bq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { if (location.hash !== h0) return; sessionStorage.setItem("pbxm_book_q", e.target.value); resetPage("book"); renderContacts(editId).then(() => { const i = $("#bq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
   $("#imp").onclick = () => $("#impf").click();
+  $("#ciddisp")?.addEventListener("change", async (e) => {
+    try { await api("PUT", "/api/cid-display", { value: e.target.value }); $("#cidok").textContent = "Enregistré, appliqué tout de suite."; }
+    catch (err) { $("#cidok").textContent = err.message; }
+  });
   $("#impf").onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     const buf = await f.arrayBuffer();

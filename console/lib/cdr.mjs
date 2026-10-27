@@ -4,9 +4,18 @@
  */
 const endpointOf = (ch) => /^PJSIP\/(.+)-[0-9a-f]+$/.exec(ch || "")?.[1] || "";
 const extOf = (ch) => { const e = endpointOf(ch); return /^\d{3}(-web|-app)?$/.test(e) ? e.slice(0, 3) : ""; };
-const parseClid = (clid) => {
+export const parseClid = (clid) => {
   const m = String(clid || "").match(/^"?([^"<]*)"?\s*<([^>]*)>$/);
-  return m ? { name: m[1].trim(), number: m[2].trim() } : { name: "", number: String(clid || "") };
+  if (!m) return { name: "", number: String(clid || "") };
+  const number = m[2].trim();
+  let name = m[1].trim();
+  // Affichage des appels entrants (Annuaire) : « Nom - numéro », « numéro - Nom » ou numéro seul → le nom seul
+  if (number) {
+    if (name === number) name = "";
+    else if (name.endsWith(` - ${number}`)) name = name.slice(0, -(number.length + 3));
+    else if (name.startsWith(`${number} - `)) name = name.slice(number.length + 3);
+  }
+  return { name, number };
 };
 
 /** rows : lignes CDR d'un même linkedid (ou mélangées) → appels [{ id, start, direction, from, to, … }] */

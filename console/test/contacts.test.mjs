@@ -27,6 +27,13 @@ test("annuaire Yealink et nom de l'appelant", () => {
   const d = buildPhonebookDialplan(contacts);
   assert.match(d, /exten => 0478123456,1,Set\(CALLERID\(name\)=Jean Dupont Boulangerie & Co\)/);
   assert.match(d, /exten => _X\.,1,Return\(\)/);
+  assert.match(d, /exten => 0478123456,1,Set\(CALLERID\(name\)=Jean Dupont Boulangerie & Co\)\n same => n,Set\(__CXNAME=Jean Dupont Boulangerie & Co\)\n same => n,Return\(\)/);
+});
+
+test("annuaire : affichage des appels entrants", async () => {
+  const { validCidDisplay, CID_DISPLAYS } = await import("../lib/contacts.mjs");
+  assert.deepEqual(Object.keys(CID_DISPLAYS), ["name_number", "number_name", "name", "number"]);
+  assert.equal(validCidDisplay("number_name"), "number_name"); assert.equal(validCidDisplay("x"), "name"); assert.equal(validCidDisplay(undefined), "name");
 });
 
 test("annuaire : contact visible par tout le monde, certains postes ou certains rôles", async () => {

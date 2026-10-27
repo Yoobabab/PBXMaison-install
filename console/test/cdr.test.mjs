@@ -43,3 +43,12 @@ test("entrant manqué puis messagerie ; sortant ; interne", () => {
   assert.equal(forUser(calls, "203")[0].number, "202");
   assert.equal(calls[0].id, "L4"); // plus récent d'abord
 });
+
+test("journal : nom de l'appelant sans le numéro ajouté pour l'affichage", async () => {
+  const { parseClid } = await import("../lib/cdr.mjs");
+  assert.deepEqual(parseClid('"Jean Dupont - 0612345678" <0612345678>'), { name: "Jean Dupont", number: "0612345678" });
+  assert.deepEqual(parseClid('"0612345678 - Jean Dupont" <0612345678>'), { name: "Jean Dupont", number: "0612345678" });
+  assert.deepEqual(parseClid('"0612345678" <0612345678>'), { name: "", number: "0612345678" });
+  assert.deepEqual(parseClid('"Jean - Paul" <0612345678>'), { name: "Jean - Paul", number: "0612345678" });
+  assert.deepEqual(parseClid("0612345678"), { name: "", number: "0612345678" });
+});

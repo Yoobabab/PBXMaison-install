@@ -101,6 +101,10 @@ export function yealinkPhonebook(users, contacts) {
 }
 
 /** Contexte [phonebook] : nom de l'appelant à partir de son numéro (appels entrants). */
+/** Ce qu'affiche un téléphone sur un appel entrant d'un contact de l'annuaire */
+export const CID_DISPLAYS = { name_number: "Nom du contact puis numéro", number_name: "Numéro puis nom du contact", name: "Nom du contact seul", number: "Numéro seul" };
+export const validCidDisplay = (v) => (CID_DISPLAYS[v] ? v : "name");
+
 export function buildPhonebookDialplan(contacts) {
   const L = ["", "; Annuaire : nom affiché pour les appels entrants (écrit par la console)", "[phonebook]"];
   const seen = new Set();
@@ -109,7 +113,7 @@ export function buildPhonebookDialplan(contacts) {
     for (const p of c.phones) {
       if (!/^\+?\d{6,15}$/.test(p.number) || seen.has(p.number)) continue;
       seen.add(p.number);
-      L.push(`exten => ${p.number.replace("+", "")},1,Set(CALLERID(name)=${name})`, " same => n,Return()");
+      L.push(`exten => ${p.number.replace("+", "")},1,Set(CALLERID(name)=${name})`, ` same => n,Set(__CXNAME=${name})`, " same => n,Return()");
     }
   }
   L.push("exten => _X.,1,Return()", "");

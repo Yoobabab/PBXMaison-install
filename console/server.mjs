@@ -1328,6 +1328,9 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.list(String(req.params.id)));
   app.post("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.create(String(req.params.id), req.body || {}, currentUser(req).email));
   app.delete("/api/absences/:id", { preHandler: requireUser }, async (req) => absences.remove(req.params.id, currentUser(req).email));
+  // Affichage des appels entrants (nom du contact et/ou numéro)
+  app.get("/api/cid-display", { preHandler: requireUser }, async () => pbx.getCidDisplay());
+  app.put("/api/cid-display", { preHandler: requireUser }, async (req) => pbx.setCidDisplay(String(req.body?.value || "")));
   app.get("/api/history", { preHandler: requireUser }, async () => history.list());
   // Simulateur : un objet pas encore enregistré, ou une version de l'historique, rejoué sur les appels des 4 dernières semaines
   app.post("/api/simulate", { preHandler: requireUser }, async (req) => {

@@ -17,7 +17,7 @@ import { buildFanvilCfg, buildSnomXml, buildGrandstreamXml, buildGatewayFile, pr
 import { buildFanvilXml, buildSnomPhoneXml, buildGrandstreamPhoneXml, grandstreamAlias } from "./phones-other.mjs";
 import { parseRouting } from "./nlroute.mjs";
 import { summarize, forUser } from "./cdr.mjs";
-import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, contactVisibleTo, PHONE_TYPES } from "./contacts.mjs";
+import { validateContact, yealinkPhonebook, buildPhonebookDialplan, contactName, contactVisibleTo, PHONE_TYPES, CID_DISPLAYS, validCidDisplay } from "./contacts.mjs";
 import { pathNow, ringTargets, parseContacts, deviceStates, inboundVerdict, simulateOutbound } from "./diagnose.mjs";
 import { defaultSecurity } from "./security.mjs";
 import { simulateCalls } from "./simulate.mjs";
@@ -1029,6 +1029,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       `OUTBOUND_CID = ${cid}`,
       `OUTBOUND_FORMAT = ${fmt}`,
       `OUTBOUND_CID_FORMAT = ${cidFmt}`,
+      `CID_DISPLAY = ${validCidDisplay(await db.getSetting("cid_display", "name"))}`,
       ...ext.globals,
       "",
     ].join("\n"));
@@ -1573,6 +1574,12 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,
     setAfterApply: (fn) => { afterApply = fn; }, tz, simulate,
+    getCidDisplay: async () => ({ value: validCidDisplay(await db.getSetting("cid_display", "name")), choices: CID_DISPLAYS }),
+    setCidDisplay: async (v) => {
+      if (!CID_DISPLAYS[v]) throw new UserError("Choix d'affichage inconnu.", "value");
+      await db.setSetting("cid_display", v); await applyDialplan();
+      return { value: v, choices: CID_DISPLAYS };
+    },
     speechKey, audioSocketPort, webUserActive, appSipAccount, loadObjects, listObjects, getObject, saveObject, deleteObject, objectImpact, savePrompt, promptFile, trace, forwardsReport, diagInbound, diagOutbound, ringTest, parseFlow, callLog, userCalls, listContacts, saveContact, deleteContact, importContacts, contactsCsv,
   };
 }
