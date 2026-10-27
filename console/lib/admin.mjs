@@ -14,6 +14,7 @@ import { validateRule, describeRule, buildOutboundDialplan, rangesText, CID_MODE
 import { defaultSecurity, validateSecurity, buildSecurityDialplan, securityGlobals, sipAcl, ipAllowed, checkIp, COUNTRIES } from "./security.mjs";
 import { defaultShortcodes, normalizeShortcodes, validateShortcodes, buildShortcodesDialplan, shortcodesList } from "./shortcodes.mjs";
 import { defaultRecording, validateRecording, recordingGlobals, recordingPath, purgeRecordings, recordingUsage, REC_DIR } from "./recording.mjs";
+import { callMatches, CALL_MIN_S } from "./ai.mjs";
 import { defaultBackup, validateBackup, publicBackup, backupDue, listBackups, backupPath, uploadBackup, BACKUP_DIR, SCHEDULES, PROTOCOLS } from "./backup.mjs";
 import { ALERT_EVENTS, SEVERITY, CRITICAL_SERVICES, defaultAlerts, validateAlerts, publicAlerts, detectAlerts } from "./alerts.mjs";
 import { parseIpList } from "./iplist.mjs";
@@ -67,6 +68,9 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_vm_ai (key text PRIMARY KEY, box text NOT NULL, text text NOT NULL DEFAULT '', summary text NOT NULL DEFAULT '',
       caller_name text NOT NULL DEFAULT '', callback text NOT NULL DEFAULT '', urgent boolean NOT NULL DEFAULT false, at timestamptz NOT NULL DEFAULT now())`);
     await db.query("ALTER TABLE pbxmaison_vm_ai ADD COLUMN IF NOT EXISTS caller_number text NOT NULL DEFAULT '', ADD COLUMN IF NOT EXISTS msg_at text NOT NULL DEFAULT ''");
+    // IA : transcription et résumé des appels enregistrés (une seule fois par enregistrement)
+    await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_call_ai (rec text PRIMARY KEY, status text NOT NULL DEFAULT 'ok', text text NOT NULL DEFAULT '', summary text NOT NULL DEFAULT '',
+      todo jsonb NOT NULL DEFAULT '[]', topics jsonb NOT NULL DEFAULT '[]', call_at text NOT NULL DEFAULT '', at timestamptz NOT NULL DEFAULT now())`);
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_ai_reports (key text PRIMARY KEY, text text NOT NULL, at timestamptz NOT NULL DEFAULT now())`);
     // Appels perdus marqués « traité » (numéro comparable → date)
     await db.query(`CREATE TABLE IF NOT EXISTS pbxmaison_callback_done (key text PRIMARY KEY, at timestamptz NOT NULL DEFAULT now(), by_who text NOT NULL DEFAULT '')`);
@@ -184,13 +188,46 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     return getRecording();
   }
   async function listRecordings(q = {}) {
-    const { calls } = await pbx.callLog({ days: q.days || 30, q: q.q || "", direction: q.direction || "", limit: 5000 });
-    const list = calls.filter((c) => c.recording).map((c) => {
+    // La recherche porte aussi sur ce qui a été dit (résumés et transcriptions de l'IA) : filtrée ici, pas dans le journal
+    const { calls } = await pbx.callLog({ days: q.days || 30, q: "", direction: q.direction || "", limit: 5000 });
+    const recs = calls.filter((c) => c.recording);
+    const ins = ai ? await ai.callInsights(recs.map((c) => c.recording)) : new Map();
+    const list = recs.filter((c) => callMatches(c, ins.get(c.recording), q.q || "")).map((c) => {
       const f = recordingPath(c.recording);
       let size = 0; try { size = fs.statSync(f).size; } catch { /* fichier purgé */ }
-      return { ...c, size, available: size > 44 };
+      const x = ins.get(c.recording);
+      return { ...c, size, available: size > 44, ai: x ? { status: x.status, summary: x.summary, todo: x.todo || [], topics: x.topics || [], text: x.text } : null };
     });
-    return { recordings: list.slice(0, 5000), total: list.length };
+    const st = ai ? await ai.settings() : {};
+    return { recordings: list.slice(0, 5000), total: list.length, ai: { enabled: !!st.enabled, calls: !!(st.enabled && st.calls) } };
+  }
+  /** Résumé d'un enregistrement à la demande (bouton « Résumer ») */
+  async function summarizeRecording(rel) {
+    if (!ai) throw new UserError("IA indisponible sur ce serveur.");
+    const f = await recordingFile(rel);
+    const { calls } = await pbx.callLog({ days: 3660, q: "", limit: 100000 });
+    const c = calls.find((x) => x.recording === rel) || {};
+    const r = await ai.callInsight(rel, f, { direction: c.direction, from: c.from?.name || c.from?.number, to: c.answered_by || c.to?.number, talk: c.talk, start: c.start });
+    return { status: r.status, summary: r.summary, todo: r.todo || [], topics: r.topics || [], text: r.text };
+  }
+  /** IA : résume les nouveaux appels enregistrés (option « Résumer les appels enregistrés ») */
+  async function aiCalls() {
+    if (!ai) return;
+    const st = await ai.settings();
+    if (!st.enabled || !st.calls) return;
+    const since = Date.parse(st.calls_since || 0) || 0;
+    const { calls } = await pbx.callLog({ days: 2, q: "", limit: 5000 });
+    const todo = calls.filter((c) => c.recording && (c.talk || 0) >= CALL_MIN_S && Date.parse(c.start) >= since && Date.now() - Date.parse(c.start) > 60_000);
+    if (!todo.length) return;
+    const known = await ai.callInsights(todo.map((c) => c.recording));
+    let budget = 5;   // appels par passage, au plus
+    for (const c of todo) {
+      if (known.has(c.recording) || budget-- <= 0) continue;
+      const f = recordingPath(c.recording);
+      if (!f || !fs.existsSync(f)) continue;
+      try { await ai.callInsight(c.recording, f, { direction: c.direction, from: c.from?.name || c.from?.number, to: c.answered_by || c.to?.number, talk: c.talk, start: c.start }); }
+      catch (e) { if (e.status === 429 || e.status === 403 || e.status === 502) return; }   // plafond, IA coupée, relais injoignable : plus tard
+    }
   }
   async function recordingFile(rel) {
     const f = recordingPath(rel);
@@ -200,6 +237,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
   async function deleteRecording(rel) {
     const f = await recordingFile(rel);
     fs.rmSync(f, { force: true });
+    if (ai) await ai.forgetCall(rel);
     return { ok: true };
   }
 
@@ -811,7 +849,12 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
       const last = await db.getSetting("backup_last", null);
       if (backupDue(b, last?.trigger === "schedule" ? last.at : null) && !backupJob?.running) await runBackup("schedule");
     }, 60_000);
-    tick(async () => { const r = await recording(); purgeRecordings(r.retention_days); }, 6 * 3600_000);
+    tick(async () => {
+      const r = await recording(); purgeRecordings(r.retention_days);
+      // Résumés et transcriptions supprimés avec les enregistrements
+      if (r.retention_days) await db.query("DELETE FROM pbxmaison_call_ai WHERE at < now() - make_interval(days => $1)", [r.retention_days]);
+    }, 6 * 3600_000);
+    tick(aiCalls, 30_000);
     tick(aiVoicemails, 20_000);
     tick(fraudWatch, 5 * 60_000);
     tick(reportTick, 30 * 60_000);
@@ -831,7 +874,7 @@ export function createAdminService({ db, ami, pbx, ai = null }) {
     migrate, start, dialplanParts, testMail, sendMail, vmKey, reportSettings, setReportSettings, buildMonthlyReport, sendMonthlyReport, listSchedules, saveSchedule, deleteSchedule, previewSchedule, sendSchedule, consoleAllowed, refreshAllow,
     listOutbound, saveOutbound, deleteOutbound, orderOutbound,
     getSecurity, setSecurity, banIp, banList,
-    getRecording, setRecording, listRecordings, recordingFile, deleteRecording,
+    getRecording, setRecording, listRecordings, recordingFile, deleteRecording, summarizeRecording,
     getShortcodes, setShortcodes, pollStatusCodes,
     getBackups, setBackups, runBackup, testRemote, restoreBackup, restoreStatus, stageUpload,
     getUpdates, updateAvailable, startUpdate, updateStatus, getLicense, setLicense, listCaptures, startCapture, stopCapture, captureFile, captureCallFile, deleteCapture,

@@ -1315,6 +1315,7 @@ export async function buildApp({ db, ami } = {}) {
     return reply.type("audio/wav").header("cache-control", "private, no-store").send(fs.createReadStream(f));
   });
   app.delete("/api/recordings/file", { preHandler: requireUser }, async (req) => admin.deleteRecording(req.query?.f));
+  app.post("/api/recordings/summary", { preHandler: requireUser }, async (req) => admin.summarizeRecording(String(req.body?.f || "")));
 
   // ---------------------------------------------------------------- Capture réseau (pcap)
   app.get("/api/capture", { preHandler: requireUser }, async () => admin.listCaptures());

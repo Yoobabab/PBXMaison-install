@@ -472,6 +472,11 @@ body.no-side .shell{margin-left:0}
 .cx-cty:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
 .cx-cty[hidden]{display:none}
 .cx-rec audio{height:34px;max-width:300px}
+.rec-ai{margin-top:6px;padding:8px 10px;border-radius:8px;background:var(--info-soft);font-size:13px;line-height:1.45}
+.rec-ai ul{margin:4px 0 0 18px;padding:0}
+.rec-ai details{margin-top:4px;border:0;padding:0;background:none}.rec-ai summary{cursor:pointer;color:var(--muted)}
+.rec-ai details p{margin:4px 0 0;white-space:pre-wrap}
+.cx-rec .btn.sm{margin-top:6px}
 .cx-dir{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--info-soft);flex:none}
 .cx-dir.in{color:var(--ok)} .cx-dir.out{color:var(--accent)}
 .cx-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;align-items:start}

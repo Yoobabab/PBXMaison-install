@@ -74,3 +74,23 @@ test("fond musical : musique seule au début, voix 1,5 s après, musique baissé
   assert.ok(rms(2 * R, 4 * R) > 0.9 * vr, "la voix reste entendue");
   assert.ok(rms(3.4 * R, 3.6 * R) > 0, "la musique a bouclé");
 });
+
+test("appels enregistrés : résumé, découpage en morceaux, recherche", async () => {
+  const { parseCallSummary, splitWav, callMatches } = await import("../lib/ai.mjs");
+  const p = parseCallSummary('Voici : {"summary":"  Paul   demande le devis ", "todo":["Envoyer le devis", "", 3], "topics":["devis","four","a","b","c"]}');
+  assert.equal(p.summary, "Paul demande le devis"); assert.deepEqual(p.todo, ["Envoyer le devis", "3"]); assert.equal(p.topics.length, 4);
+  assert.deepEqual(parseCallSummary("pas du json").todo, []);
+  // WAV 8 kHz mono de 25 s → morceaux de 10 s : 10 + 10 + 5
+  const n = 25 * 8000, w = Buffer.alloc(44 + n * 2);
+  w.write("RIFF", 0); w.writeUInt32LE(36 + n * 2, 4); w.write("WAVEfmt ", 8); w.writeUInt32LE(16, 16); w.writeUInt16LE(1, 20); w.writeUInt16LE(1, 22);
+  w.writeUInt32LE(8000, 24); w.writeUInt32LE(16000, 28); w.writeUInt16LE(2, 32); w.writeUInt16LE(16, 34); w.write("data", 36); w.writeUInt32LE(n * 2, 40);
+  const parts = splitWav(w, 10);
+  assert.deepEqual(parts.map((b) => (b.length - 44) / 16000), [10, 10, 5]);
+  assert.equal(parts[2].readUInt32LE(40), 5 * 16000); assert.equal(parts[2].toString("ascii", 0, 4), "RIFF");
+  const c = { from: { name: "Boulangerie Dupont", number: "0412345678" }, to: { number: "201" }, answered_by: "Julie", did: "0499000000" };
+  const ins = { summary: "Demande de devis pour le four", text: "bonjour c'est pour le dévis", todo: ["Rappeler Paul"] };
+  assert.ok(callMatches(c, ins, "DEVIS four")); assert.ok(callMatches(c, ins, "devis"));
+  assert.ok(callMatches(c, null, "dupont")); assert.ok(callMatches(c, null, "412345678"));
+  assert.ok(!callMatches(c, null, "devis")); assert.ok(!callMatches(c, ins, "facture"));
+  assert.ok(callMatches(c, ins, ""));
+});

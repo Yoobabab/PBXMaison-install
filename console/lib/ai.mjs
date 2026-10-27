@@ -8,7 +8,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { listServerMusic, serverMusicFile, MUSIC_DIR } from "./music.mjs";
 
-export const DEFAULT_AI = { enabled: false, voicemail: true, relay: "" };
+export const DEFAULT_AI = { enabled: false, voicemail: true, calls: false, relay: "" };
+/** Appels enregistrés : morceaux de 10 min envoyés à la transcription, 60 min au plus par appel */
+export const CALL_CHUNK_S = 600, CALL_MAX_S = 3600, CALL_MIN_S = 10;
 export const VOICES = { coral: "Chaleureuse", sage: "Posée", alloy: "Neutre", verse: "Dynamique", ash: "Grave", nova: "Claire" };
 
 /** Réponse JSON du résumé d'un message vocal → objet propre (tolère du texte autour) */
@@ -19,6 +21,40 @@ export function parseVoicemailSummary(text) {
   const clean = (v, max) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
   if (!o) return { summary: clean(text, 240), caller_name: "", callback: "", urgent: false };
   return { summary: clean(o.summary, 240), caller_name: clean(o.caller_name, 60), callback: clean(o.callback, 20).replace(/[^\d+]/g, ""), urgent: o.urgent === true };
+}
+
+/** Réponse JSON du résumé d'un appel enregistré → objet propre */
+export function parseCallSummary(text) {
+  let o = null;
+  const m = /\{[\s\S]*\}/.exec(String(text || ""));
+  if (m) { try { o = JSON.parse(m[0]); } catch { o = null; } }
+  const clean = (v, max) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+  const list = (v, n, max) => (Array.isArray(v) ? v : []).map((x) => clean(x, max)).filter(Boolean).slice(0, n);
+  if (!o) return { summary: clean(text, 300), todo: [], topics: [] };
+  return { summary: clean(o.summary, 300), todo: list(o.todo, 5, 140), topics: list(o.topics, 4, 30) };
+}
+
+/** WAV d'un appel → morceaux WAV 8 kHz mono d'au plus `chunkS` secondes (le relais refuse au-delà de 15 min) */
+export function splitWav(buf, chunkS = CALL_CHUNK_S) {
+  const w = toPbxWav(buf), data = w.subarray(44), per = chunkS * 8000 * 2, out = [];
+  for (let off = 0; off < data.length; off += per) {
+    const part = data.subarray(off, Math.min(data.length, off + per));
+    if (part.length < 8000 * 2) break;   // reste de moins d'une seconde : ignoré
+    const h = Buffer.from(w.subarray(0, 44)); h.writeUInt32LE(36 + part.length, 4); h.writeUInt32LE(part.length, 40);
+    out.push(Buffer.concat([h, part]));
+  }
+  return out;
+}
+
+/** Recherche dans les enregistrements : numéros, noms, et ce qui a été dit (sans tenir compte des accents ni des majuscules) */
+export function callMatches(c, ins, q) {
+  const norm = (x) => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const words = norm(q).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const digits = (x) => String(x || "").replace(/\D/g, "");
+  const hay = norm([c.from?.name, c.from?.number, c.to?.name, c.to?.number, c.answered_by, c.did, ins?.summary, ins?.text, ...(ins?.todo || []), ...(ins?.topics || [])].join(" "));
+  const nums = [c.from?.number, c.to?.number, c.did].map(digits).join(" ");
+  return words.every((w) => hay.includes(w) || (/^\d{3,}$/.test(w) && nums.includes(w.replace(/^0/, ""))));
 }
 
 /** WAV PCM 16 bits (n'importe quelle fréquence, mono ou stéréo) → WAV 8 kHz mono, le format des annonces du PBX */
@@ -199,16 +235,51 @@ export function createAi({ db, etcDir, env = process.env, fetchImpl = globalThis
     const r = await db.query("SELECT key, text, summary, caller_name, callback, urgent FROM pbxmaison_vm_ai WHERE box = $1", [box]);
     return new Map(r.rows.map((x) => [x.key, x]));
   }
+  /** Appel enregistré → transcription (par morceaux) + résumé, gardés en base : une seule fois par enregistrement */
+  function callInsight(rel, file, meta = {}) {
+    const k = `call:${rel}`;
+    if (!inFlight.has(k)) inFlight.set(k, callOnce(rel, file, meta).finally(() => inFlight.delete(k)));
+    return inFlight.get(k);
+  }
+  async function callOnce(rel, file, meta) {
+    const old = (await db.query("SELECT rec, status, text, summary, todo, topics FROM pbxmaison_call_ai WHERE rec = $1", [rel])).rows[0];
+    if (old && old.status === "ok") return old;
+    const save = async (status, t = "", sum = { summary: "", todo: [], topics: [] }) => {
+      await db.query(`INSERT INTO pbxmaison_call_ai (rec, status, text, summary, todo, topics, call_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (rec) DO UPDATE SET status = $2, text = $3, summary = $4, todo = $5, topics = $6, at = now()`,
+        [rel, status, t, sum.summary, JSON.stringify(sum.todo), JSON.stringify(sum.topics), String(meta.start || "")]);
+      return { rec: rel, status, text: t, ...sum };
+    };
+    const parts = splitWav(fs.readFileSync(file));
+    if (parts.length * CALL_CHUNK_S > CALL_MAX_S + CALL_CHUNK_S) return save("long", "", { summary: "Appel trop long pour être résumé (plus d'une heure).", todo: [], topics: [] });
+    const texts = [];
+    for (const p of parts) texts.push((await call("/v1/ai/transcribe", { audio: p.toString("base64") })).text || "");
+    const t = texts.join(" ").replace(/\s+/g, " ").trim();
+    if (!t) return save("ok", "", { summary: "Appel sans parole reconnue (silence ou bruit).", todo: [], topics: [] });
+    const input = JSON.stringify({ sens: meta.direction === "out" ? "appel sortant" : "appel entrant", appelant: meta.from || "", appele: meta.to || "", duree_s: meta.talk || 0, transcription: t });
+    return save("ok", t, parseCallSummary(await text("call", input)));
+  }
+  async function callInsights(rels) {
+    if (!rels.length) return new Map();
+    const r = await db.query("SELECT rec, status, text, summary, todo, topics FROM pbxmaison_call_ai WHERE rec = ANY($1)", [rels]);
+    return new Map(r.rows.map((x) => [x.rec, x]));
+  }
+  const forgetCall = (rel) => db.query("DELETE FROM pbxmaison_call_ai WHERE rec = $1", [rel]);
   async function saveSettings(input) {
     const s = await settings();
     const next = { ...s };
     if (input.enabled !== undefined) next.enabled = !!input.enabled;
     if (input.voicemail !== undefined) next.voicemail = !!input.voicemail;
+    if (input.calls !== undefined) {
+      next.calls = !!input.calls;
+      // Activé à partir de maintenant : les appels enregistrés avant ne sont pas résumés d'office (bouton « Résumer » sur chacun)
+      if (next.calls && !s.calls) next.calls_since = new Date().toISOString();
+    }
     await db.setSetting("ai", next);
     if (next.enabled && !s.enabled) { try { await register(next); } catch { /* le statut affichera l'erreur */ } }
     return status();
   }
   // Relais du portail pour autre chose que l'IA (autorisations de notification de l'appli) : marche même si l'IA est désactivée
   const relay = (p, body) => call(p, body, { force: true });
-  return { settings, saveSettings, status, transcribe, text, speech, musics, music, voicemailInsight, insights, realtimeUrl, relay, AiError };
+  return { settings, saveSettings, status, transcribe, text, speech, musics, music, voicemailInsight, insights, callInsight, callInsights, forgetCall, realtimeUrl, relay, AiError };
 }

@@ -287,14 +287,15 @@ async function pageRecordings(sub) {
           <span class="hint">L'appelant doit être informé de l'enregistrement (RGPD). Crée l'annonce dans <a href="#/gestion/annonces">Gestion d'appels › Annonces</a>, par ex. « Cet appel peut être enregistré afin d'améliorer la qualité de nos services ».</span></label>
         <label>Conserver les enregistrements pendant (jours)<input type="number" name="retention_days" min="0" max="3650" value="${s.retention_days}"><span class="hint">0 = sans limite. La CNIL recommande 6 mois au maximum pour les enregistrements de formation.</span></label>
         <div class="actions"><button class="btn">Enregistrer</button></div></div></form>`
-    : `<div class="panel"><div class="filters"><input type="search" id="rq" placeholder="Numéro, nom, poste…" value="${H.esc(q.q || "")}">
+    : `<div class="panel"><div class="filters"><input type="search" id="rq" placeholder="${list.ai?.enabled ? "Numéro, nom, ou un mot dit dans l'appel…" : "Numéro, nom, poste…"}" value="${H.esc(q.q || "")}">
         <select id="rdir"><option value="">Tous les sens</option><option value="in" ${q.direction === "in" ? "selected" : ""}>Entrants</option><option value="out" ${q.direction === "out" ? "selected" : ""}>Sortants</option></select>
         <select id="rdays">${[[1, "Aujourd'hui"], [7, "7 jours"], [30, "30 jours"], [90, "90 jours"], [366, "1 an"]].map(([v, l]) => `<option value="${v}" ${Number(q.days || 30) === v ? "selected" : ""}>${l}</option>`).join("")}</select>
         <span class="s">${list.total} enregistrement(s)</span></div>
       ${list.recordings.length ? `${pg.html}<div class="cx-list">${pg.rows.map((c) => `<div class="cx-row cx-rec">
           <span class="cx-dir ${c.direction}" title="${DIR[c.direction] || ""}">${ic(c.direction === "in" ? I.down : I.up, 15)}</span>
           <div class="grow"><b>${H.esc(c.from.name || H.fmtPhone(c.from.number))}</b> <span class="s">→</span> <b>${H.esc(c.answered_by || H.fmtPhone(c.to.number))}</b>
-            <div class="s">${fmtDT(c.start)} · ${Math.floor(c.talk / 60)} min ${String(c.talk % 60).padStart(2, "0")} s${c.did ? ` · SDA ${H.esc(H.fmtPhone(c.did))}` : ""}</div></div>
+            <div class="s">${fmtDT(c.start)} · ${Math.floor(c.talk / 60)} min ${String(c.talk % 60).padStart(2, "0")} s${c.did ? ` · SDA ${H.esc(H.fmtPhone(c.did))}` : ""}</div>
+            ${recAi(c, list.ai)}</div>
           ${c.available ? `<audio controls preload="none" src="/api/recordings/file?f=${encodeURIComponent(c.recording)}"></audio>
             <a class="ghost-ic" href="/api/recordings/file?f=${encodeURIComponent(c.recording)}&dl=1" title="Télécharger">${ic(I.dl)}</a>
             <button class="ghost-ic" data-del="${H.esc(c.recording)}" title="Supprimer">${ic(I.trash)}</button>` : `<span class="s">Fichier supprimé</span>`}
@@ -317,6 +318,20 @@ async function pageRecordings(sub) {
     if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.classList.add("danger"); b.title = "Cliquer à nouveau pour supprimer"; return; }
     await H.api("DELETE", `/api/recordings/file?f=${encodeURIComponent(b.dataset.del)}`); pageRecordings();
   }));
+  H.app.querySelectorAll("[data-sum]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true; b.innerHTML = '<span class="spin"></span> Résumé en cours…';
+    try { await H.api("POST", "/api/recordings/summary", { f: b.dataset.sum }); pageRecordings(sub); }
+    catch (err) { b.disabled = false; b.textContent = "Résumer"; H.setFlash({ cls: "bad", text: err.message }); pageRecordings(sub); }
+  }));
+}
+/** Résumé IA d'un enregistrement : sujet, choses à faire, transcription repliée ; sinon bouton « Résumer » */
+function recAi(c, st) {
+  const x = c.ai;
+  if (x?.status === "ok" || x?.status === "long") return `<div class="rec-ai"><div>${H.esc(x.summary)}</div>
+    ${x.todo?.length ? `<ul>${x.todo.map((t) => `<li>${H.esc(t)}</li>`).join("")}</ul>` : ""}
+    ${x.text ? `<details><summary>Transcription</summary><p>${H.esc(x.text)}</p></details>` : ""}</div>`;
+  if (!c.available || !st?.enabled) return "";
+  return `<button type="button" class="btn ghost sm" data-sum="${H.esc(c.recording)}" title="Transcription et résumé par l'IA (environ 0,5 centime la minute)">Résumer</button>`;
 }
 
 // ================================================================ Codes raccourcis
@@ -695,7 +710,7 @@ async function pageAi() {
   const d = await H.api("GET", "/api/ai-settings");
   const r = d.relay, on = d.settings.enabled;
   const euro = (n) => `${(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-  const OPS = { transcriptions: "messages transcrits", voicemail: "résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce", report: "bilans et rapports", flow: "routages écrits en français", ivr: "choix du SVI parlé", standardiste: "appels du standardiste IA", standardiste_min: "minutes de standardiste IA" };
+  const OPS = { transcriptions: "transcriptions", voicemail: "messages vocaux résumés", call: "appels résumés", annonces: "annonces en voix IA", diagnose: "diagnostics", announce: "textes d'annonce", report: "bilans et rapports", flow: "routages écrits en français", ivr: "choix du SVI parlé", standardiste: "appels du standardiste IA", standardiste_min: "minutes de standardiste IA" };
   const state = !on ? ["off", "Désactivée"] : d.error ? ["bad", "Problème"] : r?.fake ? ["wait", "Mode test"] : r?.ready ? ["ok", "Active"] : ["wait", "En attente de la clé IRT"];
   H.app.innerHTML = head("IA", "Fonctions d'intelligence artificielle du PBX. La clé OpenAI d'IRT reste dans le portail pro : le PBX n'y a jamais accès.") + `
     <div class="cards">
@@ -706,7 +721,8 @@ async function pageAi() {
     <div class="panel"><div class="ph"><h2>Réglages</h2></div><form id="aif" class="pad stack">
       ${sw("enabled", on, "Activer l'IA sur ce PBX", "Annonces en voix IA, diagnostic dans Gestion d'appels › Dépannage, et les options ci-dessous.")}
       ${sw("voicemail", d.settings.voicemail, "Transcrire et résumer les messages vocaux", "Chaque nouveau message est écrit en texte avec un résumé d'une phrase : dans l'e-mail, le softphone et l'appli. Environ 0,3 centime la minute.")}
-      <div class="note">À prévoir côté client (RGPD) : informer les appelants que les messages sont transcrits automatiquement, par exemple dans l'annonce du répondeur. Les messages passent par le relais Callikoe puis OpenAI, sans y être conservés au-delà du traitement.</div>
+      ${sw("calls", d.settings.calls, "Résumer les appels enregistrés", "Pour chaque appel enregistré à partir de maintenant : le sujet et les choses à faire, et la recherche par mot dit dans l'appel (Activité › Enregistrements). Environ 0,5 centime la minute d'appel, dans le plafond du mois.")}
+      <div class="note">À prévoir côté client (RGPD) : informer les appelants que les messages et les appels enregistrés sont transcrits automatiquement, par exemple dans l'annonce du répondeur et celle de l'enregistrement. Les messages passent par le relais Callikoe puis OpenAI, sans y être conservés au-delà du traitement.</div>
       <div class="actions"><button class="btn">Enregistrer</button></div></form></div>
     <div class="panel"><div class="ph"><h2>Ailleurs dans la console</h2></div><div class="pad stack">
       <p style="margin:0"><a href="#/gestion/standardiste"><b>Standardiste IA</b></a> : dans Gestion d'appels, avec les routages.</p>
@@ -715,7 +731,7 @@ async function pageAi() {
       <div class="row"><input id="aitry" class="grow" value="On est fermés lundi pour inventaire" maxlength="300"><button type="button" class="btn ghost" id="aitryb" ${on ? "" : "disabled"}>Rédiger une annonce</button></div>
       <p class="hint" style="margin:0">Pour créer une vraie annonce lue par une voix IA, avec ou sans fond musical : <a href="#/gestion/annonces/nouveau">Gestion d'appels › Annonces › Ajouter</a>.</p>
       <div id="aitryr"></div></div></div>`;
-  onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
+  onSubmit(H.$("#aif"), async (f) => { await H.api("PUT", "/api/ai-settings", { enabled: f.enabled, voicemail: f.voicemail, calls: f.calls }); ok(f.enabled ? "IA activée." : "IA désactivée."); pageAi(); });
   H.$("#aitry").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); H.$("#aitryb").click(); } };
   H.$("#aitryb").onclick = async (e) => {
     e.target.disabled = true; H.$("#aitryr").innerHTML = '<span class="spin"></span>';
