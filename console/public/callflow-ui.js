@@ -957,7 +957,7 @@ async function renderDiagAi(head) {
 
 // ---------------------------------------------------------------- Renvois actifs
 async function renderForwards(head) {
-  const { forwards } = await h.api("GET", "/api/forwards");
+  const [{ forwards }, abs] = await Promise.all([h.api("GET", "/api/forwards"), h.api("GET", "/api/absences").catch(() => ({ absences: [] }))]);
   const only = sessionStorage.getItem("cf_fw_active") !== "0";
   const ext = sessionStorage.getItem("cf_fw_ext") === "1";
   const rows = forwards.filter((r) => (!only || r.active) && (!ext || r.external));
@@ -969,7 +969,11 @@ async function renderForwards(head) {
       ${rows.map((r) => `<tr><td>${r.id ? `<a href="#/utilisateurs/${esc(r.id)}/renvois">${esc(r.id)}</a> ` : ""}${esc(r.name)}</td><td>${esc(r.when)}</td>
         <td>${r.external ? "↗ " : ""}${esc(r.to)}</td><td>${r.active ? `<span class="pill ${r.level === "bad" ? "bad" : r.level === "warn" ? "wait" : "ok"}">Actif</span>` : '<span class="pill off">Inactif</span>'}</td></tr>`).join("")}
     </tbody></table></div>` : '<div class="empty">Aucun renvoi.</div>'}
-    <p class="hint pad" style="margin:0">Renvois réglés dans les fiches utilisateurs (onglet Renvois) ou par les utilisateurs eux-mêmes dans leur softphone. Les statuts Absent / Ne pas déranger renvoient tous les appels.</p></div>`;
+    <p class="hint pad" style="margin:0">Renvois réglés dans les fiches utilisateurs (onglet Renvois) ou par les utilisateurs eux-mêmes dans leur softphone. Les statuts Absent / Ne pas déranger renvoient tous les appels.</p></div>
+    <div class="panel"><div class="ph"><h2>Absences programmées</h2></div>${abs.absences.length ? `<div class="table-wrap"><table><thead><tr><th>Qui</th><th>Quand et vers</th><th>État</th></tr></thead><tbody>
+      ${abs.absences.map((a) => `<tr><td><a href="#/utilisateurs/${esc(a.ext)}/renvois">${esc(a.ext)}</a> ${esc(a.name)}</td><td>${esc(a.label)}${a.note ? ` <span class="s">· ${esc(a.note)}</span>` : ""}</td>
+        <td>${a.status === "active" ? '<span class="pill ok">En cours</span>' : '<span class="pill off">Prévue</span>'}</td></tr>`).join("")}</tbody></table></div>`
+      : '<div class="empty">Aucune absence prévue. Elles se programment dans la fiche de l\'utilisateur › Renvois d\'appels.</div>'}</div>`;
   h.$("#fa").onchange = (e) => { sessionStorage.setItem("cf_fw_active", e.target.checked ? "1" : "0"); renderForwards(head); };
   h.$("#fe").onchange = (e) => { sessionStorage.setItem("cf_fw_ext", e.target.checked ? "1" : "0"); renderForwards(head); };
 }

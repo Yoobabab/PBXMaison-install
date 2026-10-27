@@ -16,6 +16,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
   newTotpSecret, verifyTotp, otpauthUri, newRecoveryCodes, recoveryHash } from "./lib/auth.mjs";
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import { createHistory } from "./lib/history.mjs";
+import { createAbsences } from "./lib/absences.mjs";
 import { isManager, isStandardist, consoleRoleOf, USER_ROLES } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
@@ -53,6 +54,9 @@ export async function buildApp({ db, ami } = {}) {
   const history = createHistory({ db, pbx });
   await history.migrate();
   pbx.setAfterApply(() => history.record());
+  const absences = createAbsences({ db, pbx });
+  await absences.migrate();
+  { let busy = false; setInterval(() => { if (busy || !isConfigured()) return; busy = true; absences.tick().catch((e) => console.error("Absences :", e.message)).finally(() => { busy = false; }); }, 60_000).unref(); }
   pbx.setExtraDialplan(() => admin.dialplanParts());
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 1_048_576 });
@@ -140,7 +144,7 @@ export async function buildApp({ db, ami } = {}) {
     if (!admin.consoleAllowed(ip)) return reply.code(403).send({ error: `Accès à la console refusé depuis ${ip} (Sécurité › Accès à la console).` });
   });
   // Journal d'audit : toute modification faite depuis la console (qui, quand, d'où, quoi)
-  const AUDIT_LABEL = [[/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
+  const AUDIT_LABEL = [[/^\/api\/(absences|extensions\/[^/]+\/absences)/, "Absences programmées"], [/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
     [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
     [/^\/api\/recording/, "Enregistrement"], [/^\/api\/history/, "Historique du standard"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
   app.addHook("onResponse", async (req, reply) => {
@@ -1319,6 +1323,11 @@ export async function buildApp({ db, ami } = {}) {
     return reply.type("audio/wav").header("cache-control", "private, no-store").send(fs.createReadStream(f));
   });
   app.delete("/api/recordings/file", { preHandler: requireUser }, async (req) => admin.deleteRecording(req.query?.f));
+  // Absences programmées (renvoi immédiat posé et retiré tout seul)
+  app.get("/api/absences", { preHandler: requireUser }, async () => absences.list());
+  app.get("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.list(String(req.params.id)));
+  app.post("/api/extensions/:id/absences", { preHandler: requireUser }, async (req) => absences.create(String(req.params.id), req.body || {}, currentUser(req).email));
+  app.delete("/api/absences/:id", { preHandler: requireUser }, async (req) => absences.remove(req.params.id, currentUser(req).email));
   app.get("/api/history", { preHandler: requireUser }, async () => history.list());
   app.post("/api/history/:id/restore", { preHandler: requireUser }, async (req) => history.restore(req.params.id, currentUser(req).email));
   app.post("/api/recordings/summary", { preHandler: requireUser }, async (req) => admin.summarizeRecording(String(req.body?.f || "")));

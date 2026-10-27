@@ -1169,6 +1169,42 @@ const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString("fr-FR", { dateS
 const optList = (obj, cur, labelOf = (v) => Array.isArray(v) ? v[0] : v) =>
   Object.entries(obj).map(([k, v]) => `<option value="${esc(k)}" ${String(k) === String(cur) ? "selected" : ""}>${esc(labelOf(v))}</option>`).join("");
 
+/** Absences programmées : le renvoi immédiat s'active le premier jour et se retire tout seul après le dernier */
+async function renderAbsences(box, u, users) {
+  const d = await api("GET", `/api/extensions/${u.id}/absences`).catch((e) => ({ error: e.message }));
+  if (d.error) { box.innerHTML = `<div class="flash bad">${esc(d.error)}</div>`; return; }
+  const plus = (n) => { const x = new Date(`${d.today}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  box.innerHTML = `<h3 class="sec" style="margin-top:0">Absences programmées</h3>
+    <p class="hint" style="margin:0 0 10px">Congés, formation… Le renvoi immédiat s'active tout seul le premier jour à minuit et s'arrête tout seul après le dernier jour.</p>
+    ${d.absences.length ? `<div class="cx-list">${d.absences.map((a) => `<div class="cx-row"><div class="grow"><b>${esc(a.label)}</b>
+      ${a.status === "active" ? ' <span class="pill ok">En cours</span>' : ' <span class="pill off">Prévue</span>'}${a.note ? ` <span class="s">${esc(a.note)}</span>` : ""}
+      ${a.error ? `<div class="s" style="color:var(--bad)">${esc(a.error)}</div>` : ""}</div>
+      <button type="button" class="ghost-ic" data-absdel="${a.id}" title="${a.status === "active" ? "Arrêter maintenant (le renvoi d'avant revient)" : "Supprimer"}">✕</button></div>`).join("")}</div>` : ""}
+    <div class="absform" id="absform">
+      <label>Du<input type="date" id="absstart" value="${plus(1)}" min="${d.today}"></label>
+      <label>Au (inclus)<input type="date" id="absend" value="${plus(7)}" min="${d.today}"></label>
+      ${destField("abs.dest", "Ses appels vont vers", { type: "extension", target: "" }, users, u.id, { extension: "Un collègue", voicemail: "Sa messagerie vocale", external: "Un numéro (portable…)" })}
+      <label>Motif (facultatif)<input id="absnote" maxlength="80" placeholder="Congés"></label>
+      <div><button type="button" class="btn sm" id="absadd">Programmer l'absence</button></div>
+      <div class="form-msg" id="absmsg"></div></div>`;
+  wireDest(box);
+  box.querySelector("#absadd").onclick = async (e) => {
+    const v = (n) => box.querySelector(n)?.value || "";
+    const type = v("[name='abs.dest.type']");
+    const target = type === "extension" ? v("select[name='abs.dest.target']") : type === "external" ? v("input[name='abs.dest.target']") : "";
+    e.target.disabled = true;
+    try {
+      await api("POST", `/api/extensions/${u.id}/absences`, { start: v("#absstart"), end: v("#absend"), note: v("#absnote"), dest: { type, target } });
+      renderAbsences(box, u, users);
+    } catch (err) { e.target.disabled = false; box.querySelector("#absmsg").innerHTML = `<div class="flash bad">${esc(err.message)}</div>`; }
+  };
+  box.querySelectorAll("[data-absdel]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.classList.add("danger"); b.title = "Cliquer à nouveau pour confirmer"; return; }
+    try { await api("DELETE", `/api/absences/${b.dataset.absdel}`); } catch (err) { alert(err.message); }
+    renderAbsences(box, u, users);
+  });
+}
+
 function destField(name, label, dest, users, selfId, labels = DEST_LABELS) {
   const others = users.filter((x) => x.id !== selfId);
   return `<div class="dest" data-dest="${name}"><span class="dl">${label}</span>
@@ -1297,7 +1333,8 @@ async function renderUser(id, tab = "general") {
         <label class="check"><input type="checkbox" name="options.ring_mobile" ${u.options.ring_mobile ? "checked" : ""}> Faire sonner aussi mon mobile${u.mobile ? ` (${esc(fmtPhone(u.mobile))})` : " (renseigne-le dans Général)"}</label>
         <label class="check"><input type="checkbox" name="options.accept_group_calls" ${u.options.accept_group_calls ? "checked" : ""}> Recevoir les appels des groupes (route entrante « tous les postes »)</label>
       </fieldset>
-      <p class="hint" style="margin:0">Les renvois vers l'extérieur passent par le trunk sortant et présentent le numéro du trunk. International et surtaxés interdits.</p></form>`;
+      <p class="hint" style="margin:0">Les renvois vers l'extérieur passent par le trunk sortant et présentent le numéro du trunk. International et surtaxés interdits.</p></form>
+      <div class="pad absbox" id="absbox"></div>`;
   } else if (tab === "telephone") {
     const host = server.host || server.fqdn;
     const ph = u.phone, st = ph.settings, o = phoneOpts;
@@ -1406,6 +1443,7 @@ async function renderUser(id, tab = "general") {
       renderUser(u.id, tab);
     } catch (e) { b.disabled = false; alert(e.message); }
   }));
+  if ($("#absbox")) renderAbsences($("#absbox"), u, users);
   const fwon = $("[name='ui.fwon']");
   fwon?.addEventListener("change", () => { fwon.closest(".fwcard").classList.toggle("on", fwon.checked); $(".fwstate").textContent = fwon.checked ? "Activé" : "Désactivé"; });
   app.querySelectorAll(".seg input").forEach((i) => i.addEventListener("change", () => app.querySelectorAll(".seg label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked))));
