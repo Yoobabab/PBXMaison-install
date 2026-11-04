@@ -760,7 +760,7 @@ async function renderPhones() {
       <div class="seg" id="pf">${[["all", "Tous", d.phones.length], ["on", "Connectés", on], ["off", "Déconnectés", d.phones.length - on]].map(([k, l, n]) => `<label class="${filter === k ? "on" : ""}"><input type="radio" name="pf" value="${k}" ${filter === k ? "checked" : ""}>${l} <span class="cnt">${n}</span></label>`).join("")}</div>
       <input type="search" id="pq" class="grow" placeholder="Rechercher : utilisateur, modèle, MAC, adresse IP…" value="${esc(q0)}" style="max-width:360px"></div>
     <div class="ubulk" id="pbar" hidden><strong id="pcount"></strong>
-      <button type="button" class="btn sm" id="psync">Provisionner</button><button type="button" class="btn ghost sm" id="preboot">Redémarrer</button>
+      <button type="button" class="btn sm" id="psync">Provisionner</button><button type="button" class="btn ghost sm" id="preboot">Redémarrer</button><button type="button" class="btn ghost sm" id="pfw" title="Programmer la mise à jour du firmware des téléphones cochés">Mettre à jour le firmware…</button>
       <button type="button" class="btn link" id="pnone">Tout décocher</button></div>
     ${d.phones.length ? `<div class="table-wrap"><table class="ptable">
       <thead><tr><th class="ck"><input type="checkbox" id="pall" aria-label="Tout cocher"></th><th>Appareil</th><th>Utilisateur</th><th>État</th><th class="hide-sm">Adresse</th><th></th></tr></thead>
@@ -822,6 +822,7 @@ async function renderPhones() {
   $("#psync")?.addEventListener("click", (e) => sendSel("resync", e.target));
   $("#preboot")?.addEventListener("click", (e) => sendSel("reboot", e.target));
   $("#pnone")?.addEventListener("click", () => { psel.clear(); draw(); });
+  $("#pfw")?.addEventListener("click", () => { location.hash = `#/mises-a-jour/programmees?postes=${[...psel].join(",")}`; });
   app.querySelectorAll("#pf input").forEach((i) => i.addEventListener("change", draw));
   $("#pq")?.addEventListener("input", draw);
   $("#resyncall")?.addEventListener("click", async (e) => {

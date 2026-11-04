@@ -443,40 +443,199 @@ async function pageBackups() {
 
 // ================================================================ Mises à jour
 const md = (t) => H.esc(t).split("\n").map((l) => l.startsWith("## ") ? `<h3>${l.slice(3)}</h3>` : l.startsWith("- ") ? `<li>${l.slice(2)}</li>` : l.startsWith("# ") ? "" : l ? `<p>${l}</p>` : "").join("").replace(/(<li>.*?<\/li>)+/gs, (m) => `<ul>${m}</ul>`);
-async function pageUpdates(check = false) {
+// Date et heure locales pour <input type="datetime-local"> (par défaut : cette nuit 2 h)
+const localInput = (d) => { const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+const tonight = () => { const d = new Date(); d.setHours(2, 0, 0, 0); if (d < new Date()) d.setDate(d.getDate() + 1); return d; };
+const WIN_LABEL = (m) => m < 60 ? `${m} min` : `${m / 60} h`;
+const JOB_PILL = { pending: "wait", running: "wait", done: "ok", partial: "wait", failed: "bad", skipped: "off", cancelled: "off" };
+const TGT_PILL = { waiting: "off", sent: "wait", done: "ok", already: "ok", unchanged: "bad", offline: "bad", busy: "bad", cancelled: "off" };
+const whenFields = (d, extra = "") => `<div class="cx-g3"><label>Quand<select name="when"><option value="later">À une date et une heure</option><option value="now">Maintenant</option></select></label>
+    <label class="upat">Date et heure<input type="datetime-local" name="run_at" value="${localInput(tonight())}"></label>
+    <label>Plage pour la faire<select name="window_min">${d.windows.map((w) => `<option value="${w}" ${w === 120 ? "selected" : ""}>${WIN_LABEL(w)}</option>`).join("")}</select><span class="hint">Passé ce délai, ce qui n'a pas pu se faire est abandonné.</span></label></div>
+    ${sw("wait_calls", true, "Attendre la fin des appels en cours", extra || "Un téléphone en communication n'est pas redémarré ; le standard n'est pas mis à jour pendant un appel")}`;
+const wireWhen = (f) => { const sel = f.querySelector("[name=when]"), at = f.querySelector(".upat"); const upd = () => { at.hidden = sel.value === "now"; }; sel.addEventListener("change", upd); upd(); };
+const whenValue = (v) => ({ run_at: v.when === "now" ? "now" : (v.run_at ? new Date(v.run_at).toISOString() : ""), window_min: Number(v.window_min), wait_calls: !!v.wait_calls });
+
+async function pageUpdates(sub) {
   H.setNav("updates");
+  const [cur, query] = String(sub || "callikoe").split("?");
+  const qs = new URLSearchParams(query || "");
+  const jobs = await H.api("GET", "/api/updates/jobs");
+  const open = jobs.jobs.filter((j) => j.status === "pending" || j.status === "running");
+  const nav = tabs("#/mises-a-jour", cur, [["callikoe", "Callikoe"], ["firmwares", "Firmwares des téléphones"], ["programmees", `Programmées${open.length ? ` (${open.length})` : ""}`]]);
+  if (cur === "firmwares") return pageFirmwares(nav);
+  if (cur === "programmees") return pageJobs(nav, jobs, qs);
+  return pageUpdatesMain(nav, jobs, false);
+}
+
+async function pageUpdatesMain(nav, jobs, check) {
   const d = await H.api("GET", `/api/updates${check ? "?check=1" : ""}`);
   // Serveur multi-tenant : tous les PBX sont mis à jour ensemble, depuis la console du serveur
   if (d.tenant) {
-    H.app.innerHTML = head("Mises à jour", "Ce PBX est mis à jour avec tout le serveur.") +
+    H.app.innerHTML = head("Mises à jour", "Ce PBX est mis à jour avec tout le serveur.") + nav +
       `<div class="cx-hero ok"><span class="cx-hero-ic">${ic(I.check, 30)}</span><div class="grow"><h2>Version installée : ${H.esc(d.current.version)}</h2>
-        <p>Le serveur cherche une nouvelle version chaque matin. Pour l'installer : <b>console du serveur › Mises à jour</b> (une pastille noire apparaît dans son menu quand il y en a une).</p></div></div>`;
+        <p>Le serveur cherche une nouvelle version chaque matin. Pour l'installer : <b>console du serveur › Mises à jour</b> (une pastille noire apparaît dans son menu quand il y en a une).</p>
+        <p>Les firmwares des téléphones se programment ici, onglet <a href="#/mises-a-jour/firmwares">Firmwares des téléphones</a>.</p></div></div>`;
     return;
   }
   const c = d.current, a = d.available;
   const newer = a?.commit && d.up_to_date === false;
+  const planned = jobs.jobs.find((j) => j.kind === "pbx" && (j.status === "pending" || j.status === "running"));
   if (H.state) { H.state.update_available = !!newer; H.renderNav?.(); }
-  H.app.innerHTML = head("Mises à jour", "Le PBX cherche une nouvelle version chaque matin. Rien ne s'installe sans toi.", `<button class="btn ghost" id="upchk">Rechercher une mise à jour</button>`) +
+  H.app.innerHTML = head("Mises à jour", "Le PBX cherche une nouvelle version chaque matin. Rien ne s'installe sans toi.", `<button class="btn ghost" id="upchk">Rechercher une mise à jour</button>`) + nav +
     `<div class="cx-hero ${newer ? "new" : d.up_to_date ? "ok" : ""}"><span class="cx-hero-ic">${ic(newer ? I.up2 : I.check, 30)}</span>
       <div class="grow"><h2>${newer ? `Nouvelle version disponible : ${H.esc(a.version)}` : d.up_to_date ? "Callikoe est à jour" : "Version installée"}</h2>
       <p>Installée : <b>${H.esc(c.version)}</b>${c.commit ? ` <span class="mono">(${H.esc(c.commit.slice(0, 7))})</span>` : ""}${c.installed_at ? ` le ${fmtDT(c.installed_at)}` : ""}
       ${a?.checked_at ? ` · vérifié ${fmtDT(a.checked_at)}` : ""}${a?.error ? ` · <span class="err">${H.esc(a.error)}</span>` : ""}</p>
       ${newer && a.message ? `<p class="s">Dernière modification : ${H.esc(a.message)} (${fmtDT(a.date)})</p>` : ""}</div>
-      ${newer ? `<button class="btn" id="upgo">Mettre à jour maintenant</button>` : ""}</div>
+      ${planned ? "" : `<button class="btn ghost" id="upplan">${ic(I.clock, 16)} Programmer</button>`}${newer && !planned ? `<button class="btn" id="upgo">Mettre à jour maintenant</button>` : ""}</div>
+    ${planned ? `<div class="panel" style="margin-bottom:16px"><div class="cx-row"><span class="cx-hero-ic">${ic(I.clock, 22)}</span><div class="grow"><b>${planned.status === "running" ? "Mise à jour programmée en cours" : `Mise à jour programmée le ${fmtDT(planned.run_at)}`}</b>
+      <div class="s">Plage de ${WIN_LABEL(planned.window_min)}${planned.wait_calls ? ", après la fin des appels en cours" : ""} · par ${H.esc(planned.created_by)}${planned.result?.waiting ? ` · ${H.esc(planned.result.waiting)}` : ""}</div></div>
+      ${planned.status === "pending" ? `<button class="btn ghost sm" data-cancel="${planned.id}">Annuler</button>` : ""}</div></div>` : ""}
+    <form id="upform" class="panel" hidden novalidate style="margin-bottom:16px"><div class="ph"><h2>Programmer la mise à jour du PBX</h2></div><div class="pad stack"><div class="form-msg"></div>
+      ${whenFields(jobs, "S'il y a des appels, la mise à jour attend qu'ils soient finis (dans la plage choisie)")}
+      <p class="s">Au moment venu, le PBX vérifie qu'une nouvelle version existe ; s'il est déjà à jour, rien ne se passe. Pense à une <a href="#/sauvegardes">sauvegarde</a> programmée juste avant.</p>
+      <div class="actions"><button type="button" class="btn link" id="upcancel">Fermer</button><button class="btn">Programmer</button></div></div></form>
     <div id="uplog"></div>
     <div class="grid2"><div class="panel"><div class="ph"><h2>Nouveautés${newer ? ` de la version ${H.esc(a.version)}` : ""}</h2></div><div class="pad cx-md">${md((newer ? a.changelog : c.changelog) || "Aucune note de version.")}</div></div>
-      <div class="panel"><div class="ph"><h2>Pendant la mise à jour</h2></div><div class="pad cx-md"><ul><li>Durée : 2 à 5 minutes.</li><li>Les appels en cours peuvent être coupés quand le moteur téléphonique redémarre : choisis un moment calme.</li>
+      <div class="panel"><div class="ph"><h2>Pendant la mise à jour</h2></div><div class="pad cx-md"><ul><li>Durée : 2 à 5 minutes.</li><li>Les appels en cours peuvent être coupés quand le moteur téléphonique redémarre : choisis un moment calme, ou programme-la la nuit.</li>
         <li>Configuration, utilisateurs, messages et enregistrements sont conservés.</li><li>Conseil : lance une <a href="#/sauvegardes">sauvegarde</a> juste avant.</li></ul></div></div></div>`;
-  H.$("#upchk").addEventListener("click", () => pageUpdates(true));
+  H.$("#upchk").addEventListener("click", () => pageUpdatesMain(nav, jobs, true));
+  const form = H.$("#upform");
+  H.$("#upplan")?.addEventListener("click", () => { form.hidden = false; form.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
+  H.$("#upcancel").addEventListener("click", () => { form.hidden = true; });
+  wireWhen(form);
+  onSubmit(form, async (v) => { await H.api("POST", "/api/updates/jobs", { kind: "pbx", ...whenValue(v) }); ok("Mise à jour du PBX programmée."); pageUpdates("callikoe"); });
+  wireCancel(() => pageUpdates("callikoe"));
   const follow = () => H.poll(async () => {
     let st; try { st = await H.api("GET", "/api/updates/status"); } catch { H.$("#uplog").innerHTML = '<div class="flash warn">La console redémarre…</div>'; return false; }
     H.$("#uplog").innerHTML = `<div class="panel" style="margin-bottom:16px"><div class="ph"><h2>${st.running ? "Mise à jour en cours…" : st.ok ? "Mise à jour terminée" : st.done ? "La mise à jour a échoué" : "Mise à jour"}</h2></div><pre class="cx-log">${H.esc((st.log || []).join("\n"))}</pre></div>`;
     if (st.done && !st.running) { if (st.ok) { ok("Mise à jour terminée."); setTimeout(() => location.reload(), 2500); } return true; }
   }, 2500);
+  if (planned?.status === "running") follow();
   H.$("#upgo")?.addEventListener("click", async (e) => {
     if (e.target.dataset.sure !== "1") { e.target.dataset.sure = "1"; e.target.textContent = "Confirmer (les appels peuvent être coupés)"; return; }
     e.target.disabled = true; await H.api("POST", "/api/updates/start", {}); follow();
   });
+}
+function wireCancel(after) {
+  H.app.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", async () => {
+    if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Confirmer l'annulation"; return; }
+    b.disabled = true; await H.api("DELETE", `/api/updates/jobs/${b.dataset.cancel}`); ok("Mise à jour annulée."); after();
+  }));
+}
+
+// ---------------- Bibliothèque de firmwares
+async function pageFirmwares(nav) {
+  const d = await H.api("GET", "/api/updates/firmwares");
+  const mlabel = new Map(d.models.map((m) => [m.id, m.label]));
+  const fmtFw = (f) => `<tr><td><b>${H.esc(f.name)}</b><div class="s mono-s">${H.esc(f.file || "")}</div></td><td>${H.esc(d.formats[f.format] || f.format)}</td>
+    <td class="mono">${H.esc(f.version)}</td><td>${f.models.map((m) => H.esc(mlabel.get(m) || m)).join(", ")}</td>
+    <td class="nw">${f.url ? `<span class="pill off">Lien</span>` : `<span class="pill ok">Sur le PBX</span><div class="s">${fmtBytes(f.size)}</div>`}</td>
+    <td class="nw s">${fmtDT(f.added_at)}<div>${H.esc(f.added_by || "")}</div></td>
+    <td class="acts nw"><a class="btn ghost sm" href="#/mises-a-jour/programmees?firmware=${H.esc(f.id)}">Programmer</a>
+      ${f.in_use ? "" : `<button class="ghost-ic" data-delfw="${H.esc(f.id)}" title="Supprimer" aria-label="Supprimer">${ic(I.trash)}</button>`}</td></tr>`;
+  const modelBoxes = (fmt) => d.models.filter((m) => m.format === fmt).map((m) => `<label class="cx-chk"><input type="checkbox" name="m_${H.esc(m.id)}" value="1"> ${H.esc(m.label)}</label>`).join("");
+  H.app.innerHTML = head("Mises à jour", "Firmwares des téléphones : envoie le fichier du fabricant une fois, puis programme la mise à jour des postes.") + nav +
+    `<div class="grid2"><div class="panel"><div class="ph"><h2>Bibliothèque</h2></div>
+      ${d.firmwares.length ? `<div class="table-wrap"><table><thead><tr><th>Firmware</th><th>Marque</th><th>Version</th><th>Modèles</th><th>Fichier</th><th>Ajouté</th><th></th></tr></thead><tbody>${d.firmwares.map(fmtFw).join("")}</tbody></table></div>`
+        : `<div class="empty">${ic(I.dl, 34)}<p><strong>Aucun firmware pour l'instant.</strong></p><p>Télécharge le firmware sur le site du fabricant (Yealink, Grandstream, Snom), puis ajoute-le ici.</p></div>`}</div>
+    <form id="fwf" class="panel" novalidate><div class="ph"><h2>Ajouter un firmware</h2></div><div class="pad stack"><div class="form-msg"></div>
+      <div class="seg" id="fwsrc"><label class="on"><input type="radio" name="src" value="file" checked>Envoyer le fichier</label><label><input type="radio" name="src" value="url">Lien du fabricant</label></div>
+      <label class="fwfile">Fichier du firmware<input type="file" id="fwfile" accept=".rom,.bin,.zip,.z"><span class="hint">Les téléphones le téléchargeront depuis le PBX : rien ne sort du réseau.</span></label>
+      <label class="fwurl" hidden>Lien direct du fichier<input name="url" placeholder="https://…/T46U-108.86.0.75.rom"><span class="hint">Les téléphones doivent pouvoir joindre ce lien (accès Internet).</span></label>
+      <div class="cx-g3"><label>Marque<select name="format">${Object.entries(d.formats).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select></label>
+        <label>Version<input name="version" placeholder="108.86.0.75"><span class="hint">Lue dans le nom du fichier quand c'est possible</span></label>
+        <label>Nom (facultatif)<input name="name" placeholder="T46U — novembre 2026"></label></div>
+      <div><b class="s">Modèles concernés</b><div class="cx-chks" id="fwmodels">${modelBoxes("yealink")}</div></div>
+      <p class="s">Fanvil : pas encore pris en charge (la mise à jour se fait depuis la page web du téléphone).</p>
+      <div class="actions"><span id="fwprog" class="s"></span><button class="btn">Ajouter</button></div></div></form></div>`;
+  const f = H.$("#fwf");
+  const src = () => f.querySelector("[name=src]:checked").value;
+  f.querySelectorAll("[name=src]").forEach((r) => r.addEventListener("change", () => {
+    f.querySelectorAll("#fwsrc label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
+    f.querySelector(".fwfile").hidden = src() !== "file"; f.querySelector(".fwurl").hidden = src() !== "url";
+  }));
+  const fmtSel = f.querySelector("[name=format]");
+  fmtSel.addEventListener("change", () => { H.$("#fwmodels").innerHTML = modelBoxes(fmtSel.value); });
+  // Marque et version devinées d'après le nom du fichier
+  const guess = (name) => {
+    const n = String(name || "").split(/[?#]/)[0].split("/").pop();
+    const fmt = /\.rom$/i.test(n) ? "yealink" : /snom|-sip-r\.bin$/i.test(n) ? "snom" : /fw\.bin$/i.test(n) ? "grandstream" : "";
+    if (fmt && fmt !== fmtSel.value) { fmtSel.value = fmt; H.$("#fwmodels").innerHTML = modelBoxes(fmt); }
+    const v = /(\d+\.\d+\.\d+(?:\.\d+)?)/.exec(n)?.[1];
+    if (v && !f.version.value) f.version.value = v;
+    // Yealink : « T46U-… » coche le modèle
+    const m = /^([A-Z]+\d+[A-Z]*)/i.exec(n)?.[1]?.toLowerCase();
+    if (m) f.querySelectorAll("#fwmodels input").forEach((cb) => { if (cb.name.endsWith(`-${m}`)) cb.checked = true; });
+  };
+  H.$("#fwfile").addEventListener("change", (e) => guess(e.target.files[0]?.name));
+  f.url.addEventListener("change", () => guess(f.url.value));
+  onSubmit(f, async (v) => {
+    const models = Object.keys(v).filter((k) => k.startsWith("m_") && v[k]).map((k) => k.slice(2));
+    if (src() === "url") { await H.api("POST", "/api/updates/firmwares", { url: v.url, format: v.format, version: v.version, name: v.name, models }); ok("Firmware ajouté."); return pageUpdates("firmwares"); }
+    const file = H.$("#fwfile").files[0];
+    if (!file) throw Object.assign(new Error("Choisis le fichier du firmware."), { field: "" });
+    H.$("#fwprog").textContent = `Envoi de ${fmtBytes(file.size)}…`;
+    const q = new URLSearchParams({ file: file.name, format: v.format, version: v.version || "", name: v.name || "", models: models.join(",") });
+    const res = await fetch(`/api/updates/firmwares/upload?${q}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file, credentials: "same-origin" });
+    const j = await res.json().catch(() => ({}));
+    H.$("#fwprog").textContent = "";
+    if (!res.ok) throw Object.assign(new Error(j.error || "Envoi impossible."), { field: j.field });
+    ok("Firmware ajouté."); pageUpdates("firmwares");
+  });
+  H.app.querySelectorAll("[data-delfw]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Supprimer ce firmware de la bibliothèque ?")) return;
+    await H.api("DELETE", `/api/updates/firmwares/${b.dataset.delfw}`); ok("Firmware supprimé."); pageUpdates("firmwares");
+  }));
+}
+
+// ---------------- Mises à jour programmées (téléphones + PBX)
+async function pageJobs(nav, jobs, qs) {
+  const lib = await H.api("GET", "/api/updates/firmwares");
+  const pre = new Set((qs.get("postes") || "").split(",").filter(Boolean));
+  const fw0 = qs.get("firmware") || lib.firmwares.find((f) => [...pre].some((x) => f.models.includes(jobs.phones.find((p) => p.ext === x)?.model)))?.id || lib.firmwares[0]?.id || "";
+  const jobCard = (j) => {
+    const t = j.targets || [];
+    const title = j.kind === "pbx" ? `Mise à jour de Callikoe${j.result?.target ? ` vers ${H.esc(j.result.target)}` : ""}` : `Firmware ${H.esc(j.payload.firmware_name || "")} · ${t.length} téléphone${t.length > 1 ? "s" : ""}`;
+    const res = j.kind === "pbx" ? (j.result?.error || j.result?.waiting || (j.status === "done" ? `Installée${j.result?.version ? ` : version ${j.result.version}` : ""}` : "")) : j.result?.total ? `${j.result.ok} / ${j.result.total} à jour` : "";
+    return `<div class="panel" style="margin-bottom:12px"><div class="cx-row"><span class="cx-hero-ic">${ic(j.kind === "pbx" ? I.up2 : I.phone, 20)}</span>
+      <div class="grow"><b>${title}</b><div class="s">${j.status === "pending" ? "Prévue le" : "Lancée le"} ${fmtDT(j.started_at || j.run_at)} · plage de ${WIN_LABEL(j.window_min)} (jusqu'à ${fmtDT(j.end_at)})${j.wait_calls ? " · attend la fin des appels" : ""} · par ${H.esc(j.created_by)}</div>
+      ${res ? `<div class="s">${H.esc(res)}</div>` : ""}</div>${pill(JOB_PILL[j.status] || "off", j.label)}
+      ${j.status === "pending" || (j.status === "running" && j.kind === "phones") ? `<button class="btn ghost sm" data-cancel="${j.id}">Annuler</button>` : ""}</div>
+      ${t.length ? `<details ${j.status === "running" ? "open" : ""}><summary class="s" style="padding:0 16px 12px;cursor:pointer">Détail par téléphone</summary><div class="table-wrap"><table><thead><tr><th>Poste</th><th>Modèle</th><th>État</th><th>Version</th></tr></thead><tbody>
+        ${t.map((x) => `<tr><td class="nw">${H.esc(x.ext)} · ${H.esc(x.name || "")}</td><td>${H.esc(lib.models.find((m) => m.id === x.model)?.label || x.model)}</td><td>${pill(TGT_PILL[x.status] || "off", x.label)}</td>
+          <td class="mono s">${H.esc(x.before || "?")}${x.after && x.after !== x.before ? ` → ${H.esc(x.after)}` : ""}</td></tr>`).join("")}</tbody></table></div></details>` : ""}</div>`;
+  };
+  const fwOpt = lib.firmwares.map((f) => `<option value="${H.esc(f.id)}" ${f.id === fw0 ? "selected" : ""}>${H.esc(f.name)} · ${H.esc(f.version)}</option>`).join("");
+  H.app.innerHTML = head("Mises à jour", "Programme la mise à jour d'un ou plusieurs téléphones, ou du PBX, à l'heure qui gêne le moins.", `<a class="btn ghost" href="#/mises-a-jour/callikoe">${ic(I.up2, 16)} Programmer la mise à jour du PBX</a>`) + nav +
+    `<form id="jf" class="panel" novalidate style="margin-bottom:16px"><div class="ph"><h2>Mettre à jour le firmware de téléphones</h2></div><div class="pad stack"><div class="form-msg"></div>
+      ${lib.firmwares.length ? `<label>Firmware<select name="firmware">${fwOpt}</select></label>
+      <div><div class="cx-row" style="padding:0"><b class="s grow">Téléphones compatibles</b><button type="button" class="btn link" id="jall">Tout cocher</button></div><div class="cx-chks" id="jphones"></div></div>
+      ${whenFields(jobs)}
+      <p class="s">Au moment venu, chaque téléphone reçoit le lien du firmware puis redémarre : il l'installe (quelques minutes) et revient tout seul. Le PBX vérifie ensuite la version de chacun.</p>
+      <div class="actions"><button class="btn">Programmer</button></div>`
+      : `<div class="empty">Ajoute d'abord un firmware dans l'onglet <a href="#/mises-a-jour/firmwares">Firmwares des téléphones</a>.</div>`}</div></form>
+    <h2 class="cx-h3">Tâches</h2>${jobs.jobs.length ? jobs.jobs.map(jobCard).join("") : `<div class="panel"><div class="empty">Aucune mise à jour programmée.</div></div>`}`;
+  wireCancel(() => pageUpdates("programmees"));
+  const f = H.$("#jf");
+  if (!lib.firmwares.length) return;
+  const drawPhones = () => {
+    const fw = lib.firmwares.find((x) => x.id === f.firmware.value);
+    const list = jobs.phones.filter((p) => fw?.models.includes(p.model));
+    H.$("#jphones").innerHTML = list.map((p) => `<label class="cx-chk"><input type="checkbox" name="p_${H.esc(p.ext)}" value="1" ${pre.has(p.ext) ? "checked" : ""}> ${H.esc(p.ext)} · ${H.esc(p.name || "")} <span class="s">${H.esc(p.model_label)}</span></label>`).join("")
+      || `<p class="s">Aucun téléphone de ce modèle (renseigne le modèle et l'adresse MAC dans la fiche de l'utilisateur).</p>`;
+  };
+  f.firmware.addEventListener("change", drawPhones); drawPhones();
+  H.$("#jall").addEventListener("click", () => { const cbs = [...f.querySelectorAll("#jphones input")]; const all = cbs.every((c) => c.checked); cbs.forEach((c) => { c.checked = !all; }); });
+  wireWhen(f);
+  onSubmit(f, async (v) => {
+    const targets = Object.keys(v).filter((k) => k.startsWith("p_") && v[k]).map((k) => k.slice(2));
+    await H.api("POST", "/api/updates/jobs", { kind: "phones", firmware: v.firmware, targets, ...whenValue(v) });
+    ok(`Mise à jour programmée pour ${targets.length} téléphone${targets.length > 1 ? "s" : ""}.`);
+    if (location.hash === "#/mises-a-jour/programmees") pageUpdates("programmees"); else location.hash = "#/mises-a-jour/programmees";
+  });
+  if (jobs.jobs.some((j) => j.status === "running")) setTimeout(() => { if (location.hash.startsWith("#/mises-a-jour/programmees")) pageUpdates("programmees"); }, 30_000);
 }
 
 // ================================================================ Alertes
@@ -1064,7 +1223,7 @@ export async function renderAdmin(helpers, page, sub) {
     case "enregistrements": return pageRecordings(sub);
     case "codes": return pageShortcodes();
     case "sauvegardes": return pageBackups();
-    case "mises-a-jour": return pageUpdates();
+    case "mises-a-jour": return pageUpdates(sub);
     case "alertes": return pageAlerts(sub);
     case "licence": return pageLicense();
     case "passerelles": return pageGateways(sub);

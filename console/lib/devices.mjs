@@ -140,6 +140,7 @@ export function buildGrandstreamXml(mac, accounts, server, { maxAccounts = 4 } =
   const L = ['<?xml version="1.0" encoding="UTF-8"?>', '<gs_provision version="1">', `  <mac>${mac}</mac>`, "  <config version=\"1\">",
     "    <P30>pool.ntp.org</P30>", "    <P64>CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00</P64>", `    <P237>${xml(server.prov_url.replace(/^https?:\/\//, ""))}</P237>`,
     `    <P212>${server.prov_url.startsWith("https") ? 2 : 1}</P212>`, "    <P194>1</P194>", "    <P193>1440</P193>",
+    ...(server.firmware ? [`    <P192>${xml(server.firmware.dir.replace(/^https?:\/\//, "").replace(/\/$/, ""))}</P192>`, "    <P232></P232>", "    <P233></P233>", "    <P238>0</P238>"] : []),
     ...(server.admin_password ? [`    <P2>${xml(server.admin_password)}</P2>`] : [])];
   for (const a of accounts) {
     const p = GS_ACCOUNT_P[a.index - 1];

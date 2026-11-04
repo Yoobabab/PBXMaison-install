@@ -5,6 +5,7 @@
  * modèles Wazo et FusionPBX) ; marqués « à valider » tant qu'ils n'ont pas été essayés sur le matériel.
  * Fonctions pures, testées dans console/test/phones-other.test.mjs.
  */
+import { firmwareParams } from "./schedupdates.mjs";
 import { TIMEZONES, LANGUAGES, TRANSPORTS } from "./phones.mjs";
 
 const xml = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -124,6 +125,7 @@ export function buildSnomPhoneXml(user, phone, secret, server, names = new Map()
     "<phone-settings>",
     ` <setting_server perm="RW">${xml(server.prov_url)}{mac}.xml</setting_server>`,
     s("update_policy", "auto_update"), s("settings_refresh_timer", 86400),
+    ...firmwareParams("snom", server.firmware).map(([k, x]) => s(k, x)),
     s("user_active", "on", ' idx="1"'), s("user_realname", name, ' idx="1"'), s("user_name", user.id, ' idx="1"'), s("user_pname", secret.auth_id, ' idx="1"'),
     s("user_pass", secret.password, ' idx="1"'), s("user_host", `${server.host}:${port}`, ' idx="1"'), s("user_outbound", `${server.host}:${port};transport=${tr}`, ' idx="1"'),
     s("user_expiry", 600, ' idx="1"'), s("user_mailbox", "*97", ' idx="1"'), s("codec_priority_list", "g722,pcma,pcmu,telephone-event", ' idx="1"'),
@@ -168,6 +170,7 @@ export function buildGrandstreamPhoneXml(user, phone, secret, server, names = ne
     ...(phone.admin_password ? [it("users.admin.password", phone.admin_password)] : []),
     it("provisioning.config.protocol", String(server.prov_url).startsWith("https") ? "HTTPS" : "HTTP"),
     it("provisioning.config.serverPath", String(server.prov_url).replace(/^https?:\/\//, "")),
+    ...firmwareParams("grandstream", server.firmware).map(([k, x]) => it(k, x)),
     it("provisioning.auto.mode", "YesUpgradeHourOfDay"), it("provisioning.auto.hour", 2), it("provisioning.auto.endHour", 4), it("provisioning.auto.randomTime.enable", "Yes"),
     ...keys,
     "</config>",

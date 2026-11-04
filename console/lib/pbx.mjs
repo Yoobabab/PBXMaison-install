@@ -870,18 +870,20 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const prov_url = await provisioningUrl(server);
     const model = modelById(u.phone.model);
     const acc = [{ index: 1, user: u.id, name: displayName(u), auth_id: secret.auth_id, password: secret.password }];
-    const srv = { host: server.host, prov_url, lang: u.phone.settings.language, tz: u.phone.settings.timezone, admin_password: u.phone.admin_password };
+    // Mise à jour programmée : lien du firmware le temps de la plage choisie
+    const firmware = firmwareLookup ? await firmwareLookup(u.phone.mac, prov_url).catch(() => null) : null;
+    const srv = { host: server.host, prov_url, lang: u.phone.settings.language, tz: u.phone.settings.timezone, admin_password: u.phone.admin_password, firmware };
     let text;
     // Codes de statut (Codes raccourcis) : le bouton NPD du téléphone prévient le PBX, le statut se voit partout
     const codes = { st_available: "*30", st_dnd: "*32", pickup: "**", ...(await db.getSetting("shortcodes", {})) };
-    const other = { host: server.host, prov_url, codes };
+    const other = { host: server.host, prov_url, codes, firmware };
     // Anciens Fanvil (firmware 1.x : X1S, X3SG, X301, X303) : format texte
     if (model?.format === "fanvil") text = /^fanvil-(x1sg|x3sg|x301|x303)$/.test(model.id) ? buildFanvilCfg(acc, srv) : buildFanvilXml(u, u.phone, secret, other, names);
     else if (model?.format === "snom") text = buildSnomPhoneXml(u, u.phone, secret, other, names);
     else if (model?.format === "grandstream") text = grandstreamAlias(model.id) ? buildGrandstreamPhoneXml(u, u.phone, secret, other, names) : buildGrandstreamXml(u.phone.mac || "", acc, srv);
     else {
       const theme = readTheme();
-      text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes,
+      text = buildYealinkCfg(u, u.phone, secret, { host: server.host, prov_url, firmware, assets_url: `${server.tls ? "https" : "http"}://${server.host}/phone/`, codes,
         wallpaper: (screen) => wallpaperName(screen, theme) }, names);
     }
     return { user: u, text, format: model?.format || "yealink" };
@@ -955,6 +957,15 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     catch { throw new UserError("Moteur téléphonique injoignable."); }
     return { ok: true };
   }
+
+  /** Postes en communication (canaux ouverts) : la mise à jour programmée attend qu'ils raccrochent */
+  async function busyEndpoints() {
+    const lines = await ami.command("core show channels concise");
+    return new Set(lines.map((l) => /^PJSIP\/([^!]+?)-[0-9a-f]+!/.exec(l)?.[1]).filter(Boolean));
+  }
+  let firmwareLookup = null;
+  const setFirmwareLookup = (fn) => { firmwareLookup = fn; };
+  const provTokenOk = async (t) => !!t && t === (await db.getSetting("prov_token", ""));
 
   async function resyncAll() {
     const reg = await registrations();
@@ -1569,7 +1580,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     templates, listTrunks, createTrunk, deleteTrunk,
     listExtensions, createExtension, extensionSecret, resetSecret, deleteExtension, nextFreeExtension,
     getUser, updateUser, applyDialplan, forgetDevice, deleteImpact, findConsoleUser, consoleUserActive,
-    provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones,
+    provisioningUrl, phoneOptions, phoneConfig, provisionFile, resetPhoneAdmin, notifyPhone, resyncAll, trackDevices, listPhones, busyEndpoints, setFirmwareLookup, provTokenOk,
     createAppToken, appTokenStatus, revokeAppToken, appProvision, appDevice, revokeAppDevice, appDevices, revokeAppDevices, createWelcome, welcomeInfo, useWelcome, webSecret, findWebUser, setWebPassword, loadUsers, registrations,
     setExtraDialplan, loadGateways, gatewayConfig, gatewayAccounts, language, countryCode, soundsDir,
     getRoutes, setRoutes, listCalls, lineStates, registrationStatus, publishRoutes,

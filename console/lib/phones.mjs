@@ -3,6 +3,7 @@
  * provisioning et reconnaissance des appareils connectés. Fonctions pures (testées dans
  * console/test/phones.test.mjs).
  */
+import { firmwareParams } from "./schedupdates.mjs";
 import crypto from "node:crypto";
 import { OTHER_PHONES } from "./devices.mjs";
 
@@ -308,6 +309,8 @@ export function buildYealinkCfg(user, phone, secret, server, names = new Map()) 
     v("static.auto_provision.reboot_force.enable", 0),
     // Message « Reprovisionner » (check-sync) : relire la config sans redémarrer
     v("sip.notify_reboot_enable", 0),
+    // Mise à jour programmée du firmware : lien présent seulement pendant la plage choisie
+    ...(server.firmware ? ["## Firmware (mise à jour programmée)", ...firmwareParams("yealink", server.firmware).map(([k, x]) => v(k, x))] : []),
     "",
     "## Annuaire de l'entreprise (collègues + contacts), aussi utilisé pour afficher le nom des appelants",
     v("remote_phonebook.data.1.url", `${server.prov_url}phonebook-${user.id}.xml`),

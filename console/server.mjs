@@ -17,6 +17,7 @@ import { hashPassword, verifyPassword, passwordProblem, createSession, readSessi
 import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import { createHistory } from "./lib/history.mjs";
 import { createAbsences } from "./lib/absences.mjs";
+import { createScheduler } from "./lib/schedupdates.mjs";
 import { isManager, isStandardist, consoleRoleOf, USER_ROLES } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
@@ -57,6 +58,11 @@ export async function buildApp({ db, ami } = {}) {
   const absences = createAbsences({ db, pbx });
   await absences.migrate();
   { let busy = false; setInterval(() => { if (busy || !isConfigured()) return; busy = true; absences.tick().catch((e) => console.error("Absences :", e.message)).finally(() => { busy = false; }); }, 60_000).unref(); }
+  // Mises à jour programmées : firmware des téléphones et mise à jour du PBX
+  const sched = createScheduler({ db, pbx, admin, VAR, models: pbx.phoneOptions().models, tenant: CX_MODE === "tenant", log: (m) => console.log(m) });
+  await sched.migrate();
+  pbx.setFirmwareLookup((mac, provUrl) => sched.firmwareFor(mac, provUrl));
+  { let busy = false; setInterval(() => { if (busy || !isConfigured()) return; busy = true; sched.tick().catch((e) => console.error("Mises à jour programmées :", e.message)).finally(() => { busy = false; }); }, 30_000).unref(); }
   pbx.setExtraDialplan(() => admin.dialplanParts());
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 1_048_576 });
@@ -145,7 +151,7 @@ export async function buildApp({ db, ami } = {}) {
   });
   // Journal d'audit : toute modification faite depuis la console (qui, quand, d'où, quoi)
   const AUDIT_LABEL = [[/^\/api\/(shield|security\/shield)/, "Protection anti-fraude collective"], [/^\/api\/(absences|extensions\/[^/]+\/absences)/, "Absences programmées"], [/^\/api\/security/, "Sécurité"], [/^\/api\/outbound/, "Règles sortantes"], [/^\/api\/trunks/, "Trunks"], [/^\/api\/extensions/, "Utilisateurs"],
-    [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
+    [/^\/api\/callflow/, "Gestion d'appels"], [/^\/api\/routes/, "Routes"], [/^\/api\/backups/, "Sauvegardes"], [/^\/api\/updates\/(jobs|firmwares)/, "Mises à jour programmées"], [/^\/api\/updates/, "Mise à jour"], [/^\/api\/shortcodes/, "Codes raccourcis"],
     [/^\/api\/recording/, "Enregistrement"], [/^\/api\/history/, "Historique du standard"], [/^\/api\/gateways/, "Passerelles"], [/^\/api\/contacts/, "Annuaire"], [/^\/api\/alerts/, "Alertes"], [/^\/api\/setup/, "Configuration"], [/^\/api\/totp/, "Double authentification"], [/^\/api\/license/, "Licence"], [/^\/api\/capture/, "Capture réseau"]];
   app.addHook("onResponse", async (req, reply) => {
     if (req.method === "GET" || !req.url.startsWith("/api/") || reply.statusCode >= 400) return;
@@ -1386,6 +1392,28 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/updates", { preHandler: requireUser }, async (req) => admin.getUpdates({ check: req.query?.check === "1" }));
   app.post("/api/updates/start", { preHandler: requireFreshMfa }, async () => admin.startUpdate());
   app.get("/api/updates/status", { preHandler: requireUser }, async () => admin.updateStatus());
+  // Mises à jour programmées (PBX et firmware des téléphones) et bibliothèque de firmwares
+  app.get("/api/updates/jobs", { preHandler: requireUser }, async () => ({ ...(await sched.listJobs()), phones: await sched.deskPhones() }));
+  app.post("/api/updates/jobs", { preHandler: requireFreshMfa }, async (req) => sched.createJob(req.body || {}, currentUser(req).email));
+  app.delete("/api/updates/jobs/:id", { preHandler: requireUser }, async (req) => sched.cancelJob(req.params.id));
+  app.get("/api/updates/firmwares", { preHandler: requireUser }, async () => sched.listFirmwares());
+  app.post("/api/updates/firmwares", { preHandler: requireUser }, async (req) => sched.addFirmwareUrl(req.body || {}, currentUser(req).email));
+  app.delete("/api/updates/firmwares/:id", { preHandler: requireUser }, async (req) => sched.deleteFirmware(req.params.id));
+  app.register(async (scope) => {
+    scope.addContentTypeParser("application/octet-stream", { bodyLimit: 512 * 1024 ** 2 }, (req, payload, done) => done(null, payload));
+    scope.post("/api/updates/firmwares/upload", { preHandler: requireUser, bodyLimit: 512 * 1024 ** 2 }, async (req) => {
+      const q = req.query || {};
+      return sched.addFirmwareFile(req.body, { file: q.file, format: q.format, version: q.version, name: q.name, models: String(q.models || "").split(",").filter(Boolean) }, currentUser(req).email);
+    });
+  });
+  // Fichier firmware demandé par un téléphone (sans session ; jeton du provisioning dans l'adresse)
+  app.get("/prov/:token/fw/:id/:file", async (req, reply) => {
+    if (!(await pbx.provTokenOk(req.params.token))) return reply.code(404).type("text/plain").send("Introuvable");
+    const out = await sched.firmwareFile(req.params.id, req.params.file, await pbx.provisioningUrl(sipServer()));
+    if (!out) return reply.code(404).type("text/plain").send("Introuvable");
+    if (out.text) return reply.type(`${out.type}; charset=utf-8`).header("cache-control", "no-store").send(out.text);
+    return reply.type("application/octet-stream").header("content-length", out.size).send(fs.createReadStream(out.path));
+  });
   app.get("/api/system", { preHandler: requireUser }, async () => admin.getSystem());
   app.post("/api/system/firewall-check", { preHandler: requireUser }, async () => admin.firewallCheck());
   app.post("/api/system/restart-services", { preHandler: requireAdmin }, async () => admin.systemAction("restart-services"));
