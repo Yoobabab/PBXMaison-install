@@ -54,13 +54,37 @@ export function validateRunAt(value, now = Date.now()) {
   return new Date(Math.max(t, now)).toISOString();
 }
 
+/** Comparaison de versions « 96.86.0.75 » (par nombres) : < 0, 0, > 0 */
+export function cmpVersion(a, b) {
+  const p = (v) => String(v || "").toLowerCase().replace(/^v/, "").split(/[.\-_]/).map((x) => (/^\d+$/.test(x) ? Number(x) : x));
+  const x = p(a), y = p(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const u = x[i] ?? 0, w = y[i] ?? 0;
+    if (u === w) continue;
+    if (typeof u === "number" && typeof w === "number") return u - w;
+    return String(u).localeCompare(String(w));
+  }
+  return 0;
+}
+/** Firmware le plus récent connu pour un modèle (bibliothèque du PBX + catalogue IRT) */
+export function bestFirmware(model, firmwares) {
+  return firmwares.filter((f) => f.models.includes(model)).sort((a, b) => cmpVersion(b.version, a.version) || (a.url ? 1 : 0) - (b.url ? 1 : 0))[0] || null;
+}
+/** La version vue sur le poste est-elle plus ancienne que celle proposée ? (inconnue = on propose) */
+export const needsUpdate = (current, fw) => !!fw && (!current || (!sameVersion(current, fw.version) && cmpVersion(versionPart(current, fw.version), fw.version) < 0));
+// « T46U-108.86.0.70 » → « 108.86.0.70 » (même nombre de morceaux que la version visée)
+const versionPart = (seen, want) => { const n = String(want).split(".").length; const m = String(seen).match(new RegExp(`(\\d+(?:\\.\\d+){${Math.max(0, n - 1)}})$`)); return m ? m[1] : seen; };
+
 /**
- * Tâche « firmware des téléphones » : postes choisis + firmware compatible.
- * phones : [{ ext, name, mac, model }] (téléphones de bureau configurés) ; firmwares : bibliothèque.
+ * Tâche « firmware des téléphones ».
+ * mode « file » : un firmware précis de la bibliothèque pour tous les postes choisis ;
+ * mode « latest » : pour chaque poste, le firmware le plus récent connu pour son modèle, seulement s'il a plus ancien.
+ * phones : [{ ext, name, mac, model, current }] ; firmwares : bibliothèque + catalogue IRT (id « cat:… », avec url).
  */
 export function validatePhonesJob(input, { phones, firmwares, now = Date.now() }) {
-  const fw = firmwares.find((f) => f.id === input.firmware);
-  if (!fw) throw new UserError("Choisis un firmware de la bibliothèque.", "firmware");
+  const mode = input.mode === "latest" ? "latest" : "file";
+  const fw = mode === "file" ? firmwares.find((f) => f.id === input.firmware) : null;
+  if (mode === "file" && !fw) throw new UserError("Choisis un firmware de la bibliothèque.", "firmware");
   const wanted = [...new Set((Array.isArray(input.targets) ? input.targets : []).map(String))];
   if (!wanted.length) throw new UserError("Choisis au moins un téléphone.", "targets");
   if (wanted.length > 500) throw new UserError("500 téléphones au plus par tâche.", "targets");
@@ -69,12 +93,19 @@ export function validatePhonesJob(input, { phones, firmwares, now = Date.now() }
   for (const ext of wanted) {
     const p = byExt.get(ext);
     if (!p || !p.mac) { bad.push(`${ext} (pas de téléphone avec adresse MAC)`); continue; }
-    if (!fw.models.includes(p.model)) { bad.push(`${ext} (${p.model_label || p.model || "modèle inconnu"})`); continue; }
-    targets.push({ ext, name: p.name || "", mac: p.mac, model: p.model, status: "waiting" });
+    const f = mode === "file" ? fw : bestFirmware(p.model, firmwares);
+    if (!f) { bad.push(`${ext} (aucun firmware connu pour ${p.model_label || p.model || "ce modèle"})`); continue; }
+    if (!f.models.includes(p.model)) { bad.push(`${ext} (${p.model_label || p.model || "modèle inconnu"})`); continue; }
+    const t = { ext, name: p.name || "", mac: p.mac, model: p.model, status: "waiting", fw: f.id, version: f.version, fw_name: f.name || f.version };
+    if (f.url && String(f.id).startsWith("cat:")) t.url = f.url;
+    if (mode === "latest" && !needsUpdate(p.current, f)) t.status = "already";
+    targets.push(t);
   }
-  if (bad.length) throw new UserError(`Ce firmware ne convient pas à : ${bad.slice(0, 8).join(", ")}${bad.length > 8 ? "…" : ""}.`, "targets");
+  if (bad.length) throw new UserError(mode === "file" ? `Ce firmware ne convient pas à : ${bad.slice(0, 8).join(", ")}${bad.length > 8 ? "…" : ""}.`
+    : `Impossible pour : ${bad.slice(0, 8).join(", ")}${bad.length > 8 ? "…" : ""}. Ajoute le firmware dans la bibliothèque ou demande-le au catalogue IRT.`, "targets");
+  if (mode === "latest" && targets.every((t) => t.status === "already")) throw new UserError(targets.length > 1 ? "Ces téléphones ont déjà la version la plus récente connue." : "Ce téléphone a déjà la version la plus récente connue.", "targets");
   return { kind: "phones", run_at: validateRunAt(input.run_at, now), window_min: windowOf(input.window_min), wait_calls: input.wait_calls !== false,
-    payload: { firmware: fw.id, firmware_name: fw.name, version: fw.version, targets } };
+    payload: { mode, firmware: fw?.id || "", firmware_name: fw ? fw.name : "le plus récent", version: fw?.version || "", targets } };
 }
 
 export function validatePbxJob(input, { now = Date.now(), tenant = false } = {}) {
@@ -133,7 +164,7 @@ export function firmwareParams(format, fw) {
 export const snomFirmwareStatus = (url) => `<?xml version="1.0" encoding="utf-8"?>\n<firmware-settings>\n <firmware perm="">${String(url).replace(/&/g, "&amp;").replace(/</g, "&lt;")}</firmware>\n</firmware-settings>\n`;
 
 // ------------------------------------------------------------------ Service : bibliothèque + tâches + exécution
-export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, log = () => {} }) {
+export function createScheduler({ db, pbx, admin, ai = null, VAR, models, tenant = false, log = () => {} }) {
   const FW_DIR = path.join(VAR, "firmware");
   const fwPath = (f) => f && !f.url && /^[0-9a-f]{12}$/.test(f.id) ? path.join(FW_DIR, f.id, f.file) : null;
 
@@ -146,10 +177,28 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
 
   // ---------- Bibliothèque de firmwares
   const firmwares = () => db.getSetting("firmwares", []);
+  /** Catalogue IRT (dernière version conseillée par modèle), relu sur le portail chaque heure */
+  const catalog = () => db.getSetting("fw_catalog", { entries: [] });
+  const catalogList = async () => ((await catalog()).entries || []).filter((e) => FW_FORMATS[e.format] && e.url && e.version)
+    .map((e) => ({ id: `cat:${e.id}`, format: e.format, models: e.models || [], version: e.version, url: e.url, name: `Catalogue IRT ${e.version}`, file: String(e.url).split("/").pop(), catalog: true, notes: e.notes || "" }));
+  /** Tout ce qui peut être installé : bibliothèque du PBX + catalogue IRT */
+  const allFirmwares = async () => [...(await firmwares()), ...(await catalogList())];
+  async function syncCatalog() {
+    if (!ai) return;
+    const old = await catalog();
+    try {
+      const r = await ai.relay("/v1/ai/firmware/catalog", undefined);
+      await db.setSetting("fw_catalog", { entries: (r.entries || []).slice(0, 500), updated_at: r.updated_at || null, at: new Date().toISOString(), error: "" });
+    } catch (e) { await db.setSetting("fw_catalog", { ...old, at: new Date().toISOString(), error: e.message }); }
+  }
+  const inUse = async () => {
+    const r = await db.query("SELECT payload FROM pbxmaison_jobs WHERE kind = 'phones' AND status IN ('pending','running')");
+    return new Set(r.rows.flatMap((x) => [x.payload.firmware, ...(x.payload.targets || []).map((t) => t.fw)]).filter(Boolean));
+  };
   async function listFirmwares() {
-    const list = await firmwares();
-    const used = (await db.query("SELECT payload->>'firmware' AS f FROM pbxmaison_jobs WHERE kind = 'phones' AND status IN ('pending','running')")).rows.map((r) => r.f);
-    return { firmwares: list.map((f) => ({ ...f, in_use: used.includes(f.id) })), formats: FW_FORMATS,
+    const [list, used, cat] = await Promise.all([firmwares(), inUse(), catalog()]);
+    return { firmwares: list.map((f) => ({ ...f, in_use: used.has(f.id) })), formats: FW_FORMATS,
+      catalog: { entries: await catalogList(), at: cat.at || null, error: cat.error || "" },
       models: models.filter((m) => FW_FORMATS[m.format]).map((m) => ({ id: m.id, label: m.label, format: m.format })) };
   }
   /** Envoi d'un fichier (corps brut) ; meta dans l'adresse : nom du fichier, marque, modèles, version */
@@ -185,14 +234,19 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
     const list = await firmwares();
     const f = list.find((x) => x.id === id);
     if (!f) throw new UserError("Firmware introuvable.");
-    const busy = (await db.query("SELECT 1 FROM pbxmaison_jobs WHERE kind = 'phones' AND status IN ('pending','running') AND payload->>'firmware' = $1", [id])).rowCount;
-    if (busy) throw new UserError("Ce firmware sert à une mise à jour programmée : annule-la d'abord.");
+    if ((await inUse()).has(id)) throw new UserError("Ce firmware sert à une mise à jour programmée : annule-la d'abord.");
     const p = fwPath(f); if (p) fs.rmSync(path.dirname(p), { recursive: true, force: true });
     await db.setSetting("firmwares", list.filter((x) => x.id !== id));
     return { ok: true };
   }
   /** Fichier demandé par un téléphone : /prov/<jeton>/fw/<id>/<fichier> */
   async function firmwareFile(id, file, provUrl) {
+    // Firmware du catalogue (lien chez le fabricant) : seul le fichier firmware_status des Snom est servi par le PBX
+    const mac = /^mac-([0-9a-f]{12})$/.exec(id)?.[1];
+    if (mac) {
+      const a = (await db.getSetting("fw_assign", {}))[mac];
+      return a?.url && file === "snom-firmware.xml" && Date.parse(a.until) > Date.now() ? { text: snomFirmwareStatus(a.url), type: "application/xml" } : null;
+    }
     const f = (await firmwares()).find((x) => x.id === id);
     if (!f) return null;
     if (file === "snom-firmware.xml") return { text: snomFirmwareStatus(f.url || `${provUrl}fw/${f.id}/${f.file}`), type: "application/xml" };
@@ -207,14 +261,16 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
     if (!mac) return null;
     const a = (await db.getSetting("fw_assign", {}))[mac];
     if (!a || Date.parse(a.until) < Date.now()) return null;
+    if (a.url) return { url: a.url, dir: a.url.replace(/[^/]*$/, ""), snom_status: `${provUrl}fw/mac-${mac}/snom-firmware.xml`, version: a.version || "" };
     const f = (await firmwares()).find((x) => x.id === a.firmware);
     if (!f) return null;
     const dir = `${provUrl}fw/${f.id}/`;
     return { url: f.url || `${dir}${f.file}`, dir, snom_status: `${dir}snom-firmware.xml`, version: f.version };
   }
-  async function assign(macs, firmware, until) {
+  /** targets : [{ mac, fw, url, version }] ; until absent = retirer */
+  async function assign(targets, until = null) {
     const cur = await db.getSetting("fw_assign", {});
-    for (const m of macs) if (firmware) cur[m] = { firmware, until }; else delete cur[m];
+    for (const t of targets) if (until) cur[t.mac] = { firmware: t.fw, url: t.url || "", version: t.version || "", until }; else delete cur[t.mac];
     // Ménage : affectations expirées
     for (const [m, a] of Object.entries(cur)) if (Date.parse(a.until) < Date.now()) delete cur[m];
     await db.setSetting("fw_assign", cur);
@@ -224,7 +280,21 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
   /** Téléphones de bureau configurés (pour choisir et contrôler les cibles) */
   async function deskPhones() {
     const label = new Map(models.map((m) => [m.id, m.label]));
-    return (await pbx.loadUsers()).filter((u) => u.phone?.mac && u.phone?.model).map((u) => ({ ext: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(" ") || u.name || "", mac: u.phone.mac, model: u.phone.model, model_label: label.get(u.phone.model) || u.phone.model }));
+    const [users, seen, all] = await Promise.all([pbx.loadUsers(), seenFirmware(false), allFirmwares()]);
+    return users.filter((u) => u.phone?.mac && u.phone?.model).map((u) => {
+      const current = seen.get(u.phone.mac)?.firmware || "";
+      const best = bestFirmware(u.phone.model, all);
+      return { ext: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(" ") || u.name || "", mac: u.phone.mac, model: u.phone.model, model_label: label.get(u.phone.model) || u.phone.model,
+        format: models.find((m) => m.id === u.phone.model)?.format || "", current, latest: best ? { version: best.version, name: best.name, catalog: !!best.catalog } : null, update: needsUpdate(current, best) };
+    });
+  }
+  /** Mise à jour proposée pour un téléphone (page Téléphones, fiche utilisateur) */
+  async function phoneUpdates() {
+    const m = new Map();
+    for (const p of await deskPhones()) m.set(p.mac, { current: p.current, latest: p.latest, update: p.update, supported: !!FW_FORMATS[p.format] });
+    const open = await db.query("SELECT id, run_at, status, payload FROM pbxmaison_jobs WHERE kind = 'phones' AND status IN ('pending','running')");
+    for (const j of open.rows) for (const t of j.payload.targets || []) if (m.has(t.mac) && (t.status === "waiting" || t.status === "sent")) m.get(t.mac).job = { id: j.id, run_at: j.run_at, status: j.status, version: t.version };
+    return m;
   }
   async function listJobs() {
     const r = await db.query("SELECT * FROM pbxmaison_jobs ORDER BY (status IN ('pending','running')) DESC, created_at DESC LIMIT 60");
@@ -240,7 +310,7 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
       const dup = await db.query("SELECT 1 FROM pbxmaison_jobs WHERE kind = 'pbx' AND status IN ('pending','running')");
       if (dup.rowCount) throw new UserError("Une mise à jour du PBX est déjà programmée : annule-la pour en choisir une autre.");
     } else {
-      job = validatePhonesJob(input, { phones: await deskPhones(), firmwares: await firmwares(), now });
+      job = validatePhonesJob(input, { phones: await deskPhones(), firmwares: await allFirmwares(), now });
       const busy = await db.query("SELECT payload FROM pbxmaison_jobs WHERE kind = 'phones' AND status IN ('pending','running')");
       const taken = new Set(busy.rows.flatMap((r) => (r.payload.targets || []).map((t) => t.ext)));
       const dup = job.payload.targets.filter((t) => taken.has(t.ext)).map((t) => t.ext);
@@ -257,7 +327,7 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
     if (j.kind === "pbx" && j.status === "running") throw new UserError("La mise à jour du PBX est en cours : elle ne peut plus être arrêtée.");
     if (!["pending", "running"].includes(j.status)) throw new UserError("Cette tâche est déjà terminée.");
     if (j.kind === "phones") {
-      await assign((j.payload.targets || []).map((t) => t.mac), null);
+      await assign(j.payload.targets || []);
       for (const t of j.payload.targets || []) if (t.status === "waiting" || t.status === "sent") t.status = "cancelled";
     }
     await db.query("UPDATE pbxmaison_jobs SET status = 'cancelled', payload = $2, finished_at = now() WHERE id = $1", [j.id, JSON.stringify(j.payload)]);
@@ -268,8 +338,8 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
     try { return await pbx.busyEndpoints(); } catch { return null; }
   }
   /** Version vue sur chaque téléphone (identité SIP) : mac → firmware */
-  async function seenFirmware() {
-    await pbx.trackDevices().catch(() => {});
+  async function seenFirmware(track = true) {
+    if (track) await pbx.trackDevices().catch(() => {});
     const r = await db.query("SELECT mac, firmware, online FROM pbxmaison_device_seen WHERE mac <> '' ORDER BY online DESC, last_seen DESC");
     const m = new Map();
     for (const x of r.rows) if (!m.has(x.mac)) m.set(x.mac, x);
@@ -278,22 +348,26 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
 
   async function runPhones(j, now) {
     const end = windowEnd({ ...j, run_at: new Date(j.run_at).toISOString() });
-    const fw = (await firmwares()).find((f) => f.id === j.payload.firmware);
-    const first = j.status === "pending";
-    if (!fw) {
-      await assign(j.payload.targets.map((t) => t.mac), null);
-      await db.query("UPDATE pbxmaison_jobs SET status = 'failed', result = $2, finished_at = now() WHERE id = $1", [j.id, JSON.stringify({ error: "Firmware supprimé de la bibliothèque." })]);
-      return;
-    }
-    if (first) {
-      await assign(j.payload.targets.map((t) => t.mac), fw.id, new Date(end).toISOString());
+    const lib = await firmwares();
+    const T = j.payload.targets;
+    // Anciennes tâches : un seul firmware pour tous
+    for (const t of T) if (!t.fw) { t.fw = j.payload.firmware; t.version = j.payload.version; }
+    const live = T.filter((t) => t.status !== "already");
+    if (j.status === "pending") {
+      const lost = live.filter((t) => !t.url && !lib.some((f) => f.id === t.fw));
+      if (lost.length === live.length && live.length) {
+        await db.query("UPDATE pbxmaison_jobs SET status = 'failed', result = $2, finished_at = now() WHERE id = $1", [j.id, JSON.stringify({ error: "Firmware supprimé de la bibliothèque." })]);
+        return;
+      }
+      await assign(live.filter((t) => !lost.includes(t)), new Date(end).toISOString());
       const seen = await seenFirmware();
-      for (const t of j.payload.targets) t.before = seen.get(t.mac)?.firmware || "";
+      for (const t of T) t.before = seen.get(t.mac)?.firmware || "";
+      for (const t of lost) t.status = "unchanged";
     }
     const [reg, busy, seen] = await Promise.all([pbx.registrations(), busyEndpoints(), seenFirmware()]);
-    for (const t of j.payload.targets) {
+    for (const t of live) {
       const online = (reg.get(t.ext) || []).length > 0 && !!seen.get(t.mac)?.online;
-      const step = phoneStep(t, { online, busy: busy ? busy.has(t.ext) : true, firmware: seen.get(t.mac)?.firmware || "", now, end, waitCalls: j.wait_calls, version: fw.version });
+      const step = phoneStep(t, { online, busy: busy ? busy.has(t.ext) : true, firmware: seen.get(t.mac)?.firmware || "", now, end, waitCalls: j.wait_calls, version: t.version });
       t.status = step.status;
       if (step.send) {
         try { await pbx.notifyPhone(t.ext, "reboot"); t.sent_at = new Date(now).toISOString(); if (step.retry) t.retried = true; t.status = "sent"; }
@@ -301,10 +375,10 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
       }
       t.after = seen.get(t.mac)?.firmware || t.after || "";
     }
-    const open = j.payload.targets.some((t) => t.status === "waiting" || t.status === "sent");
+    const open = T.some((t) => t.status === "waiting" || t.status === "sent");
     if (!open || now >= end) {
-      await assign(j.payload.targets.map((t) => t.mac), null);
-      const out = phonesOutcome(j.payload.targets);
+      await assign(T);
+      const out = phonesOutcome(T);
       await db.query("UPDATE pbxmaison_jobs SET status = $2, payload = $3, result = $4, started_at = COALESCE(started_at, now()), finished_at = now() WHERE id = $1",
         [j.id, out.status, JSON.stringify(j.payload), JSON.stringify(out)]);
       log(`Mise à jour firmware n°${j.id} : ${out.ok}/${out.total} téléphone(s) à jour`);
@@ -356,5 +430,5 @@ export function createScheduler({ db, pbx, admin, VAR, models, tenant = false, l
     setTimeout(() => tick().catch(() => {}), 15_000).unref?.();
   }
 
-  return { migrate, start, tick, listFirmwares, addFirmwareFile, addFirmwareUrl, deleteFirmware, firmwareFile, firmwareFor, listJobs, createJob, cancelJob, deskPhones };
+  return { migrate, start, tick, syncCatalog, phoneUpdates, listFirmwares, addFirmwareFile, addFirmwareUrl, deleteFirmware, firmwareFile, firmwareFor, listJobs, createJob, cancelJob, deskPhones };
 }

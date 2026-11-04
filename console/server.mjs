@@ -59,10 +59,13 @@ export async function buildApp({ db, ami } = {}) {
   await absences.migrate();
   { let busy = false; setInterval(() => { if (busy || !isConfigured()) return; busy = true; absences.tick().catch((e) => console.error("Absences :", e.message)).finally(() => { busy = false; }); }, 60_000).unref(); }
   // Mises à jour programmées : firmware des téléphones et mise à jour du PBX
-  const sched = createScheduler({ db, pbx, admin, VAR, models: pbx.phoneOptions().models, tenant: CX_MODE === "tenant", log: (m) => console.log(m) });
+  const sched = createScheduler({ db, pbx, admin, ai, VAR, models: pbx.phoneOptions().models, tenant: CX_MODE === "tenant", log: (m) => console.log(m) });
   await sched.migrate();
   pbx.setFirmwareLookup((mac, provUrl) => sched.firmwareFor(mac, provUrl));
   { let busy = false; setInterval(() => { if (busy || !isConfigured()) return; busy = true; sched.tick().catch((e) => console.error("Mises à jour programmées :", e.message)).finally(() => { busy = false; }); }, 30_000).unref(); }
+  // Catalogue des firmwares d'IRT (portail) : relu chaque heure
+  setInterval(() => { if (isConfigured()) sched.syncCatalog().catch(() => {}); }, 3600_000).unref();
+  setTimeout(() => { if (isConfigured()) sched.syncCatalog().catch(() => {}); }, 40_000).unref();
   pbx.setExtraDialplan(() => admin.dialplanParts());
 
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL || "warn" }, trustProxy: "127.0.0.1", bodyLimit: 1_048_576 });
@@ -968,8 +971,11 @@ export async function buildApp({ db, ami } = {}) {
     return { ok: true };
   });
 
-  app.get("/api/phones", { preHandler: requireUser }, async () => ({
-    phones: await pbx.listPhones(), provisioning_url: await pbx.provisioningUrl(sipServer()) }));
+  app.get("/api/phones", { preHandler: requireUser }, async () => {
+    const [phones, fw] = await Promise.all([pbx.listPhones(), sched.phoneUpdates().catch(() => new Map())]);
+    // Firmware : version plus récente disponible (bibliothèque ou catalogue IRT), mise à jour programmée
+    return { phones: phones.map((p) => (p.configured && !p.extra && fw.has(p.mac) ? { ...p, fw: fw.get(p.mac) } : p)), provisioning_url: await pbx.provisioningUrl(sipServer()) };
+  });
   app.post("/api/phones/resync", { preHandler: requireUser }, async () => pbx.resyncAll());
   app.post("/api/phones/forget", { preHandler: requireUser }, async (req) => pbx.forgetDevice(req.body?.ext, req.body?.key));
   app.get("/api/phone-options", { preHandler: requireUser }, async () => ({
@@ -985,6 +991,11 @@ export async function buildApp({ db, ami } = {}) {
   });
   app.post("/api/extensions/:id/phone/notify", { preHandler: requireUser }, async (req) => pbx.notifyPhone(req.params.id, req.body?.action));
   app.post("/api/extensions/:id/phone/admin", { preHandler: requireUser }, async (req) => pbx.resetPhoneAdmin(req.params.id));
+  app.get("/api/extensions/:id/phone/firmware", { preHandler: requireUser }, async (req) => {
+    const u = await pbx.getUser(req.params.id);
+    const fw = u.phone?.mac ? (await sched.phoneUpdates()).get(u.phone.mac) : null;
+    return { mac: u.phone?.mac || "", ...(fw || { supported: false }) };
+  });
 
   // Provisioning : fichiers demandés par les téléphones (sans session ; jeton secret dans l'URL)
   app.get("/prov/:token/:file", async (req, reply) => {
@@ -1397,6 +1408,7 @@ export async function buildApp({ db, ami } = {}) {
   app.post("/api/updates/jobs", { preHandler: requireFreshMfa }, async (req) => sched.createJob(req.body || {}, currentUser(req).email));
   app.delete("/api/updates/jobs/:id", { preHandler: requireUser }, async (req) => sched.cancelJob(req.params.id));
   app.get("/api/updates/firmwares", { preHandler: requireUser }, async () => sched.listFirmwares());
+  app.post("/api/updates/firmwares/catalog", { preHandler: requireUser }, async () => { await sched.syncCatalog(); return sched.listFirmwares(); });
   app.post("/api/updates/firmwares", { preHandler: requireUser }, async (req) => sched.addFirmwareUrl(req.body || {}, currentUser(req).email));
   app.delete("/api/updates/firmwares/:id", { preHandler: requireUser }, async (req) => sched.deleteFirmware(req.params.id));
   app.register(async (scope) => {

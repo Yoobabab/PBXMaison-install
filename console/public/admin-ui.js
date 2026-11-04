@@ -549,7 +549,12 @@ async function pageFirmwares(nav) {
         <label>Nom (facultatif)<input name="name" placeholder="T46U — novembre 2026"></label></div>
       <div><b class="s">Modèles concernés</b><div class="cx-chks" id="fwmodels">${modelBoxes("yealink")}</div></div>
       <p class="s">Fanvil : pas encore pris en charge (la mise à jour se fait depuis la page web du téléphone).</p>
-      <div class="actions"><span id="fwprog" class="s"></span><button class="btn">Ajouter</button></div></div></form></div>`;
+      <div class="actions"><span id="fwprog" class="s"></span><button class="btn">Ajouter</button></div></div></form></div>
+    <div class="panel" style="margin-top:16px"><div class="ph"><h2>Catalogue IRT</h2><button type="button" class="btn ghost sm" id="fwcat">Relire le catalogue</button></div>
+      <div class="pad s" style="padding-bottom:0">Dernières versions conseillées par IRT pour chaque modèle, relues chaque heure sur le portail${d.catalog.at ? ` (dernière lecture ${fmtDT(d.catalog.at)})` : ""}${d.catalog.error ? ` · <span class="err">${H.esc(d.catalog.error)}</span>` : ""}. Elles servent au choix « Le plus récent pour chaque poste » ; les téléphones les téléchargent chez le fabricant.</div>
+      ${d.catalog.entries.length ? `<div class="table-wrap"><table><thead><tr><th>Marque</th><th>Version</th><th>Modèles</th><th>Fichier</th></tr></thead><tbody>${d.catalog.entries.map((f) => `<tr><td>${H.esc(d.formats[f.format] || f.format)}</td><td class="mono">${H.esc(f.version)}</td>
+        <td>${f.models.map((m) => H.esc(mlabel.get(m) || m)).join(", ")}${f.notes ? `<div class="s">${H.esc(f.notes)}</div>` : ""}</td><td class="s mono-s">${H.esc(f.file)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty">Le catalogue IRT est vide pour l'instant.</div>`}</div>`;
   const f = H.$("#fwf");
   const src = () => f.querySelector("[name=src]:checked").value;
   f.querySelectorAll("[name=src]").forEach((r) => r.addEventListener("change", () => {
@@ -584,6 +589,7 @@ async function pageFirmwares(nav) {
     if (!res.ok) throw Object.assign(new Error(j.error || "Envoi impossible."), { field: j.field });
     ok("Firmware ajouté."); pageUpdates("firmwares");
   });
+  H.$("#fwcat").addEventListener("click", async (e) => { e.target.disabled = true; await H.api("POST", "/api/updates/firmwares/catalog", {}); pageUpdates("firmwares"); });
   H.app.querySelectorAll("[data-delfw]").forEach((b) => b.addEventListener("click", async () => {
     if (!confirm("Supprimer ce firmware de la bibliothèque ?")) return;
     await H.api("DELETE", `/api/updates/firmwares/${b.dataset.delfw}`); ok("Firmware supprimé."); pageUpdates("firmwares");
@@ -594,10 +600,13 @@ async function pageFirmwares(nav) {
 async function pageJobs(nav, jobs, qs) {
   const lib = await H.api("GET", "/api/updates/firmwares");
   const pre = new Set((qs.get("postes") || "").split(",").filter(Boolean));
-  const fw0 = qs.get("firmware") || lib.firmwares.find((f) => [...pre].some((x) => f.models.includes(jobs.phones.find((p) => p.ext === x)?.model)))?.id || lib.firmwares[0]?.id || "";
+  const mode0 = qs.get("firmware") ? "file" : "latest";
+  const fw0 = qs.get("firmware") || lib.firmwares[0]?.id || "";
+  const supported = new Set(Object.keys(lib.formats));
   const jobCard = (j) => {
     const t = j.targets || [];
-    const title = j.kind === "pbx" ? `Mise à jour de Callikoe${j.result?.target ? ` vers ${H.esc(j.result.target)}` : ""}` : `Firmware ${H.esc(j.payload.firmware_name || "")} · ${t.length} téléphone${t.length > 1 ? "s" : ""}`;
+    const title = j.kind === "pbx" ? `Mise à jour de Callikoe${j.result?.target ? ` vers ${H.esc(j.result.target)}` : ""}`
+      : `${j.payload.mode === "latest" ? "Firmware le plus récent" : `Firmware ${H.esc(j.payload.firmware_name || "")}`} · ${t.length} téléphone${t.length > 1 ? "s" : ""}`;
     const res = j.kind === "pbx" ? (j.result?.error || j.result?.waiting || (j.status === "done" ? `Installée${j.result?.version ? ` : version ${j.result.version}` : ""}` : "")) : j.result?.total ? `${j.result.ok} / ${j.result.total} à jour` : "";
     return `<div class="panel" style="margin-bottom:12px"><div class="cx-row"><span class="cx-hero-ic">${ic(j.kind === "pbx" ? I.up2 : I.phone, 20)}</span>
       <div class="grow"><b>${title}</b><div class="s">${j.status === "pending" ? "Prévue le" : "Lancée le"} ${fmtDT(j.started_at || j.run_at)} · plage de ${WIN_LABEL(j.window_min)} (jusqu'à ${fmtDT(j.end_at)})${j.wait_calls ? " · attend la fin des appels" : ""} · par ${H.esc(j.created_by)}</div>
@@ -605,34 +614,47 @@ async function pageJobs(nav, jobs, qs) {
       ${j.status === "pending" || (j.status === "running" && j.kind === "phones") ? `<button class="btn ghost sm" data-cancel="${j.id}">Annuler</button>` : ""}</div>
       ${t.length ? `<details ${j.status === "running" ? "open" : ""}><summary class="s" style="padding:0 16px 12px;cursor:pointer">Détail par téléphone</summary><div class="table-wrap"><table><thead><tr><th>Poste</th><th>Modèle</th><th>État</th><th>Version</th></tr></thead><tbody>
         ${t.map((x) => `<tr><td class="nw">${H.esc(x.ext)} · ${H.esc(x.name || "")}</td><td>${H.esc(lib.models.find((m) => m.id === x.model)?.label || x.model)}</td><td>${pill(TGT_PILL[x.status] || "off", x.label)}</td>
-          <td class="mono s">${H.esc(x.before || "?")}${x.after && x.after !== x.before ? ` → ${H.esc(x.after)}` : ""}</td></tr>`).join("")}</tbody></table></div></details>` : ""}</div>`;
+          <td class="mono s">${H.esc(x.before || "?")} → ${H.esc(x.after && x.after !== x.before ? x.after : x.version || "")}</td></tr>`).join("")}</tbody></table></div></details>` : ""}</div>`;
   };
   const fwOpt = lib.firmwares.map((f) => `<option value="${H.esc(f.id)}" ${f.id === fw0 ? "selected" : ""}>${H.esc(f.name)} · ${H.esc(f.version)}</option>`).join("");
   H.app.innerHTML = head("Mises à jour", "Programme la mise à jour d'un ou plusieurs téléphones, ou du PBX, à l'heure qui gêne le moins.", `<a class="btn ghost" href="#/mises-a-jour/callikoe">${ic(I.up2, 16)} Programmer la mise à jour du PBX</a>`) + nav +
     `<form id="jf" class="panel" novalidate style="margin-bottom:16px"><div class="ph"><h2>Mettre à jour le firmware de téléphones</h2></div><div class="pad stack"><div class="form-msg"></div>
-      ${lib.firmwares.length ? `<label>Firmware<select name="firmware">${fwOpt}</select></label>
-      <div><div class="cx-row" style="padding:0"><b class="s grow">Téléphones compatibles</b><button type="button" class="btn link" id="jall">Tout cocher</button></div><div class="cx-chks" id="jphones"></div></div>
+      <div class="seg" id="jmode"><label class="${mode0 === "latest" ? "on" : ""}"><input type="radio" name="mode" value="latest" ${mode0 === "latest" ? "checked" : ""}>Le plus récent pour chaque poste</label>
+        <label class="${mode0 === "file" ? "on" : ""}"><input type="radio" name="mode" value="file" ${mode0 === "file" ? "checked" : ""}>Un firmware précis</label></div>
+      <p class="s jlatest">Le PBX regarde la version de chaque poste et installe la plus récente connue pour son modèle (ta bibliothèque et le catalogue IRT) ; un poste déjà à jour n'est pas touché.</p>
+      <label class="jfile">Firmware${lib.firmwares.length ? `<select name="firmware">${fwOpt}</select>` : `<span class="hint">Aucun firmware dans la bibliothèque : ajoute-le dans l'onglet <a href="#/mises-a-jour/firmwares">Firmwares des téléphones</a>.</span>`}</label>
+      <div><div class="cx-row" style="padding:0"><b class="s grow">Téléphones</b><button type="button" class="btn link" id="jall">Tout cocher</button></div><div class="cx-chks" id="jphones"></div></div>
       ${whenFields(jobs)}
       <p class="s">Au moment venu, chaque téléphone reçoit le lien du firmware puis redémarre : il l'installe (quelques minutes) et revient tout seul. Le PBX vérifie ensuite la version de chacun.</p>
-      <div class="actions"><button class="btn">Programmer</button></div>`
-      : `<div class="empty">Ajoute d'abord un firmware dans l'onglet <a href="#/mises-a-jour/firmwares">Firmwares des téléphones</a>.</div>`}</div></form>
+      <div class="actions"><button class="btn">Programmer</button></div></div></form>
     <h2 class="cx-h3">Tâches</h2>${jobs.jobs.length ? jobs.jobs.map(jobCard).join("") : `<div class="panel"><div class="empty">Aucune mise à jour programmée.</div></div>`}`;
   wireCancel(() => pageUpdates("programmees"));
   const f = H.$("#jf");
-  if (!lib.firmwares.length) return;
+  const mode = () => f.querySelector("[name=mode]:checked").value;
   const drawPhones = () => {
-    const fw = lib.firmwares.find((x) => x.id === f.firmware.value);
-    const list = jobs.phones.filter((p) => fw?.models.includes(p.model));
-    H.$("#jphones").innerHTML = list.map((p) => `<label class="cx-chk"><input type="checkbox" name="p_${H.esc(p.ext)}" value="1" ${pre.has(p.ext) ? "checked" : ""}> ${H.esc(p.ext)} · ${H.esc(p.name || "")} <span class="s">${H.esc(p.model_label)}</span></label>`).join("")
-      || `<p class="s">Aucun téléphone de ce modèle (renseigne le modèle et l'adresse MAC dans la fiche de l'utilisateur).</p>`;
+    const m = mode();
+    f.querySelectorAll("#jmode label").forEach((l) => l.classList.toggle("on", l.querySelector("input").checked));
+    f.querySelector(".jlatest").hidden = m !== "latest"; f.querySelector(".jfile").hidden = m !== "file";
+    const fw = lib.firmwares.find((x) => x.id === f.firmware?.value);
+    const list = m === "file" ? jobs.phones.filter((p) => fw?.models.includes(p.model)) : jobs.phones.filter((p) => supported.has(p.format));
+    const kept = new Set([...f.querySelectorAll("#jphones input:checked")].map((c) => c.name.slice(2)));
+    const info = (p) => m === "file" ? `${H.esc(p.current || "?")} → ${H.esc(fw.version)}`
+      : !p.latest ? "aucun firmware connu" : p.update ? `${H.esc(p.current || "?")} → <b>${H.esc(p.latest.version)}</b>` : `à jour (${H.esc(p.current)})`;
+    H.$("#jphones").innerHTML = list.map((p) => {
+      const off = m === "latest" && (!p.latest || !p.update);
+      return `<label class="cx-chk ${off ? "dim" : ""}"><input type="checkbox" name="p_${H.esc(p.ext)}" value="1" ${off ? "disabled" : ""} ${!off && (pre.has(p.ext) || kept.has(p.ext)) ? "checked" : ""}>
+        <span>${H.esc(p.ext)} · ${H.esc(p.name || "")}<span class="s" style="display:block">${H.esc(p.model_label)} · ${info(p)}</span></span></label>`;
+    }).join("") || `<p class="s">${m === "file" ? "Aucun téléphone de ce modèle" : "Aucun téléphone Yealink, Grandstream ou Snom"} (renseigne le modèle et l'adresse MAC dans la fiche de l'utilisateur).</p>`;
   };
-  f.firmware.addEventListener("change", drawPhones); drawPhones();
-  H.$("#jall").addEventListener("click", () => { const cbs = [...f.querySelectorAll("#jphones input")]; const all = cbs.every((c) => c.checked); cbs.forEach((c) => { c.checked = !all; }); });
+  f.querySelectorAll("[name=mode]").forEach((r) => r.addEventListener("change", drawPhones));
+  f.firmware?.addEventListener("change", drawPhones); drawPhones();
+  H.$("#jall").addEventListener("click", () => { const cbs = [...f.querySelectorAll("#jphones input:not(:disabled)")]; const all = cbs.every((c) => c.checked); cbs.forEach((c) => { c.checked = !all; }); });
   wireWhen(f);
   onSubmit(f, async (v) => {
-    const targets = Object.keys(v).filter((k) => k.startsWith("p_") && v[k]).map((k) => k.slice(2));
-    await H.api("POST", "/api/updates/jobs", { kind: "phones", firmware: v.firmware, targets, ...whenValue(v) });
-    ok(`Mise à jour programmée pour ${targets.length} téléphone${targets.length > 1 ? "s" : ""}.`);
+    const targets = [...f.querySelectorAll("#jphones input:checked")].map((c) => c.name.slice(2));
+    const r = await H.api("POST", "/api/updates/jobs", { kind: "phones", mode: mode(), firmware: v.firmware, targets, ...whenValue(v) });
+    const n = r.targets.filter((t) => t.status !== "already").length;
+    ok(`Mise à jour programmée pour ${n} téléphone${n > 1 ? "s" : ""}.`);
     if (location.hash === "#/mises-a-jour/programmees") pageUpdates("programmees"); else location.hash = "#/mises-a-jour/programmees";
   });
   if (jobs.jobs.some((j) => j.status === "running")) setTimeout(() => { if (location.hash.startsWith("#/mises-a-jour/programmees")) pageUpdates("programmees"); }, 30_000);

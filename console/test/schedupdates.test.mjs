@@ -36,7 +36,7 @@ test("tâche téléphones : postes compatibles seulement", () => {
   const firmwares = [{ id: "a1b2c3d4e5f6", name: "T46U 108.86", version: "108.86.0.75", models: ["yealink-t46u"] }];
   const j = validatePhonesJob({ firmware: "a1b2c3d4e5f6", targets: ["201"], run_at: "2026-11-05T01:00:00Z", window_min: 60 }, { phones, firmwares, now: NOW });
   assert.equal(j.kind, "phones"); assert.equal(j.window_min, 60); assert.equal(j.wait_calls, true);
-  assert.deepEqual(j.payload.targets, [{ ext: "201", name: "Julie", mac: "805ec0aabbcc", model: "yealink-t46u", status: "waiting" }]);
+  assert.deepEqual(j.payload.targets, [{ ext: "201", name: "Julie", mac: "805ec0aabbcc", model: "yealink-t46u", status: "waiting", fw: "a1b2c3d4e5f6", version: "108.86.0.75", fw_name: "T46U 108.86" }]);
   assert.throws(() => validatePhonesJob({ firmware: "a1b2c3d4e5f6", targets: ["201", "202", "203"] }, { phones, firmwares, now: NOW }), /202 \(Yealink T54W\), 203 \(pas de téléphone/);
   assert.throws(() => validatePhonesJob({ firmware: "zz", targets: ["201"] }, { phones, firmwares, now: NOW }), /bibliothèque/);
   assert.throws(() => validatePhonesJob({ firmware: "a1b2c3d4e5f6", targets: [] }, { phones, firmwares, now: NOW }), /au moins un téléphone/);
@@ -75,4 +75,22 @@ test("versions, bilan et paramètres de provisioning", () => {
   assert.deepEqual(firmwareParams("snom", fw), [["firmware_status", fw.snom_status]]);
   assert.deepEqual(firmwareParams("yealink", null), []);
   assert.match(snomFirmwareStatus("http://x/a.bin?a=1&b=2"), /<firmware perm="">http:\/\/x\/a\.bin\?a=1&amp;b=2<\/firmware>/);
+});
+
+test("le plus récent : comparaison de versions et choix par modèle", async () => {
+  const { cmpVersion, bestFirmware, needsUpdate } = await import("../lib/schedupdates.mjs");
+  assert.ok(cmpVersion("96.86.0.80", "96.86.0.75") > 0); assert.ok(cmpVersion("96.86.0.100", "96.86.0.75") > 0); assert.equal(cmpVersion("1.2.0", "1.2"), 0);
+  const fws = [{ id: "lib1", models: ["yealink-t54w"], version: "96.86.0.75" }, { id: "cat:x", models: ["yealink-t54w", "yealink-t57w"], version: "96.86.0.80", url: "https://x/a.rom" }];
+  assert.equal(bestFirmware("yealink-t54w", fws).id, "cat:x"); assert.equal(bestFirmware("yealink-t46u", fws), null);
+  assert.ok(needsUpdate("96.86.0.70", fws[1])); assert.ok(!needsUpdate("96.86.0.80", fws[1])); assert.ok(!needsUpdate("96.86.0.85", fws[1])); assert.ok(needsUpdate("", fws[1]));
+  assert.ok(needsUpdate("T54W-96.86.0.70", fws[1]));
+  const phones = [{ ext: "201", mac: "a", model: "yealink-t57w", current: "96.86.0.70" }, { ext: "310", mac: "b", model: "yealink-t54w", current: "96.86.0.80" }, { ext: "203", mac: "c", model: "yealink-t46u", current: "108" }];
+  const j = validatePhonesJob({ mode: "latest", targets: ["201", "310"] }, { phones, firmwares: fws, now: NOW });
+  assert.equal(j.payload.mode, "latest");
+  assert.deepEqual(j.payload.targets.map((t) => [t.ext, t.status, t.fw, t.version, t.url || ""]), [["201", "waiting", "cat:x", "96.86.0.80", "https://x/a.rom"], ["310", "already", "cat:x", "96.86.0.80", "https://x/a.rom"]]);
+  assert.throws(() => validatePhonesJob({ mode: "latest", targets: ["310"] }, { phones, firmwares: fws, now: NOW }), /déjà la version la plus récente/);
+  assert.throws(() => validatePhonesJob({ mode: "latest", targets: ["203"] }, { phones, firmwares: fws, now: NOW }), /aucun firmware connu/);
+  // Mode fichier : même firmware pour tous, version par téléphone
+  const f = validatePhonesJob({ firmware: "lib1", targets: ["310"] }, { phones, firmwares: fws, now: NOW });
+  assert.deepEqual([f.payload.mode, f.payload.targets[0].fw, f.payload.targets[0].version, f.payload.targets[0].status], ["file", "lib1", "96.86.0.75", "waiting"]);
 });

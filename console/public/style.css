@@ -1070,6 +1070,10 @@ td.nowrap{white-space:nowrap}
 
 /* Mises à jour programmées : listes de cases à cocher (modèles, téléphones) */
 .cx-chks { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 18px; margin-top: 8px; }
-.cx-chk { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; gap: 8px; font-weight: 500; margin: 0; cursor: pointer; }
+.cx-chk { display: flex; flex-direction: row; align-items: flex-start; justify-content: flex-start; text-align: left; gap: 8px; font-weight: 500; margin: 0; cursor: pointer; }
 .cx-chk input { width: auto; margin: 0; }
-.cx-chk .s { margin-left: auto; }
+.cx-chk.dim { opacity: .55; cursor: default; }
+.fwbox { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.fwbox .grow { flex: 1; min-width: 240px; }
+.fwbox .s { margin-top: 4px; }
+a.pill { text-decoration: none; }
