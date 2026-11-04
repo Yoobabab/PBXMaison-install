@@ -1073,7 +1073,9 @@ td.nowrap{white-space:nowrap}
 .cx-chk { display: flex; flex-direction: row; align-items: flex-start; justify-content: flex-start; text-align: left; gap: 8px; font-weight: 500; margin: 0; cursor: pointer; }
 .cx-chk input { width: auto; margin: 0; }
 .cx-chk.dim { opacity: .55; cursor: default; }
-.fwbox { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
-.fwbox .grow { flex: 1; min-width: 240px; }
-.fwbox .s { margin-top: 4px; }
+.fwline { font-size: 12.5px; font-weight: 400; color: var(--muted); }
+.fwline .btn.link { font-size: 12.5px; font-weight: 500; padding: 0; vertical-align: baseline; }
+.fwline a, a.fwnew { color: var(--accent, #2563eb); text-decoration: none; }
+.fwnew { color: var(--ink); font-weight: 500; white-space: nowrap; }
+a.fwnew { font-weight: 500; }
 a.pill { text-decoration: none; }

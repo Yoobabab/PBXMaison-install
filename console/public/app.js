@@ -777,8 +777,8 @@ async function renderPhones() {
     const list = d.phones.filter((p) => (f === "all" || (f === "on") === p.online) && (!q || hay(p).includes(q)));
     rows.innerHTML = list.map((p) => {
       const sub = [p.label, p.mac ? fmtMac(p.mac) : "", p.firmware ? `v${p.firmware}` : ""].filter(Boolean).join(" · ") || (!p.configured && p.user_agent ? p.user_agent : "");
-      const fwTag = p.fw?.job ? `<span class="pill wait" title="Mise à jour du firmware programmée">MAJ ${p.fw.job.status === "running" || Date.parse(p.fw.job.run_at) <= Date.now() ? "en cours" : "prévue"} → ${esc(p.fw.job.version)}</span>`
-        : p.fw?.update ? `<a class="pill wait" href="#/mises-a-jour/programmees?postes=${esc(p.user.id)}" title="Programmer la mise à jour">Firmware ${esc(p.fw.latest.version)} dispo</a>` : "";
+      const fwTag = p.fw?.job ? `<span class="fwnew" title="Mise à jour du firmware programmée">→ ${esc(p.fw.job.version)}</span>`
+        : p.fw?.update ? `<a class="fwnew" href="#/mises-a-jour/programmees?postes=${esc(p.user.id)}" title="Firmware ${esc(p.fw.latest.version)} disponible : programmer la mise à jour">↑ ${esc(p.fw.latest.version)}</a>` : "";
       const state = p.online ? `<span class="pill ok">Connecté</span><div class="s">depuis ${esc(ago(p.since))}</div>`
         : p.last_seen ? `<span class="pill bad">Déconnecté</span><div class="s">depuis ${esc(ago(p.since || p.last_seen))}</div><div class="s">dernière connexion le ${esc(fmtSeen(p.last_seen))}</div>`
         : `<span class="pill off">Jamais connecté</span>${p.provisioned ? `<div class="s">provisionné le ${esc(fmtDate(p.provisioned.at))}</div>` : ""}`;
@@ -790,7 +790,7 @@ async function renderPhones() {
       const can = p.online && p.device.kind === "phone" && !p.extra;
       return `<tr class="click ${p.online ? "" : p.last_seen ? "dev-off" : "dev-never"} ${can && psel.has(p.user.id) ? "sel" : ""}" data-href="#/utilisateurs/${esc(p.user.id)}/telephone">
       <td class="ck">${can ? `<input type="checkbox" data-psel="${esc(p.user.id)}" ${psel.has(p.user.id) ? "checked" : ""} aria-label="Cocher ${esc(p.user.id)}">` : ""}</td>
-      <td><span class="devcell">${deviceIcon(p.device.kind)}<span><strong>${esc(p.model || p.device?.label || "Appareil")}</strong>${sub ? `<div class="s mono-s">${esc(sub)}</div>` : ""}${fwTag ? `<div>${fwTag}</div>` : ""}</span></span></td>
+      <td><span class="devcell">${deviceIcon(p.device.kind)}<span><strong>${esc(p.model || p.device?.label || "Appareil")}</strong>${sub || fwTag ? `<div class="s mono-s">${esc(sub)}${fwTag ? ` ${fwTag}` : ""}</div>` : ""}</span></span></td>
       <td class="nw"><a href="#/utilisateurs/${esc(p.user.id)}">${esc(p.user.id)} · ${esc(p.user.name)}</a></td>
       <td class="nw">${state}</td>
       <td class="hide-sm">${addr}</td>
@@ -1356,6 +1356,7 @@ async function renderUser(id, tab = "general") {
         <div class="full phrow"><label>Modèle<select name="phone.model"><option value="">— Saisie manuelle / softphone —</option>${o.models.map((m) => `<option value="${m.id}" ${ph.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
 <label>Adresse MAC<input name="phone.mac" value="${esc(fmtMac(ph.mac))}" placeholder="44:DB:D2:29:FA:7B" autocomplete="off"><span class="hint">Sur l'étiquette sous le téléphone.</span></label>
           ${ph.mac ? `<button type="button" class="btn ghost provtog ${u.registered ? "" : "on"}" id="provtog" aria-expanded="${u.registered ? "false" : "true"}"><span class="chev">▸</span> Provisioning et page web ${u.registered ? '<span class="pill ok">Connecté</span>' : ""}</button>` : ""}</div>
+        ${ph.mac && ph.model ? `<div class="full" id="fwbox" style="margin-top:-6px"></div>` : ""}
         ${ph.mac ? `<div class="full provwrap" id="provpanel" ${u.registered ? "hidden" : ""}><div class="provbox">
           <div><span class="dl">Lien de provisioning</span><span class="mono">${esc(o.provisioning_url)}</span> <button class="copy" type="button" data-copy="${esc(o.provisioning_url)}">Copier</button>
             <div class="hint">À saisir dans le téléphone (page web › Paramètres › Auto Provision › Server URL) ou en option DHCP 66. Le téléphone télécharge ensuite <span class="mono">${esc(ph.mac)}.cfg</span>.</div></div>
@@ -1367,7 +1368,6 @@ async function renderUser(id, tab = "general") {
             <span class="secret"><input type="password" readonly value="${esc(ph.admin_password)}" id="adminpw"></span> <button class="copy" type="button" data-copy="${esc(ph.admin_password)}">Copier</button>
             <button type="button" class="btn link" id="adminreset">Réinitialiser</button>
             <div class="hint">Appliqué au prochain provisioning.</div></div></div></div>` : ""}
-        ${ph.mac && ph.model ? `<div class="full" id="fwbox"></div>` : ""}
         <h3 class="full sec">Téléphones supplémentaires <span class="hint" style="font-weight:400">(même poste ${esc(u.id)} : ils sonnent ensemble, mêmes réglages et touches)</span></h3>
         <div class="full" id="extraph"></div>
         <h3 class="full sec">Réglages du téléphone</h3>
@@ -1549,20 +1549,18 @@ async function renderUser(id, tab = "general") {
     // Firmware du téléphone : version actuelle, plus récente connue (bibliothèque ou catalogue IRT), mise à jour maintenant ou programmée
     if ($("#fwbox")) api("GET", `/api/extensions/${u.id}/phone/firmware`).then((fw) => {
       const box = $("#fwbox"); if (!box) return;
-      if (!fw.supported) { box.innerHTML = `<div class="fwbox"><b>Firmware</b><span class="s">Mise à jour depuis la page web du téléphone (Fanvil pas encore pris en charge par Callikoe).</span></div>`; return; }
+      if (!fw.supported) { box.innerHTML = `<div class="fwline">Firmware : mise à jour depuis la page web du téléphone</div>`; return; }
       const prog = `#/mises-a-jour/programmees?postes=${encodeURIComponent(u.id)}`;
-      const state = fw.job ? `<span class="pill wait">Mise à jour ${fw.job.status === "running" || Date.parse(fw.job.run_at) <= Date.now() ? "en cours" : `prévue le ${esc(fmtDateTime(fw.job.run_at))}`} → ${esc(fw.job.version)}</span> <a href="#/mises-a-jour/programmees">Voir</a>`
-        : fw.update ? `<span class="pill wait">Version ${esc(fw.latest.version)} disponible</span>`
-        : fw.latest ? `<span class="pill ok">À jour</span>` : `<span class="pill off">Aucun firmware connu pour ce modèle</span>`;
-      box.innerHTML = `<div class="fwbox"><div class="grow"><b>Firmware</b> ${state}
-        <div class="s">Version du téléphone : <span class="mono">${esc(fw.current || "inconnue (pas encore connecté)")}</span>${fw.latest ? ` · plus récente connue : <span class="mono">${esc(fw.latest.version)}</span> (${fw.latest.catalog ? "catalogue IRT" : "bibliothèque du PBX"})` : ""}</div></div>
-        ${fw.job ? "" : `${fw.update ? `<button type="button" class="btn sm" id="fwnow">Mettre à jour maintenant</button>` : ""}<a class="btn ghost sm" href="${prog}">${fw.update ? "Programmer…" : "Installer un firmware…"}</a>`}</div>`;
+      const cur = `Firmware <span class="mono">${esc(fw.current || "inconnu")}</span>`;
+      box.innerHTML = `<div class="fwline">${cur}${fw.job ? ` · <span class="fwnew">mise à jour ${fw.job.status === "running" || Date.parse(fw.job.run_at) <= Date.now() ? "en cours" : `prévue le ${esc(fmtDateTime(fw.job.run_at))}`} → ${esc(fw.job.version)}</span>`
+        : fw.update ? ` · <span class="fwnew">${esc(fw.latest.version)} disponible</span> · <button type="button" class="btn link" id="fwnow">Mettre à jour</button> · <a href="${prog}">Programmer</a>`
+        : fw.latest ? " · à jour" : ""}</div>`;
       $("#fwnow")?.addEventListener("click", async (e) => {
         const b = e.currentTarget;
-        if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = u.registered ? "Confirmer (le téléphone redémarre)" : "Confirmer (dès qu'il se connecte, dans l'heure)"; return; }
+        if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = u.registered ? "Confirmer (redémarrage)" : "Confirmer (dès qu'il se connecte)"; return; }
         b.disabled = true;
         try { await api("POST", "/api/updates/jobs", { kind: "phones", mode: "latest", targets: [u.id], run_at: "now", window_min: 60, wait_calls: true }); flash = { text: "Mise à jour du firmware lancée : le téléphone redémarre dès qu'il n'est plus en appel." }; route(); }
-        catch (err) { b.disabled = false; b.textContent = "Mettre à jour maintenant"; box.insertAdjacentHTML("beforeend", `<div class="flash bad">${esc(err.message)}</div>`); }
+        catch (err) { b.disabled = false; b.textContent = "Mettre à jour"; box.insertAdjacentHTML("beforeend", `<div class="fwline err">${esc(err.message)}</div>`); }
       });
     }).catch(() => {});
     $("#provtog")?.addEventListener("click", (e) => {
