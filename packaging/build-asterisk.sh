@@ -35,6 +35,15 @@ VERSION="$(basename "$SRC" | sed 's/^asterisk-//')"
 cd "$SRC"
 echo "== Asterisk $VERSION pour $TARGET"
 
+# Opus (softphone web, appli mobile) : module libre codec_opus_open_source (GPL v2, github.com/traud/asterisk-opus),
+# compilé avec libopus ; correction d'erreurs (FEC) activée par défaut pour les réseaux mobiles
+OPUS_REV=a959f072d3f364be983dd27e6e250b038aaef747
+wget -q -O /tmp/asterisk-opus.tar.gz "https://codeload.github.com/traud/asterisk-opus/tar.gz/${OPUS_REV}"
+tar xzf /tmp/asterisk-opus.tar.gz -C /tmp
+cp /tmp/asterisk-opus-${OPUS_REV}/codecs/codec_opus_open_source.c /tmp/asterisk-opus-${OPUS_REV}/codecs/ex_opus.h codecs/
+sed -i 's/^#define CODEC_OPUS_DEFAULT_FEC 0/#define CODEC_OPUS_DEFAULT_FEC 1/' include/asterisk/opus.h
+grep -q 'CODEC_OPUS_DEFAULT_FEC 1' include/asterisk/opus.h || { echo "Réglage FEC d'Opus introuvable"; exit 1; }
+
 echo "== configure"
 ./configure --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -n 25
 make -s menuselect.makeopts >/dev/null
@@ -44,7 +53,6 @@ menuselect/menuselect \
   --enable CORE-SOUNDS-FR-ALAW --enable CORE-SOUNDS-FR-ULAW --enable CORE-SOUNDS-FR-G722 \
   --enable CORE-SOUNDS-EN-ALAW --enable CORE-SOUNDS-EN-ULAW \
   --enable MOH-OPSOUND-ALAW --enable MOH-OPSOUND-ULAW --enable MOH-OPSOUND-G722 \
-  --enable codec_opus \
   menuselect.makeopts
 echo "== make ($(nproc) cœurs)"
 make -s -j"$(nproc)" 2>&1 | grep -E -i "error|erreur" | head -n 40 || true
@@ -55,9 +63,8 @@ rm -rf "$STAGE"
 echo "== make install (+ sons)"
 make -s install DESTDIR="$STAGE" 2>&1 | grep -v -E '\.{10}' | tail -n 20 || true
 test -x "$STAGE/usr/sbin/asterisk" || { echo "Échec de make install"; exit 1; }
-# Opus (softphone web, appli mobile) : module gratuit fourni par Sangoma, téléchargé par make install.
-# S'il manque, Callikoe reste en G.722 / G.711 pour ces appareils (pas d'échec de la compilation).
-if ls "$STAGE"/usr/lib*/asterisk/modules/codec_opus.so >/dev/null 2>&1; then echo "== codec_opus : présent"; else echo "== codec_opus : ABSENT (téléchargement impossible ?)"; fi
+ls "$STAGE"/usr/lib*/asterisk/modules/codec_opus_open_source.so >/dev/null 2>&1 || { echo "Module Opus non compilé"; exit 1; }
+echo "== codec_opus_open_source : présent"
 # Pas de fichiers de configuration d'exemple : PBXMaison écrit les siens
 rm -rf "$STAGE/etc/asterisk"
 # /var/run est un lien vers /run sur le système cible : ne jamais le livrer
@@ -69,7 +76,7 @@ cp -a contrib/ast-db-manage "$STAGE/usr/share/asterisk/ast-db-manage"
 install -m 0644 configs/samples/indications.conf.sample "$STAGE/usr/share/asterisk/indications.conf.sample"
 install -m 0644 configs/samples/musiconhold.conf.sample "$STAGE/usr/share/asterisk/musiconhold.conf.sample"
 # Version de l'archive = version d'Asterisk + révision Callikoe (changer CX_BUILD force la réinstallation sur les serveurs)
-CX_BUILD=2   # 2 : module Opus (softphone web, appli)
+CX_BUILD=2   # 2 : module Opus libre (softphone web, appli)
 echo "${VERSION}+cx${CX_BUILD}" > "$STAGE/usr/share/asterisk/VERSION"
 
 # Dépendances d'exécution : bibliothèques liées → paquets apt qui les fournissent

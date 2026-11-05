@@ -62,7 +62,7 @@ const genPassword = () => crypto.randomBytes(24).toString("base64").replace(/[^A
 const hostOk = (h) => /^[A-Za-z0-9.-]+$/.test(h) && h.includes(".");
 
 const WEB_CODECS = "g722,alaw,ulaw,vp8,h264";
-// Opus en premier pour le softphone web et l'appli quand le moteur sait le convertir (module codec_opus) :
+// Opus en premier pour le softphone web et l'appli quand le moteur sait le convertir (module codec_opus ou codec_opus_open_source) :
 // prévu pour Internet et la 4G (correction des paquets perdus, débit adapté), bien plus stable que G.722
 const OPUS_CODECS = `opus,${WEB_CODECS}`;
 /** SDA d'un trunk : son numéro principal (au format national) puis les SDA ajoutées. */
@@ -359,7 +359,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   let webCodecs = WEB_CODECS;
   /** Le moteur a-t-il le module Opus (conversion vers G.711 / G.722) ? */
   async function opusReady() {
-    try { return (await ami.command("module show like codec_opus")).some((l) => /codec_opus\.so/.test(l) && /running/i.test(l)); } catch { return null; }   // moteur injoignable : on ne change rien
+    try { return (await ami.command("module show like opus")).some((l) => /codec_opus(_open_source)?\.so/.test(l) && /running/i.test(l)); } catch { return null; }   // moteur injoignable : on ne change rien
   }
   async function createWebEndpoint(c, u) {
     const id = `${u.id}-web`;
