@@ -43,6 +43,8 @@ tar xzf /tmp/asterisk-opus.tar.gz -C /tmp
 cp /tmp/asterisk-opus-${OPUS_REV}/codecs/codec_opus_open_source.c /tmp/asterisk-opus-${OPUS_REV}/codecs/ex_opus.h codecs/
 sed -i 's/^#define CODEC_OPUS_DEFAULT_FEC 0/#define CODEC_OPUS_DEFAULT_FEC 1/' include/asterisk/opus.h
 grep -q 'CODEC_OPUS_DEFAULT_FEC 1' include/asterisk/opus.h || { echo "Réglage FEC d'Opus introuvable"; exit 1; }
+# L'archive d'Asterisk contient la liste des modules déjà calculée : la refaire pour qu'elle voie le module ajouté
+rm -f menuselect-tree
 
 echo "== configure"
 ./configure --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -n 25
