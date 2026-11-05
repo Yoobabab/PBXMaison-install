@@ -11,7 +11,7 @@ const wav = (secs, rate = 8000) => { const n = secs * rate, b = Buffer.alloc(44 
 
 test("fonds musicaux du serveur multi-tenant : ajout vérifié, liste, renommage, retrait ; proposés aux PBX avec ceux du portail", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cxmusic-"));
-  assert.throws(() => checkMusicWav(wav(10, 44100)), /8 kHz/);
+  assert.throws(() => checkMusicWav(wav(10, 44100)), /16 kHz/);
   assert.throws(() => addServerMusic("Court", wav(2), dir), /5 et 90/);
   const a = addServerMusic("Jazz du magasin", wav(10), dir), b = addServerMusic("Jazz du magasin", wav(6), dir);
   assert.equal(a.id, "srv-jazz-du-magasin"); assert.equal(b.id, "srv-jazz-du-magasin-2");
@@ -23,7 +23,7 @@ test("fonds musicaux du serveur multi-tenant : ajout vérifié, liste, renommage
   const fetchImpl = async (url) => ({ ok: true, json: async () => (url.endsWith("/v1/ai/music") ? { music: [{ id: "silk-phello", name: "Silk — Phello", seconds: 60 }] } : {}) });
   const ai = createAi({ db, etcDir: dir, env: { CX_MUSIC_DIR: dir, PBXM_AI_URL: "http://relais" }, fetchImpl });
   assert.deepEqual((await ai.musics()).map((m) => m.id), ["silk-phello", "srv-jazz-du-magasin", "srv-jazz-du-magasin-2"]);
-  assert.equal((await ai.music("srv-jazz-du-magasin")).length, 44 + 10 * 16000);
+  assert.equal((await ai.music("srv-jazz-du-magasin")).length, 44 + 10 * 32000);   // fourni en 16 kHz (HD)
   removeServerMusic(a.id, dir);
   assert.equal(serverMusicFile(a.id, dir), null);
   await assert.rejects(ai.music(a.id), /inconnu/);

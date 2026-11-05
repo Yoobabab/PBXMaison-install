@@ -21,12 +21,13 @@ export function serverMusicFile(id, dir = MUSIC_DIR) {
   const f = path.join(dir, `${id}.wav`);
   return fs.existsSync(f) ? f : null;
 }
-/** Vérifie un WAV 8 kHz mono 16 bits de 5 à 90 s ; renvoie sa durée */
+/** Vérifie un WAV 16 kHz (HD) ou 8 kHz, mono 16 bits, de 5 à 90 s ; renvoie sa durée */
 export function checkMusicWav(buf) {
   const b = Buffer.from(buf);
   if (b.length < 44 || b.toString("ascii", 0, 4) !== "RIFF" || b.toString("ascii", 8, 12) !== "WAVE") throw new Error("Fichier audio illisible (WAV attendu).");
-  if (b.readUInt16LE(20) !== 1 || b.readUInt16LE(22) !== 1 || b.readUInt32LE(24) !== 8000 || b.readUInt16LE(34) !== 16) throw new Error("Format inattendu : WAV 8 kHz mono 16 bits attendu.");
-  const seconds = (b.length - 44) / 16000;
+  const rate = b.readUInt32LE(24);
+  if (b.readUInt16LE(20) !== 1 || b.readUInt16LE(22) !== 1 || ![8000, 16000].includes(rate) || b.readUInt16LE(34) !== 16) throw new Error("Format inattendu : WAV 16 kHz (ou 8 kHz) mono 16 bits attendu.");
+  const seconds = (b.length - 44) / (rate * 2);
   if (seconds < 5 || seconds > 90) throw new Error("Fond musical : entre 5 et 90 secondes.");
   return Math.round(seconds * 10) / 10;
 }

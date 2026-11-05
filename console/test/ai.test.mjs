@@ -20,7 +20,7 @@ test("IA : résumé d'un message vocal lu proprement", () => {
 test("IA : voix reçue (24 kHz, taille de flux) convertie au format des annonces (8 kHz mono)", () => {
   const out = toPbxWav(wav(24000, 1, 24000));
   assert.equal(out.readUInt32LE(24), 8000); assert.equal(out.readUInt16LE(22), 1); assert.equal(out.readUInt32LE(40), 16000);
-  assert.equal(out.readInt16LE(44), 1000);
+  assert.ok(Math.abs(out.readInt16LE(44 + 4000 * 2) - 1000) <= 2);   // signal constant conservé (hors bords du filtre)
   assert.equal(toPbxWav(wav(16000, 2, 1600)).readUInt32LE(40), 1600);
   assert.throws(() => toPbxWav(Buffer.from("pas un wav")), /illisible/);
 });
@@ -62,17 +62,18 @@ test("fond musical : musique seule au début, voix 1,5 s après, musique baissé
   const sine = (n, f, a) => Array.from({ length: n }, (_, i) => a * Math.sin((2 * Math.PI * f * i) / R));
   const voice = wavOf(sine(3 * R, 440, 8000));           // 3 s de « voix »
   const music = wavOf(sine(2 * R, 200, 20000));          // 2 s de musique forte : doit boucler
-  const out = mixMusic(voice, music);
+  const out = mixMusic(voice, music);   // mélange en 16 kHz (HD)
+  assert.equal(out.readUInt32LE(24), 16000);
   const n = (out.length - 44) / 2;
-  assert.equal(n, Math.round(1.5 * R) + 3 * R + 2 * R);  // 1,5 s + voix + 2 s
+  { const R = 16000; assert.equal(n, Math.round(1.5 * R) + 3 * R + 2 * R); }  // 1,5 s + voix + 2 s
   const rms = (a, z) => { let e = 0; for (let i = a; i < z; i++) e += out.readInt16LE(44 + i * 2) ** 2; return Math.sqrt(e / (z - a)); };
-  const intro = rms(0.3 * R, 0.9 * R), bed = rms(4.6 * R, 4.95 * R), end = rms(n - 400, n);
+  const Q = 16000, intro = rms(0.3 * Q, 0.9 * Q), bed = rms(4.6 * Q, 4.95 * Q), end = rms(n - 800, n);
   const vr = 8000 / Math.SQRT2;
   assert.ok(Math.abs(20 * Math.log10(intro / vr) + 6) < 1.5, `intro ${intro}`);   // musique seule : 6 dB sous la voix
   assert.ok(Math.abs(20 * Math.log10(bed / vr) + 15) < 1.5, `après la voix ${bed}`); // 15 dB sous la voix
   assert.ok(end < bed / 4, "fondu de fin");
-  assert.ok(rms(2 * R, 4 * R) > 0.9 * vr, "la voix reste entendue");
-  assert.ok(rms(3.4 * R, 3.6 * R) > 0, "la musique a bouclé");
+  assert.ok(rms(2 * Q, 4 * Q) > 0.9 * vr, "la voix reste entendue");
+  assert.ok(rms(3.4 * Q, 3.6 * Q) > 0, "la musique a bouclé");
 });
 
 test("appels enregistrés : résumé, découpage en morceaux, recherche", async () => {

@@ -817,7 +817,7 @@ export async function buildApp({ db, ami } = {}) {
   app.post("/api/u/ai/speech", { preHandler: requireWebUser }, async (req) => {
     await pilotOf(req);
     const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice, req.body?.music || "");
-    return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / 16000) * 10) / 10 };
+    return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / (wav.readUInt32LE(24) * 2)) * 10) / 10 };
   });
   app.get("/api/u/ai/music/:id", { preHandler: requireWebUser }, async (req, reply) => { await pilotOf(req); return reply.type("audio/wav").header("cache-control", "private, max-age=3600").send(await ai.music(req.params.id)); });
   app.post("/api/u/ai/announce-text", { preHandler: requireWebUser }, async (req) => { await pilotOf(req); return { text: await ai.text("announce", String(req.body?.idea || "").slice(0, 1000)) }; });
@@ -1265,7 +1265,7 @@ export async function buildApp({ db, ami } = {}) {
   app.get("/api/ai/music/:id", { preHandler: requireUser }, async (req, reply) => reply.type("audio/wav").header("cache-control", "private, max-age=3600").send(await ai.music(req.params.id)));
   app.post("/api/ai/speech", { preHandler: requireUser }, async (req) => {
     const wav = await ai.speech(String(req.body?.text || ""), req.body?.voice, req.body?.music || "");
-    return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / 16000) * 10) / 10 };
+    return { wav: wav.toString("base64"), seconds: Math.round(((wav.length - 44) / (wav.readUInt32LE(24) * 2)) * 10) / 10 };
   });
   app.post("/api/ai/announce-text", { preHandler: requireUser }, async (req) => ({ text: await ai.text("announce", String(req.body?.idea || "").slice(0, 1000)) }));
   app.post("/api/ai/diagnose", { preHandler: requireUser }, async (req) => {

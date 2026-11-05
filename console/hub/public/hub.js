@@ -458,7 +458,7 @@ async function renderNew() {
 const LIC_STATUS = { valide: ["ok", "À jour"], bientot: ["wait", "Expire bientôt"], expiree: ["bad", "Expirée"], revoquee: ["off", "Supprimée"] };
 let licFilter = "", licQuery = "", licSort = { k: "exp", dir: 1 };
 // ---------------------------------------------------------------- IA : fonds musicaux des annonces
-/** Fichier audio → WAV 8 kHz mono, 60 s max après le silence du début, volume égalisé, fondus (dans le navigateur) */
+/** Fichier audio → WAV 16 kHz (HD) mono, 60 s max après le silence du début, volume égalisé, fondus (dans le navigateur) */
 async function toMusicWav(file) {
   const ac = new (window.AudioContext || window.webkitAudioContext)();
   let audio; try { audio = await ac.decodeAudioData(await file.arrayBuffer()); } finally { ac.close(); }
@@ -466,17 +466,17 @@ async function toMusicWav(file) {
   let s0 = 0; while (s0 < audio.length && ch.every((c) => Math.abs(c[s0]) < 0.01)) s0++;
   const dur = Math.min(60, (audio.length - s0) / sr);
   if (dur < 5) throw new Error("musique trop courte (5 s minimum)");
-  const off = new OfflineAudioContext(1, Math.floor(dur * 8000), 8000);
+  const off = new OfflineAudioContext(1, Math.floor(dur * 16000), 16000);
   const src = off.createBufferSource(); src.buffer = audio;
-  const lp = off.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3400;
+  const lp = off.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 7000;
   src.connect(lp).connect(off.destination); src.start(0, s0 / sr, dur);
   const x = (await off.startRendering()).getChannelData(0);
   let e = 0, n = 0, peak = 0; for (const v of x) { if (Math.abs(v) > 0.01) { e += v * v; n++; } peak = Math.max(peak, Math.abs(v)); }
   const g = Math.min(n ? 0.1 / Math.sqrt(e / n) : 1, peak ? 0.95 / peak : 1);   // ≈ −20 dB, sans saturer
-  const fi = 0.3 * 8000, fo = 2 * 8000, L = x.length, b = new DataView(new ArrayBuffer(44 + L * 2));
+  const fi = 0.3 * 16000, fo = 2 * 16000, L = x.length, b = new DataView(new ArrayBuffer(44 + L * 2));
   const w = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
   w(0, "RIFF"); b.setUint32(4, 36 + L * 2, true); w(8, "WAVEfmt "); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
-  b.setUint32(24, 8000, true); b.setUint32(28, 16000, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, "data"); b.setUint32(40, L * 2, true);
+  b.setUint32(24, 16000, true); b.setUint32(28, 32000, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, "data"); b.setUint32(40, L * 2, true);
   for (let i = 0; i < L; i++) { const f = Math.min(1, i / fi, (L - i) / fo); b.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(x[i] * g * f * 32767))), true); }
   return new Uint8Array(b.buffer);
 }

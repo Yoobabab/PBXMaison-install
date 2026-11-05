@@ -44,6 +44,7 @@ menuselect/menuselect \
   --enable CORE-SOUNDS-FR-ALAW --enable CORE-SOUNDS-FR-ULAW --enable CORE-SOUNDS-FR-G722 \
   --enable CORE-SOUNDS-EN-ALAW --enable CORE-SOUNDS-EN-ULAW \
   --enable MOH-OPSOUND-ALAW --enable MOH-OPSOUND-ULAW --enable MOH-OPSOUND-G722 \
+  --enable codec_opus \
   menuselect.makeopts
 echo "== make ($(nproc) cœurs)"
 make -s -j"$(nproc)" 2>&1 | grep -E -i "error|erreur" | head -n 40 || true
@@ -54,6 +55,9 @@ rm -rf "$STAGE"
 echo "== make install (+ sons)"
 make -s install DESTDIR="$STAGE" 2>&1 | grep -v -E '\.{10}' | tail -n 20 || true
 test -x "$STAGE/usr/sbin/asterisk" || { echo "Échec de make install"; exit 1; }
+# Opus (softphone web, appli mobile) : module gratuit fourni par Sangoma, téléchargé par make install.
+# S'il manque, Callikoe reste en G.722 / G.711 pour ces appareils (pas d'échec de la compilation).
+if ls "$STAGE"/usr/lib*/asterisk/modules/codec_opus.so >/dev/null 2>&1; then echo "== codec_opus : présent"; else echo "== codec_opus : ABSENT (téléchargement impossible ?)"; fi
 # Pas de fichiers de configuration d'exemple : PBXMaison écrit les siens
 rm -rf "$STAGE/etc/asterisk"
 # /var/run est un lien vers /run sur le système cible : ne jamais le livrer
@@ -64,7 +68,9 @@ install -d "$STAGE/usr/share/asterisk"
 cp -a contrib/ast-db-manage "$STAGE/usr/share/asterisk/ast-db-manage"
 install -m 0644 configs/samples/indications.conf.sample "$STAGE/usr/share/asterisk/indications.conf.sample"
 install -m 0644 configs/samples/musiconhold.conf.sample "$STAGE/usr/share/asterisk/musiconhold.conf.sample"
-echo "$VERSION" > "$STAGE/usr/share/asterisk/VERSION"
+# Version de l'archive = version d'Asterisk + révision Callikoe (changer CX_BUILD force la réinstallation sur les serveurs)
+CX_BUILD=2   # 2 : module Opus (softphone web, appli)
+echo "${VERSION}+cx${CX_BUILD}" > "$STAGE/usr/share/asterisk/VERSION"
 
 # Dépendances d'exécution : bibliothèques liées → paquets apt qui les fournissent
 find "$STAGE/usr/sbin" "$STAGE/usr/lib" -type f \( -name '*.so*' -o -perm -u+x \) -print0 \
@@ -78,5 +84,5 @@ echo "== Dépendances : $(tr '\n' ' ' < "$OUT/asterisk-${TARGET}-amd64.deps")"
 # shellcheck disable=SC2046
 tar -C "$STAGE" -czf "$OUT/asterisk-${TARGET}-amd64.tar.gz" $(cd "$STAGE" && ls -A)
 tar -tzf "$OUT/asterisk-${TARGET}-amd64.tar.gz" | grep -E '^(\./)?(var/)?run(/|$)' && { echo "var/run présent dans l'archive"; exit 1; } || true
-echo "$VERSION" > "$OUT/asterisk-${TARGET}-amd64.version"
+echo "${VERSION}+cx${CX_BUILD}" > "$OUT/asterisk-${TARGET}-amd64.version"
 ls -lh "$OUT"

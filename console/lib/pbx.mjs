@@ -3,6 +3,7 @@
  * Les objets PJSIP sont écrits dans les tables realtime d'Asterisk (ps_*) ;
  * Asterisk est rechargé via l'AMI.
  */
+import { promptVersions } from "./audio.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -61,6 +62,9 @@ const genPassword = () => crypto.randomBytes(24).toString("base64").replace(/[^A
 const hostOk = (h) => /^[A-Za-z0-9.-]+$/.test(h) && h.includes(".");
 
 const WEB_CODECS = "g722,alaw,ulaw,vp8,h264";
+// Opus en premier pour le softphone web et l'appli quand le moteur sait le convertir (module codec_opus) :
+// prévu pour Internet et la 4G (correction des paquets perdus, débit adapté), bien plus stable que G.722
+const OPUS_CODECS = `opus,${WEB_CODECS}`;
 /** SDA d'un trunk : son numéro principal (au format national) puis les SDA ajoutées. */
 const trunkDidList = (row, cc = "33") => [...new Set([nationalNumber(row.number || "", cc) || "", ...(row.dids || [])].filter(Boolean))];
 
@@ -352,6 +356,11 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
   }
 
   // Endpoint WebRTC du softphone web : <poste>-web (mêmes renvois, même messagerie, même numéro présenté)
+  let webCodecs = WEB_CODECS;
+  /** Le moteur a-t-il le module Opus (conversion vers G.711 / G.722) ? */
+  async function opusReady() {
+    try { return (await ami.command("module show like codec_opus")).some((l) => /codec_opus\.so/.test(l) && /running/i.test(l)); } catch { return null; }   // moteur injoignable : on ne change rien
+  }
   async function createWebEndpoint(c, u) {
     const id = `${u.id}-web`;
     const exists = await c.query("SELECT 1 FROM ps_endpoints WHERE id = $1", [id]);
@@ -363,7 +372,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     await c.query(
       `INSERT INTO ps_endpoints (id, aors, auth, context, disallow, allow, callerid, direct_media, webrtc, dtls_auto_generate_cert,
          dtmf_mode, language, mailboxes, set_var, max_video_streams)
-       VALUES ($1, $1, $1, 'from-internal', 'all', '${WEB_CODECS}', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5, 16)`,
+       VALUES ($1, $1, $1, 'from-internal', 'all', '${webCodecs}', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5, 16)`,
       [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
   }
   // Appli mobile (appels dans l'appli, sonnerie du système) : <poste>-app, ses propres identifiants, mêmes réglages que le softphone web
@@ -379,7 +388,7 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       await c.query(
         `INSERT INTO ps_endpoints (id, aors, auth, context, disallow, allow, callerid, direct_media, webrtc, dtls_auto_generate_cert,
            dtmf_mode, language, mailboxes, set_var, max_video_streams)
-         VALUES ($1, $1, $1, 'from-internal', 'all', '${WEB_CODECS}', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5, 16)`,
+         VALUES ($1, $1, $1, 'from-internal', 'all', '${webCodecs}', $2, 'no', 'yes', 'yes', 'rfc4733', $3, $4, $5, 16)`,
         [id, `"${displayName(u)}" <${u.id}>`, language(), u.voicemail.enabled ? `${u.id}@default` : null, userOpts(u)]);
     });
     const a = (await db.query("SELECT username, password FROM ps_auths WHERE id = $1", [id])).rows[0];
@@ -419,7 +428,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     // Plusieurs téléphones par utilisateur (+ softphone, appli) : jusqu'à 6 appareils connectés au même poste
     await db.query(`UPDATE ps_aors a SET max_contacts = 6 FROM ps_endpoints e WHERE e.aors = a.id AND e.context = 'from-internal' AND e.id !~ '-web$' AND a.max_contacts < 6`);
     // Vidéo (appels vidéo, réunions) : VP8 / H.264, jusqu'à 16 flux vidéo pour les réunions
-    await db.query(`UPDATE ps_endpoints SET allow = '${WEB_CODECS}', max_video_streams = 16 WHERE id LIKE '%-web' AND (allow IS DISTINCT FROM '${WEB_CODECS}' OR max_video_streams IS DISTINCT FROM 16)`);
+    const opus = await opusReady();
+    if (opus !== null) webCodecs = opus ? OPUS_CODECS : WEB_CODECS;
+    if (opus !== null) await db.query(`UPDATE ps_endpoints SET allow = $1, max_video_streams = 16 WHERE (id LIKE '%-web' OR id LIKE '%-app') AND (allow IS DISTINCT FROM $1 OR max_video_streams IS DISTINCT FROM 16)`, [webCodecs]);
     // Trunks : G.729 retiré (le moteur ne sait pas le convertir, l'appel serait muet côté softphone), A-law en premier
     const tr = await db.query("SELECT id, allow FROM ps_endpoints WHERE context = 'from-trunk' AND allow LIKE '%g729%'");
     for (const r of tr.rows) {
@@ -1060,9 +1071,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     // Musiques d'attente des files : un dossier par file contenant un lien vers l'annonce choisie
     for (const c of mohClasses(model)) {
       fs.mkdirSync(c.dir, { recursive: true });
-      for (const f of fs.readdirSync(c.dir)) if (f !== c.file) fs.rmSync(path.join(c.dir, f), { force: true });
-      const link = path.join(c.dir, c.file);
-      if (!fs.existsSync(link)) fs.symlinkSync(path.join(soundsDir(), c.file), link);
+      const want = [c.file, ...(fs.existsSync(path.join(soundsDir(), hdOf(c.file))) ? [hdOf(c.file)] : [])];
+      for (const f of fs.readdirSync(c.dir)) if (!want.includes(f)) fs.rmSync(path.join(c.dir, f), { force: true });
+      for (const f of want) { const link = path.join(c.dir, f); if (!fs.existsSync(link)) fs.symlinkSync(path.join(soundsDir(), f), link); }
     }
     writeAtomic(path.join(dir, "musiconhold_callikoe.conf"), buildMoh(model));
     writeAtomic(path.join(dir, "voicemail_users.conf"), `${buildVoicemail(users)}${buildGroupVoicemail(model)}\n`);
@@ -1234,40 +1245,36 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
       }
       await c.query("DELETE FROM pbxmaison_objects WHERE kind = $1 AND id = $2", [kind, id]);
     });
-    if (kind === "prompt" && o.data.file) { try { fs.unlinkSync(path.join(soundsDir(), o.data.file)); } catch { /* déjà absent */ } }
+    if (kind === "prompt" && o.data.file) removePrompt(o.data.file);
     await applyDialplan();
     return { ok: true, refs };
   }
 
-  /** WAV PCM 16 bits mono 8 kHz (converti dans le navigateur) → durée en secondes ; sinon erreur. */
+  /** Annonce reçue (WAV PCM, 8 kHz ou mieux) → versions 8 kHz et 16 kHz (HD) + durée ; sinon erreur. */
   function checkWav(buf) {
-    if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") throw new UserError("Fichier audio invalide (WAV attendu).", "file");
-    let off = 12, fmt = null, dataLen = 0;
-    while (off + 8 <= buf.length) {
-      const id = buf.toString("ascii", off, off + 4), len = buf.readUInt32LE(off + 4);
-      if (id === "fmt ") fmt = { format: buf.readUInt16LE(off + 8), channels: buf.readUInt16LE(off + 10), rate: buf.readUInt32LE(off + 12), bits: buf.readUInt16LE(off + 22) };
-      if (id === "data") { dataLen = Math.min(len, buf.length - off - 8); break; }
-      off += 8 + len + (len % 2);
-    }
-    if (!fmt || fmt.format !== 1 || fmt.channels !== 1 || fmt.rate !== 8000 || fmt.bits !== 16) throw new UserError("Format audio non pris en charge : WAV PCM 16 bits mono 8 kHz attendu.", "file");
-    const sec = dataLen / 16000;
-    if (sec < 0.3) throw new UserError("Annonce trop courte.", "file");
-    if (sec > 600) throw new UserError("Annonce trop longue (10 minutes maximum).", "file");
-    return Math.round(sec * 10) / 10;
+    let v;
+    try { v = promptVersions(buf); } catch { throw new UserError("Fichier audio invalide (WAV PCM 16 bits attendu).", "file"); }
+    if (v.seconds < 0.3) throw new UserError("Annonce trop courte.", "file");
+    if (v.seconds > 600) throw new UserError("Annonce trop longue (10 minutes maximum).", "file");
+    return { ...v, duration: Math.round(v.seconds * 10) / 10 };
   }
+  // Une annonce = <nom>.wav (8 kHz, opérateurs) + <nom>.wav16 (16 kHz, téléphones HD, softphone, appli) : Asterisk prend la meilleure
+  const hdOf = (file) => file.replace(/\.wav$/, ".wav16");
+  const removePrompt = (file) => { for (const f of [file, hdOf(file)]) { try { fs.unlinkSync(path.join(soundsDir(), f)); } catch { /* déjà absent */ } } };
   async function savePrompt(id, name, wav, by) {
     const clean = String(name || "").replace(/[\r\n"<>,;|\\()[\]{}$]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50);
     if (!clean) throw new UserError("Donne un nom à l'annonce.", "name");
     let data;
     if (wav) {
-      const duration = checkWav(wav);
+      const { wav8, wav16, duration } = checkWav(wav);
       const pid = id || `p${crypto.randomBytes(4).toString("hex")}`;
       fs.mkdirSync(soundsDir(), { recursive: true });
       const file = `${pid}-${Date.now().toString(36)}.wav`;
-      writeAtomic(path.join(soundsDir(), file), wav);
+      writeAtomic(path.join(soundsDir(), file), wav8);
+      if (wav16) writeAtomic(path.join(soundsDir(), hdOf(file)), wav16);
       const old = id ? await getObject("prompt", id) : null;
-      if (old?.data.file && old.data.file !== file) { try { fs.unlinkSync(path.join(soundsDir(), old.data.file)); } catch { /* */ } }
-      data = { name: clean, file, duration };
+      if (old?.data.file && old.data.file !== file) removePrompt(old.data.file);
+      data = { name: clean, file, duration, hd: !!wav16 };
       id = pid;
     } else {
       if (!id) throw new UserError("Envoie un fichier audio.", "file");
@@ -1283,7 +1290,9 @@ export function createPbxService({ db, ami, templatesFile, routesFile, env }) {
     const o = await getObject("prompt", id);
     const f = path.join(soundsDir(), o.data.file || "");
     if (!o.data.file || !fs.existsSync(f)) throw Object.assign(new UserError("Fichier absent."), { status: 404 });
-    return f;
+    // Écoute dans la console : la version HD quand elle existe
+    const hd = path.join(soundsDir(), hdOf(o.data.file));
+    return fs.existsSync(hd) ? hd : f;
   }
 
   async function traceModel() {
