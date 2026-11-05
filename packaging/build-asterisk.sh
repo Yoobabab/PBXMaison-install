@@ -43,8 +43,6 @@ tar xzf /tmp/asterisk-opus.tar.gz -C /tmp
 cp /tmp/asterisk-opus-${OPUS_REV}/codecs/codec_opus_open_source.c /tmp/asterisk-opus-${OPUS_REV}/codecs/ex_opus.h codecs/
 sed -i 's/^#define CODEC_OPUS_DEFAULT_FEC 0/#define CODEC_OPUS_DEFAULT_FEC 1/' include/asterisk/opus.h
 grep -q 'CODEC_OPUS_DEFAULT_FEC 1' include/asterisk/opus.h || { echo "Réglage FEC d'Opus introuvable"; exit 1; }
-# L'archive d'Asterisk contient la liste des modules déjà calculée : la refaire pour qu'elle voie le module ajouté
-rm -f menuselect-tree
 
 echo "== configure"
 ./configure --with-jansson-bundled --with-pjproject-bundled 2>&1 | tail -n 25
@@ -65,6 +63,10 @@ rm -rf "$STAGE"
 echo "== make install (+ sons)"
 make -s install DESTDIR="$STAGE" 2>&1 | grep -v -E '\.{10}' | tail -n 20 || true
 test -x "$STAGE/usr/sbin/asterisk" || { echo "Échec de make install"; exit 1; }
+# Module Opus compilé à part (la liste des modules de l'archive d'Asterisk ne le connaît pas)
+gcc -pthread -O2 -fPIC -shared -Iinclude -Icodecs -DAST_MODULE='"codec_opus_open_source"' \
+  -DAST_MODULE_SELF_SYM=__internal_codec_opus_open_source_self -o codecs/codec_opus_open_source.so codecs/codec_opus_open_source.c -lopus
+install -m 0755 codecs/codec_opus_open_source.so "$STAGE/usr/lib/asterisk/modules/codec_opus_open_source.so"
 ls "$STAGE"/usr/lib*/asterisk/modules/codec_opus_open_source.so >/dev/null 2>&1 || { echo "Module Opus non compilé"; exit 1; }
 echo "== codec_opus_open_source : présent"
 # Pas de fichiers de configuration d'exemple : PBXMaison écrit les siens
