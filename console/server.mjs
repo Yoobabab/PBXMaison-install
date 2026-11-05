@@ -18,6 +18,7 @@ import { createPbxService, routesPath, UserError } from "./lib/pbx.mjs";
 import { createHistory } from "./lib/history.mjs";
 import { createAbsences } from "./lib/absences.mjs";
 import { createScheduler } from "./lib/schedupdates.mjs";
+import { createCallQuality } from "./lib/callquality.mjs";
 import { isManager, isStandardist, consoleRoleOf, USER_ROLES } from "./lib/users.mjs";
 import * as vm from "./lib/voicemail.mjs";
 import { parseCsv } from "./lib/contacts.mjs";
@@ -63,6 +64,11 @@ export async function buildApp({ db, ami } = {}) {
   await sched.migrate();
   pbx.setFirmwareLookup((mac, provUrl) => sched.firmwareFor(mac, provUrl));
   { let busy = false; setInterval(() => { if (busy || !isConfigured()) return; busy = true; sched.tick().catch((e) => console.error("Mises à jour programmées :", e.message)).finally(() => { busy = false; }); }, 30_000).unref(); }
+  // Qualité des appels (pertes, gigue, délai, coupures de son), côté poste et côté opérateur : mesurée toutes les 5 s pendant l'appel
+  const quality = createCallQuality({ db, ami, trunkIds: async () => new Set((await db.query("SELECT id FROM pbxmaison_trunks")).rows.map((r) => r.id)), log: (m) => console.log(m) });
+  await quality.migrate();
+  setInterval(() => { if (isConfigured()) quality.tick().catch(() => {}); }, 5000).unref();
+  setInterval(() => { quality.purge().catch(() => {}); }, 24 * 3600_000).unref();
   // Catalogue des firmwares d'IRT (portail) : relu chaque heure
   setInterval(() => { if (isConfigured()) sched.syncCatalog().catch(() => {}); }, 3600_000).unref();
   setTimeout(() => { if (isConfigured()) sched.syncCatalog().catch(() => {}); }, 40_000).unref();
@@ -1061,7 +1067,11 @@ export async function buildApp({ db, ami } = {}) {
       return score(smart) <= score(plain) ? { ...smart, ai_text: rewritten } : plain;
     } catch { return plain; }
   });
-  app.get("/api/cdr", { preHandler: requireUser }, async (req) => pbx.callLog(req.query || {}));
+  app.get("/api/cdr", { preHandler: requireUser }, async (req) => {
+    const r = await pbx.callLog(req.query || {});
+    const q = await quality.forCalls(r.calls.map((c) => c.id)).catch(() => new Map());
+    return { ...r, calls: r.calls.map((c) => (q.has(c.id) ? { ...c, quality: q.get(c.id) } : c)) };
+  });
   app.get("/api/cdr.csv", { preHandler: requireUser }, async (req, reply) => {
     const { calls } = await pbx.callLog({ ...(req.query || {}), limit: 5000 });
     const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;

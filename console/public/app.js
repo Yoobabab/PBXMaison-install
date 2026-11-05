@@ -1745,6 +1745,12 @@ async function renderCalls() {
 // ---------------------------------------------------------------- Journal des appels
 const DIR = { in: ["↙", "Entrant"], out: ["↗", "Sortant"], internal: ["⇄", "Interne"] };
 const CST = { answered: ["ok", "Répondu"], missed: ["bad", "Manqué"], voicemail: ["wait", "Messagerie"], busy: ["wait", "Occupé"], failed: ["off", "Échec"] };
+/** Qualité de l'appel : affichée seulement quand elle n'est pas bonne (détail au survol) */
+function qualityTag(q) {
+  if (!q || q.grade === "good" || q.grade === "fair") return "";
+  const legs = q.legs.map((l) => `${l.side} : ${l.codec || "?"}, note ${String(l.mos).replace(".", ",")}, pertes ${String(Math.max(l.rx_loss, l.tx_loss)).replace(".", ",")} %, gigue ${l.jitter_ms} ms, délai ${l.rtt_ms} ms${l.max_gap_s >= 3 ? `, coupure ${Math.round(l.max_gap_s)} s` : ""}`).join("\n");
+  return `<div class="s qtag ${q.grade}" title="${esc(`${q.detail}\n\n${legs}`)}">● Son ${q.grade === "bad" ? "mauvais" : "moyen"}</div>`;
+}
 async function renderCdr() {
   setNav("cdr");
   clearInterval(timer);
@@ -1778,7 +1784,7 @@ async function renderCdr() {
         <td><strong>${esc(fmtPhone(c.from.number))}</strong>${c.from.name ? `<div class="s">${esc(c.from.name)}</div>` : ""}${scamBtn(c)}</td>
         <td>${esc(fmtPhone(c.to.number))}${c.rule ? `<div class="s">Règle « ${esc(c.rule)} »</div>` : ""}${c.direction === "in" && c.did ? `<div class="s"><a href="#/gestion/traceur/${esc(c.did)}">Tracer la SDA</a></div>` : ""}</td>
         <td>${c.answered_by ? esc(c.answered_by) : c.voicemail ? `Messagerie ${esc(c.voicemail)}` : "—"}${c.rang.length > (c.answered_by ? 1 : 0) ? `<div class="s">A sonné : ${esc(c.rang.join(", "))}</div>` : ""}</td>
-        <td>${c.talk ? fmtDur(c.talk) : "—"}<div class="s">total ${fmtDur(c.duration)}</div></td>
+        <td>${c.talk ? fmtDur(c.talk) : "—"}<div class="s">total ${fmtDur(c.duration)}</div>${qualityTag(c.quality)}</td>
         <td><span class="pill ${CST[c.status]?.[0] || "off"}">${CST[c.status]?.[1] || esc(c.status)}</span></td></tr>`).join("")}</tbody></table></div>${pg.html}` : '<div class="empty">Aucun appel sur cette période.</div>'}</div>`;
   wirePager(app, renderCdr);
   app.querySelectorAll("[data-scam]").forEach((b) => b.onclick = async () => {

@@ -1077,3 +1077,6 @@ td.nowrap{white-space:nowrap}
 .fwbox .grow { flex: 1; min-width: 240px; }
 .fwbox .s { margin-top: 4px; }
 a.pill { text-decoration: none; }
+.qtag { white-space: nowrap; cursor: help; }
+.qtag.poor { color: #b45309; }
+.qtag.bad { color: #b91c1c; }
